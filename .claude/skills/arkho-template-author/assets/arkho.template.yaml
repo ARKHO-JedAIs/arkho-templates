@@ -1,0 +1,72 @@
+# yaml-language-server: $schema=https://unpkg.com/@jedais/arkho-cli/schema/arkho.template.schema.json
+# Annotated starter — delete what you do not use. The line above resolves to the
+# LATEST published CLI schema (live editor validation + autocomplete). Pin a CLI
+# version only when you need a specific contract, e.g.:
+#   $schema=https://unpkg.com/@jedais/arkho-cli@0.1.1/schema/arkho.template.schema.json
+
+schemaVersion: 1                      # manifest format version — always 1 today
+name: my-template                     # MUST equal the folder name (kebab-case)
+title: My Template                    # optional, shown in list/select (<=80 chars)
+description: >                         # required, <=500 chars
+  What this template generates and what it is for.
+version: 0.1.0                        # strict semver; 0.x while experimental
+category: other                       # datalake | backend | frontend | infra | other
+tags: [example]                       # optional lowercase/kebab labels
+
+# maintainers:
+#   - name: Team Name
+#     email: team@example.com
+
+# requires:                           # declare ONLY when a concrete CLI capability is needed
+#   arkho: ">=0.3.0"
+
+parameters:
+  - name: project_name                # snake_case -> {{ project_name }} and --project-name
+    type: string
+    prompt: Project name?
+    required: true
+    pattern: "^[a-z][a-z0-9-]{2,30}$"
+    patternHint: lowercase, numbers and hyphens (3-31 characters)
+
+  # - name: zones
+  #   type: integer
+  #   prompt: How many zones?
+  #   default: 3
+  #   minimum: 1
+  #   maximum: 5
+
+  # - name: language
+  #   type: choice
+  #   prompt: Infrastructure language
+  #   default: python
+  #   choices:
+  #     - { value: python,     label: Python 3.12,    hint: CDK + PySpark }
+  #     - { value: typescript, label: TypeScript 5.x, hint: native CDK }
+
+  # Conventional parameter for Node toolchains (only declare when needed):
+  # - name: package_manager
+  #   type: choice
+  #   prompt: Which package manager will the project use?
+  #   default: pnpm
+  #   choices: [{ value: npm }, { value: pnpm }, { value: yarn }]
+
+  # Conditional parameter (when references a PRIOR parameter only):
+  # - name: cdk_account
+  #   type: string
+  #   when: language == 'typescript'
+
+templating:
+  engine: handlebars                  # handlebars (default) | none
+  exclude:                            # copied WITHOUT interpolation (binaries/assets)
+    - "**/*.png"
+    - "assets/**"
+  skip:                               # NOT copied (internal docs/fixtures)
+    - "DEVELOPMENT.md"
+
+# hooks:                              # runs on the consumer machine — mechanical init only
+#   post:
+#     - run: git init -q
+#       description: Initialize repository
+
+nextSteps:                            # final success box; supports {{ }} interpolation
+  - "cd {{ project_name }}"
