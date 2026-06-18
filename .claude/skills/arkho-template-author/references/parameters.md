@@ -36,4 +36,4 @@ membership   'value' in multichoice_parameter
 logical      &&   ||   !   ( )
 ```
 
-Examples: `zones >= 3`, `language == 'python'`, `'streaming' in glue_features`, `enable_lakeformation && zones > 2`. No arithmetic, functions, or external access. Conditioned files must guard with the same parameter (`{{#if enable_lakeformation}}…{{/if}}`). Referencing a LATER parameter is a manifest validation error.
+Examples: `zones >= 3`, `language == 'python'`, `'streaming' in glue_features`, `enable_lakeformation && zones > 2`. No arithmetic, functions, or external access. A `when` on a *parameter* only governs whether that parameter is asked — it never makes files appear or disappear. To make a whole FILE conditional, list it under `templating.include` with its own `when`; template files never carry conditional logic of their own (the engine does flat `{{ token }}` substitution only — no `{{#if}}`/`{{#each}}`). Referencing a LATER parameter is a manifest validation error.

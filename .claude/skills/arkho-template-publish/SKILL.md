@@ -13,7 +13,7 @@ Use when validating a finished template manifest, choosing a version bump, or pu
 
 ## Hard Rules
 
-- `arkho-cli template validate [folder]` is the gate. It checks schema shape PLUS coherence the schema cannot express: `name` equals the folder, each `default` satisfies its own parameter's rules, every `when` parses and references only prior parameters, globs compile, and `choices` have no duplicate `value`. No PR merges with an invalid manifest — it is the CI gate.
+- `arkho-cli template validate [folder]` is the gate. It checks schema shape PLUS coherence the schema cannot express: `name` equals the folder, each `default` satisfies its own parameter's rules, every `when` (on parameters AND on `templating.include` entries) parses and references only prior parameters, globs compile, and `choices` have no duplicate `value`. No PR merges with an invalid manifest — it is the CI gate.
 - `arkho-cli template push [folder]` requires a clean working tree, re-runs validation, then creates and pushes the annotated tag `<name>/v<version>`.
 - Versions are IMMUTABLE. `push` fails if `<name>/v<version>` already exists. To correct a release, bump — never move or delete a tag.
 - The manifest `version` field MUST match the tag being pushed; a mismatch fails the push.

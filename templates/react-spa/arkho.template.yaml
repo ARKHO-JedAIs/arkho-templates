@@ -1,0 +1,71 @@
+# yaml-language-server: $schema=https://unpkg.com/@jedais/arkho-cli/schema/arkho.template.schema.json
+
+schemaVersion: 1
+name: react-spa
+title: React SPA
+description: >
+  React SPA (TypeScript, Vite) wired to Cognito auth and a backend API, with
+  atomic-design structure, shadcn/Radix UI, React Query, Axios, Zustand, and Zod.
+version: 1.0.0
+category: frontend
+tags: [react, spa, typescript, vite, cognito]
+
+parameters:
+  - name: project_name
+    type: string
+    prompt: Project name? (used as the npm package name)
+    required: true
+    pattern: "^[a-z][a-z0-9-]{1,40}$"
+    patternHint: lowercase letters, numbers and hyphens; must start with a letter (2-41 chars)
+
+  - name: package_manager
+    type: choice
+    prompt: Which package manager will the project use?
+    default: pnpm
+    choices: [{ value: npm }, { value: pnpm }, { value: yarn }]
+
+  - name: aws_region
+    type: string
+    prompt: AWS region of the Cognito user pool?
+    required: true
+    pattern: "^[a-z]{2}-[a-z]+-[0-9]$"
+    patternHint: an AWS region such as us-east-1
+
+  - name: cognito_user_pool_id
+    type: string
+    prompt: Cognito user pool id?
+    required: true
+    pattern: "^[a-z]{2}-[a-z]+-[0-9]_[A-Za-z0-9]+$"
+    patternHint: a Cognito user pool id such as us-east-1_abc123
+
+  - name: cognito_user_pool_client_id
+    type: string
+    prompt: Cognito app client id? (public, no client secret)
+    required: true
+    pattern: "^[a-z0-9]+$"
+    patternHint: the public Cognito app client id (lowercase letters and digits)
+
+  - name: cognito_domain
+    type: string
+    prompt: Cognito domain? (optional, reserved for future hosted/federation flows)
+    required: false
+
+  - name: api_base_url
+    type: string
+    prompt: Backend API base URL?
+    required: true
+    pattern: "^https?://.+$"
+    patternHint: a full URL including the scheme, e.g. https://api.example.com
+
+templating:
+  engine: token
+  exclude:
+    # Contains literal JSX double-brace syntax (`state={{ ... }}`) that is NOT a
+    # template token; copied without substitution so the engine cannot mangle it.
+    - "src/app/RequireAuth.tsx"
+
+nextSteps:
+  - "cd {{ project_name }}"
+  - "cp .env.example .env   # fill in any values you still need"
+  - "{{ package_manager }} install"
+  - "{{ package_manager }} run dev"

@@ -1,0 +1,13 @@
+node_modules/
+dist/
+coverage/
+*.log
+.DS_Store
+
+# Local environment - never commit real values.
+.env
+.env.local
+.env.*.local
+
+# The committed example IS tracked (re-included in case a parent rule ignores it).
+!.env.example

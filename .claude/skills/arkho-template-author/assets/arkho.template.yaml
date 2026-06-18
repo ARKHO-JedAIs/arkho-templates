@@ -51,17 +51,28 @@ parameters:
   #   choices: [{ value: npm }, { value: pnpm }, { value: yarn }]
 
   # Conditional parameter (when references a PRIOR parameter only):
+  # `when` here only governs whether the PARAMETER is asked. To make a FILE
+  # conditional, use templating.include below — never in-file logic.
   # - name: cdk_account
   #   type: string
   #   when: language == 'typescript'
 
 templating:
-  engine: handlebars                  # handlebars (default) | none
-  exclude:                            # copied WITHOUT interpolation (binaries/assets)
-    - "**/*.png"
-    - "assets/**"
+  engine: token                       # token (default) | none
+  # token: flat {{ token }} substitution in file CONTENTS and PATH names only.
+  # No conditionals, loops, or helpers — an unknown/absent token becomes empty.
+  # none: copy everything literally (reference code with no variables).
+  exclude:                            # copied WITHOUT substitution. Mandatory for
+    - "**/*.png"                       # binaries/assets (substitution corrupts them)
+    - "assets/**"                      # AND files with their own {{ }} (GH Actions,
+    # - ".github/workflows/**"         # other template systems) that must stay literal.
   skip:                               # NOT copied (internal docs/fixtures)
     - "DEVELOPMENT.md"
+  # include:                          # the ONLY way to make output conditional:
+  #   - path: infra/lakeformation.ts  # copied only when `when` is true; same
+  #     when: enable_lakeformation    # mini-language as a parameter `when`.
+  #   - path: glue/streaming/**
+  #     when: "'streaming' in glue_features"
 
 # hooks:                              # runs on the consumer machine — mechanical init only
 #   post:
