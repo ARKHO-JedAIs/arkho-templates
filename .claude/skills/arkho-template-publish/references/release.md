@@ -2,10 +2,10 @@
 
 ## Tag format
 
-Each published version is the annotated git tag `<name>/v<version>` — e.g. `datalake-s3/v1.4.0`. The template's full history is its tags:
+Each published version is the annotated git tag `<name>@<version>` — e.g. `datalake-s3@1.4.0`. The CLI resolves versions by filtering tags on the `<name>@` prefix, so this namespace is mandatory (a `<name>/v<version>` tag is NOT recognized). The template's full history is its tags:
 
 ```bash
-git tag -l 'datalake-s3/*'
+git tag -l 'datalake-s3@*'
 ```
 
 ## Immutability

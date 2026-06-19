@@ -14,8 +14,8 @@ Use when validating a finished template manifest, choosing a version bump, or pu
 ## Hard Rules
 
 - `arkho-cli template validate [folder]` is the gate. It checks schema shape PLUS coherence the schema cannot express: `name` equals the folder, each `default` satisfies its own parameter's rules, every `when` (on parameters AND on `templating.include` entries) parses and references only prior parameters, globs compile, and `choices` have no duplicate `value`. No PR merges with an invalid manifest — it is the CI gate.
-- `arkho-cli template push [folder]` requires a clean working tree, re-runs validation, then creates and pushes the annotated tag `<name>/v<version>`.
-- Versions are IMMUTABLE. `push` fails if `<name>/v<version>` already exists. To correct a release, bump — never move or delete a tag.
+- `arkho-cli template push [folder]` requires a clean working tree, re-runs validation, then creates and pushes the annotated tag `<name>@<version>`. The CLI resolves template versions by filtering tags on the `<name>@` prefix, so this namespace is mandatory — a `<name>/v<version>` tag is NOT recognized.
+- Versions are IMMUTABLE. `push` fails if `<name>@<version>` already exists. To correct a release, bump — never move or delete a tag.
 - The manifest `version` field MUST match the tag being pushed; a mismatch fails the push.
 - Editor validation catches shape errors; `validate` catches coherence errors. Run `validate` even when the editor is green.
 
@@ -34,8 +34,8 @@ MAJOR = breaks anyone automating `create-project` with flags. First publishable 
 1. Run `arkho-cli template validate <folder>`; fix every reported error.
 2. Pick the bump from the table; update `version` in `arkho.template.yaml`.
 3. Commit — a clean working tree is required for push.
-4. Run `arkho-cli template push <folder>` → publishes tag `<name>/v<version>`.
-5. Verify history (tags are the version record): `git tag -l '<name>/*'`.
+4. Run `arkho-cli template push <folder>` → publishes tag `<name>@<version>`.
+5. Verify history (tags are the version record): `git tag -l '<name>@*'`.
 
 ## Output Contract
 
