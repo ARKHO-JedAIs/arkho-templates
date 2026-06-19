@@ -1,0 +1,14 @@
+{
+  "name": "arkho-templates",
+  "description": "ARKHO CLI template catalog.",
+  "items": [
+    {
+      "name": "react-spa",
+      "type": "project:frontend",
+      "categories": ["web", "react", "spa", "auth-cognito"],
+      "description": "React SPA wired to Cognito + backend API.",
+      "path": "templates/react-spa",
+      "status": "available"
+    }
+  ]
+}
