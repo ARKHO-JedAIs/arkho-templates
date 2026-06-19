@@ -6,7 +6,7 @@ title: React SPA
 description: >
   React SPA (TypeScript, Vite) wired to Cognito auth and a backend API, with
   atomic-design structure, shadcn/Radix UI, React Query, Axios, Zustand, and Zod.
-version: 1.0.0
+version: 1.1.0
 category: frontend
 tags: [react, spa, typescript, vite, cognito]
 
@@ -49,6 +49,10 @@ parameters:
     type: string
     prompt: Cognito domain? (optional, reserved for future hosted/federation flows)
     required: false
+    # default "" so an unanswered optional resolves to empty instead of leaking a
+    # literal `{{ cognito_domain }}` token into the generated .env (engine leaves
+    # undefined values as the raw token).
+    default: ""
 
   - name: api_base_url
     type: string
@@ -65,7 +69,8 @@ templating:
     - "src/app/RequireAuth.tsx"
 
 nextSteps:
+  # .env is generated pre-filled with your answers; .env.example stays as the
+  # committed placeholder template for teammates.
   - "cd {{ project_name }}"
-  - "cp .env.example .env   # fill in any values you still need"
   - "{{ package_manager }} install"
   - "{{ package_manager }} run dev"
