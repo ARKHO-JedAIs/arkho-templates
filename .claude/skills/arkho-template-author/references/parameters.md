@@ -25,7 +25,7 @@ The `parameters` list drives three behaviors, in this precedence: **flag** (`--k
 
 ## Conventional parameters
 
-No parameters are built in — everything comes from this list. The team keeps **naming conventions** so flags/interpolation/tooling stay consistent. First convention: `package_manager` (choice: `npm`/`pnpm`/`yarn`, default `pnpm`) for Node toolchains. Declare it only when needed (a Go/Python template omits it; a `when` can condition it), and interpolate it into `package.json` `"packageManager": "{{ package_manager }}@<version>"` — after generation `package.json` is the source of truth, not `arkho.json`.
+No parameters are built in — everything comes from this list. The team keeps **naming conventions** so flags/interpolation/tooling stay consistent. First convention: `package_manager` (choice: `npm`/`pnpm`/`yarn`, default `pnpm`) for Node toolchains. Declare it only when needed (a Go/Python template omits it; a `when` can condition it), and interpolate it as `{{ package_manager }}` in scripts, docs, and `nextSteps`. Do NOT pin a single corepack `"packageManager": "{{ package_manager }}@<version>"` field across all three managers — one literal version cannot fit them (pnpm/npm are 10.x, yarn is 4.x), so a yarn project would get a non-existent `yarn@10.0.0`. Either omit the field or pin a version valid for the chosen manager. After generation `package.json` is the source of truth, not `arkho.json`.
 
 ## The `when` mini-language
 

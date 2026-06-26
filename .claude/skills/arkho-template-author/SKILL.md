@@ -21,7 +21,7 @@ Use when creating a template folder under `templates/<name>/` or editing its `ar
 - A validation rule MUST match its type (`pattern` on an `integer` fails). `secret` forbids `default` — no plaintext credentials versioned in the repo.
 - Every `pattern` MUST ship a `patternHint` (actionable message, not the raw regex).
 - `when` references ONLY prior parameters; small grammar (`== != > >= < <=`, `'x' in multichoice`, `&& || !`), no arithmetic/functions/external access.
-- `templating.engine: token` (default) does FLAT `{{ token }}` substitution only — in file contents AND path names. NO conditionals/loops/helpers (`{{#if}}`/`{{#each}}` do not exist); an unknown/absent token becomes empty. Conditionality is whole-file (`include`/`skip`/`exclude`), NEVER logic inside a file — template files stay runnable source.
+- `templating.engine: token` (default) does FLAT `{{ token }}` substitution only — in **file contents** (the CLI does NOT substitute file/path names). NO conditionals/loops/helpers (`{{#if}}`/`{{#each}}` do not exist); an unknown/absent token becomes empty (give optional params a `default`). Conditionality is whole-file (`include`/`skip`/`exclude`), NEVER logic inside a file — template files stay runnable source.
 - `hooks.post` executes template code on the consumer's machine — reserve for mechanical init (`git init`, `chmod +x`). NOT dependency installs; route those through `nextSteps`.
 
 ## Decision Gates
@@ -29,7 +29,7 @@ Use when creating a template folder under `templates/<name>/` or editing its `ar
 | Need | Do |
 |---|---|
 | Fixed set of options | `choice` (single) / `multichoice` (list), with `choices` |
-| Node project toolchain | declare conventional `package_manager`, interpolate into `package.json` `packageManager` |
+| Node project toolchain | declare conventional `package_manager`; interpolate as `{{ package_manager }}` (avoid pinning a cross-PM corepack `packageManager` version — see `references/parameters.md`) |
 | Binary/asset files, or files with their own `{{ }}` | `templating.exclude` (copied, no substitution — engine would corrupt binaries / mangle literal `{{ }}`) |
 | Internal docs/fixtures | `templating.skip` (not copied; the manifest itself is always skipped) |
 | Token/credential at gen time | `secret` (masked, never persisted) — last resort, prefer runtime env |

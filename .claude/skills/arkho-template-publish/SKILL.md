@@ -1,23 +1,27 @@
 ---
 name: arkho-template-publish
-description: "Trigger: validate template, publish template, push template, bump template version, release arkho template, template tag. Validate and publish an ARKHO template through its CLI release workflow."
+description: "Trigger: validate template, publish template, push template, bump template version, release arkho template, template tag. Validate and release an ARKHO template via the manual git-tag flow (CLI publish commands are planned)."
 license: Apache-2.0
 metadata:
   author: sergio-mondragon
-  version: "1.0"
+  version: "1.1"
 ---
 
 ## Activation Contract
 
 Use when validating a finished template manifest, choosing a version bump, or publishing a template. Do NOT use for authoring parameters/structure (see `arkho-template-author`).
 
+## Status — CLI publish commands are planned
+
+> 🚧 `arkho-cli template validate` and `arkho-cli template push` do NOT exist yet. The current CLI's `template` command only LISTS the catalog. Until they ship, validate and release MANUALLY (steps below). The hard rules on tag namespace, immutability, and version↔tag match still apply regardless of how the tag is created.
+
 ## Hard Rules
 
-- `arkho-cli template validate [folder]` is the gate. It checks schema shape PLUS coherence the schema cannot express: `name` equals the folder, each `default` satisfies its own parameter's rules, every `when` (on parameters AND on `templating.include` entries) parses and references only prior parameters, globs compile, and `choices` have no duplicate `value`. No PR merges with an invalid manifest — it is the CI gate.
-- `arkho-cli template push [folder]` requires a clean working tree, re-runs validation, then creates and pushes the annotated tag `<name>@<version>`. The CLI resolves template versions by filtering tags on the `<name>@` prefix, so this namespace is mandatory — a `<name>/v<version>` tag is NOT recognized.
-- Versions are IMMUTABLE. `push` fails if `<name>@<version>` already exists. To correct a release, bump — never move or delete a tag.
-- The manifest `version` field MUST match the tag being pushed; a mismatch fails the push.
-- Editor validation catches shape errors; `validate` catches coherence errors. Run `validate` even when the editor is green.
+- **Tag namespace is mandatory.** A published version is the annotated git tag `<name>@<version>` (e.g. `react-spa@1.1.0`). The CLI resolves versions by filtering tags on the `<name>@` prefix, so a `<name>/v<version>` tag is NOT recognized.
+- The manifest `version` field MUST match the tag — tag `react-spa@1.1.0` requires `version: 1.1.0` in `arkho.template.yaml`.
+- Versions are IMMUTABLE. Never move or delete a published tag; to correct a release, bump and push a new tag. Re-tagging an existing `<name>@<version>` is forbidden.
+- Tag a clean, committed working tree — the tag must point at a committed state, never local edits.
+- Validate before releasing (see Execution Steps). The `$schema` line gives live editor checks for shape; coherence (name↔folder, each `default` satisfies its parameter's rules, every `when` — on parameters AND `templating.include` entries — parses and references only prior parameters, globs compile, `choices` have no duplicate `value`) is enforced by the CLI's manifest parser, the same code path `generate` uses.
 
 ## Decision Gates — semver bump
 
@@ -27,15 +31,23 @@ Use when validating a finished template manifest, choosing a version bump, or pu
 | New optional parameter or new files | MINOR |
 | Renamed/removed parameter, type change, output restructure | MAJOR |
 
-MAJOR = breaks anyone automating `create-project` with flags. First publishable release: `1.0.0` (or `0.x` while experimental).
+MAJOR = breaks anyone automating `generate` with flags. First publishable release: `1.0.0` (or `0.x` while experimental).
 
-## Execution Steps
+## Execution Steps (manual release)
 
-1. Run `arkho-cli template validate <folder>`; fix every reported error.
-2. Pick the bump from the table; update `version` in `arkho.template.yaml`.
-3. Commit — a clean working tree is required for push.
-4. Run `arkho-cli template push <folder>` → publishes tag `<name>@<version>`.
-5. Verify history (tags are the version record): `git tag -l '<name>@*'`.
+1. **Validate.** Confirm the editor shows no `$schema` errors (shape). For coherence, parse the manifest with the CLI's own parser (`parseTemplateManifest` from the CLI's `core/manifest/template-manifest.js`, fed the YAML parsed object) — there is no standalone `validate` command yet. Fix every reported error.
+2. **Bump.** Pick the bump from the table; update `version` in `arkho.template.yaml`.
+3. **Commit** the change with a clean working tree.
+4. **Tag** with the `<name>@<version>` namespace:
+   ```bash
+   git tag -a 'react-spa@1.1.0' -m 'react-spa template v1.1.0'
+   ```
+5. **Push** the commit and the tag:
+   ```bash
+   git push origin main
+   git push origin react-spa@1.1.0
+   ```
+6. **Verify history** (tags are the version record): `git tag -l '<name>@*'`.
 
 ## Output Contract
 

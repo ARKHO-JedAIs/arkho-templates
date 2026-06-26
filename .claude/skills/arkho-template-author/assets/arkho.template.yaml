@@ -59,7 +59,7 @@ parameters:
 
 templating:
   engine: token                       # token (default) | none
-  # token: flat {{ token }} substitution in file CONTENTS and PATH names only.
+  # token: flat {{ token }} substitution in file CONTENTS only (not path names).
   # No conditionals, loops, or helpers — an unknown/absent token becomes empty.
   # none: copy everything literally (reference code with no variables).
   exclude:                            # copied WITHOUT substitution. Mandatory for
