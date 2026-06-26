@@ -45,7 +45,6 @@ post-generation hooks, prints the template's `nextSteps`, and writes an
 templates/<name>/
   arkho.template.yaml   # the manifest (parameters, validation, templating rules)
   ...                   # the template source files (runnable as-is, tokens included)
-MANIFESTS.md            # full reference: manifest schema, templating engine, arkho.json
 CLAUDE.md               # agent instructions for this repo
 .claude/skills/         # authoring & publishing skills
 ```
