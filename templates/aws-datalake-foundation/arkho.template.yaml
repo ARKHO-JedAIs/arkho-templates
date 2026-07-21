@@ -1,0 +1,63 @@
+# yaml-language-server: $schema=https://unpkg.com/@jedais/arkho-cli/schema/arkho.template.schema.json
+
+schemaVersion: 1
+name: aws-datalake-foundation
+title: AWS Data Lake Foundation (CDK)
+description: >
+  Foundational AWS Data Lake on CDK v2 (TypeScript): 3 S3 zones (Raw/Clean/Curated
+  with Iceberg), Glue ETL orchestrated by Step Functions, native governance with
+  Lake Formation + Glue Data Catalog, KMS encryption, and CloudTrail auditing.
+  Split into 7 stacks (security, storage, governance, ingestion, processing,
+  consumption, observability) with per-environment config, cdk-nag and tests.
+version: 1.0.0
+category: infrastructure
+tags: [aws, cdk, datalake, typescript, iac, glue, lakeformation, iceberg]
+
+parameters:
+  - name: project_slug
+    type: string
+    prompt: Project slug? (prefix for all resources and the npm package name)
+    required: true
+    pattern: "^[a-z][a-z0-9-]{1,30}$"
+    patternHint: lowercase letters, numbers and hyphens; must start with a letter (2-31 chars), e.g. acme-datalake
+
+  - name: client_name
+    type: string
+    prompt: Client / organization display name? (used in descriptions and docs)
+    required: true
+    minLength: 2
+    maxLength: 60
+
+  - name: catalog_prefix
+    type: string
+    prompt: Glue Data Catalog database prefix? (databases are named <prefix>_<env>_<zone>)
+    required: true
+    pattern: "^[a-z][a-z0-9_]{0,20}$"
+    patternHint: lowercase letters, digits and underscores; must start with a letter (1-21 chars), e.g. acme
+
+  - name: aws_region
+    type: string
+    prompt: Target AWS region?
+    default: us-east-1
+    pattern: "^[a-z]{2}-[a-z]+-[0-9]$"
+    patternHint: an AWS region such as us-east-1
+
+  - name: package_manager
+    type: choice
+    prompt: Which package manager will the project use?
+    default: npm
+    choices: [{ value: npm }, { value: pnpm }, { value: yarn }]
+
+templating:
+  engine: token
+  # No excludes needed: TypeScript template literals use ${...} and Python uses
+  # single braces, so no source file carries a literal `{{ }}` token.
+
+nextSteps:
+  - "cd {{ project_slug }}"
+  - "{{ package_manager }} install"
+  - "{{ package_manager }} run build"
+  - "{{ package_manager }} test"
+  - "Bootstrap the account once: npx cdk bootstrap aws://<account>/{{ aws_region }}"
+  - "Set alertEmail in lib/config/environments.ts, then: {{ package_manager }} run synth:dev"
+  - "Deploy dev: {{ package_manager }} run deploy:dev"

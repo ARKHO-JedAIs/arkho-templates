@@ -9,6 +9,5 @@
       "description": "React SPA wired to Cognito + backend API.",
       "path": "templates/react-spa",
       "status": "available"
-    }
-  ]
-}
+    },
+    {
