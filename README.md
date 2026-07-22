@@ -100,3 +100,11 @@ git push origin react-spa@1.1.0
 
 # Version history
 git tag -l 'react-spa@*'
+```
+
+Published versions are **immutable** — never move or delete a tag; bump instead.
+
+Bump convention: **PATCH** for fixes that don't change parameters or output;
+**MINOR** for new optional parameters or files; **MAJOR** for renamed/removed
+parameters, type changes, or output restructuring. See the
+[`arkho-template-publish`](.claude/skills/arkho-template-publish/) skill.

@@ -11,3 +11,12 @@
       "status": "available"
     },
     {
+      "name": "aws-datalake-foundation",
+      "type": "project:infrastructure",
+      "categories": ["aws", "cdk", "datalake", "iac", "typescript"],
+      "description": "Foundational AWS Data Lake on CDK v2: S3 zones + Glue/Step Functions ETL, Lake Formation governance, KMS, and CloudTrail.",
+      "path": "templates/aws-datalake-foundation",
+      "status": "available"
+    }
+  ]
+}
