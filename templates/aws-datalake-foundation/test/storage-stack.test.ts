@@ -16,8 +16,8 @@ describe('StorageStack', () => {
   });
   const template = Template.fromStack(storage);
 
-  test('crea las 3 zonas + resultados Athena + access logs', () => {
-    template.resourceCountIs('AWS::S3::Bucket', 5);
+  test('crea las 4 zonas + Athena results + access logs (6 buckets)', () => {
+    template.resourceCountIs('AWS::S3::Bucket', 6);
   });
 
   test('todos los buckets bloquean acceso público', () => {
@@ -44,13 +44,36 @@ describe('StorageStack', () => {
     });
   });
 
-  test('Raw Zone transiciona a Glacier IR a los 90 días', () => {
+  test('Raw Zone transiciona a Glacier IR a los rawTransitionDays', () => {
     template.hasResourceProperties('AWS::S3::Bucket', {
       LifecycleConfiguration: {
         Rules: Match.arrayWith([
           Match.objectLike({
-            Transitions: [{ StorageClass: 'GLACIER_IR', TransitionInDays: 90 }],
+            Transitions: [{ StorageClass: 'GLACIER_IR', TransitionInDays: cfg.rawTransitionDays }],
           }),
+        ]),
+      },
+    });
+  });
+
+  test('Archive Zone transiciona a Glacier IR desde el día 1 y expira', () => {
+    template.hasResourceProperties('AWS::S3::Bucket', {
+      LifecycleConfiguration: {
+        Rules: Match.arrayWith([
+          Match.objectLike({
+            Transitions: [{ StorageClass: 'GLACIER_IR', TransitionInDays: 1 }],
+            ExpirationInDays: cfg.archiveRetentionYears * 365,
+          }),
+        ]),
+      },
+    });
+  });
+
+  test('Athena results bucket tiene expiración de 30 días', () => {
+    template.hasResourceProperties('AWS::S3::Bucket', {
+      LifecycleConfiguration: {
+        Rules: Match.arrayWith([
+          Match.objectLike({ ExpirationInDays: 30 }),
         ]),
       },
     });

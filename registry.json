@@ -13,17 +13,9 @@
     {
       "name": "aws-datalake-foundation",
       "type": "project:infrastructure",
-      "categories": ["aws", "cdk", "datalake", "iac", "typescript"],
-      "description": "Foundational AWS Data Lake on CDK v2: S3 zones + Glue/Step Functions ETL, Lake Formation governance, KMS, and CloudTrail.",
+      "categories": ["aws", "cdk", "datalake", "iac", "typescript", "glue", "lakeformation", "iceberg", "vpc"],
+      "description": "Foundational AWS Data Lake on CDK v2: 4 S3 zones (Raw/Clean/Curated Iceberg/Archive), Glue ETL + Step Functions, Lake Formation FGAC, KMS, CloudTrail, and optional VPC + ingestion Lambdas.",
       "path": "templates/aws-datalake-foundation",
-      "status": "available"
-    },
-    {
-      "name": "datalake-foundation",
-      "type": "project:infrastructure",
-      "categories": ["aws", "cdk", "datalake", "iac", "typescript", "modular"],
-      "description": "Foundational datalake on CDK with 4 S3 zones and optional Glue, Athena, Lake Formation and VPC modules.",
-      "path": "templates/datalake-foundation",
       "status": "available"
     }
   ]
