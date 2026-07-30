@@ -1,0 +1,10 @@
+node_modules
+cdk.out
+.cdk.staging
+coverage
+
+# Compilados de TypeScript (el código fuente Lambda en JS sí se versiona)
+*.js
+*.d.ts
+!jest.config.js
+!lambda/**/*.js

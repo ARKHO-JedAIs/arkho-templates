@@ -1,0 +1,19 @@
+{
+  "app": "npx ts-node --prefer-ts-exts bin/app.ts",
+  "watch": {
+    "include": ["**"],
+    "exclude": ["README.md", "cdk*.json", "**/*.d.ts", "**/*.js", "node_modules", "test"]
+  },
+  "context": {
+    "env": "{{ environment }}",
+    "enableIngestionLambdas": "{{ enable_ingestion_lambdas }}",
+    "enableVpc": "{{ enable_vpc }}",
+    "vpcCidr": "{{ vpc_cidr }}",
+    "@aws-cdk/aws-iam:minimizePolicies": true,
+    "@aws-cdk/core:checkSecretUsage": true,
+    "@aws-cdk/aws-s3:createDefaultLoggingPolicy": true,
+    "@aws-cdk/aws-iam:standardizedServicePrincipals": true,
+    "@aws-cdk/core:enablePartitionLiterals": true,
+    "@aws-cdk/aws-s3:serverAccessLogsUseBucketPolicy": true
+  }
+}

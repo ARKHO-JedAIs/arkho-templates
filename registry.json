@@ -9,6 +9,14 @@
       "description": "React SPA wired to Cognito + backend API.",
       "path": "templates/react-spa",
       "status": "available"
+    },
+    {
+      "name": "aws-datalake-foundation",
+      "type": "project:infrastructure",
+      "categories": ["aws", "cdk", "datalake", "iac", "typescript", "glue", "lakeformation", "iceberg", "vpc"],
+      "description": "Foundational AWS Data Lake on CDK v2: 4 S3 zones (Raw/Clean/Curated Iceberg/Archive), Glue ETL + Step Functions, Lake Formation FGAC, KMS, CloudTrail, and optional VPC + ingestion Lambdas.",
+      "path": "templates/aws-datalake-foundation",
+      "status": "available"
     }
   ]
 }
