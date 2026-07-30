@@ -45,8 +45,8 @@ export const ENVIRONMENTS: Record<EnvName, DatalakeConfig> = {
     removalPolicy: RemovalPolicy.DESTROY,
     autoDeleteObjects: true,
     terminationProtection: false,
-    rawTransitionDays: {{ raw_retention_days }},
-    archiveRetentionYears: {{ archive_retention_years }},
+    rawTransitionDays: 90,
+    archiveRetentionYears: 7,
     ingestSchedule: 'cron(0 6 * * ? *)',   // 06:00 UTC diario
     pipelineSchedule: 'cron(0 7 * * ? *)', // 1 h después de la ingesta
     crawlerSchedule: 'cron(30 8 * * ? *)', // tras finalizar el pipeline
@@ -61,8 +61,8 @@ export const ENVIRONMENTS: Record<EnvName, DatalakeConfig> = {
     removalPolicy: RemovalPolicy.RETAIN,
     autoDeleteObjects: false,
     terminationProtection: false,
-    rawTransitionDays: {{ raw_retention_days }},
-    archiveRetentionYears: {{ archive_retention_years }},
+    rawTransitionDays: 90,
+    archiveRetentionYears: 7,
     ingestSchedule: 'cron(0 6 * * ? *)',
     pipelineSchedule: 'cron(0 7 * * ? *)',
     crawlerSchedule: 'cron(30 8 * * ? *)',
@@ -77,8 +77,8 @@ export const ENVIRONMENTS: Record<EnvName, DatalakeConfig> = {
     removalPolicy: RemovalPolicy.RETAIN,
     autoDeleteObjects: false,
     terminationProtection: true,
-    rawTransitionDays: {{ raw_retention_days }},
-    archiveRetentionYears: {{ archive_retention_years }},
+    rawTransitionDays: 90,
+    archiveRetentionYears: 7,
     ingestSchedule: 'cron(0 6 * * ? *)',
     pipelineSchedule: 'cron(0 7 * * ? *)',
     crawlerSchedule: 'cron(30 8 * * ? *)',

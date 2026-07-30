@@ -70,20 +70,20 @@ parameters:
     type: integer
     prompt: "Days before the Raw zone transitions to Glacier Instant Retrieval?"
     default: 90
-    min: 30
-    max: 3650
+    minimum: 30
+    maximum: 3650
 
   - name: archive_retention_years
     type: integer
     prompt: "Years to retain objects in the Archive zone (Glacier) before expiration?"
     default: 7
-    min: 1
-    max: 99
+    minimum: 1
+    maximum: 99
 
   - name: package_manager
     type: choice
     prompt: "Which package manager will the project use?"
-    default: npm
+    default: pnpm
     choices: [{ value: npm }, { value: pnpm }, { value: yarn }]
 
   - name: enable_ingestion_lambdas
