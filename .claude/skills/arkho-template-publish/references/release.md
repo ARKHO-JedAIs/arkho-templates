@@ -10,7 +10,7 @@ git tag -l 'datalake-s3@*'
 
 ## Immutability
 
-Published versions never change. `push` verifies the tag does not already exist and fails if it does. This guarantees that anyone who pinned a version (or whose generated project recorded `template.tag` + `template.commit`) can reproduce the exact same output later. To fix a bad release, bump the version and push a new tag — do not move or delete the old one.
+Published versions never change. Before tagging, verify the tag does not already exist (`git tag -l '<name>@<version>'` must return nothing); the planned `push` command will automate this check. This guarantees that anyone who pinned a version (or whose generated project recorded `template.tag` + `template.commit`) can reproduce the exact same output later. To fix a bad release, bump the version and push a new tag — do not move or delete the old one.
 
 ## Bump examples
 
@@ -20,4 +20,4 @@ Published versions never change. `push` verifies the tag does not already exist 
 
 ## Why validation is separate from the editor
 
-The `$schema` line gives live editor checks for *shape* (`additionalProperties: false`, types, required fields). *Coherence* checks the schema cannot express (name↔folder match, defaults satisfying their own rules, `when` parsing and ordering — on parameters and `templating.include` entries — glob compilation, duplicate `choices` values) are enforced by the CLI's manifest parser when it loads the manifest (the same code path `generate` uses). A standalone `arkho-cli template validate` command that runs these as a CI gate is planned but not yet available.
+The `$schema` line gives live editor checks for *shape* (`additionalProperties: false`, types, required fields). *Coherence* checks the schema cannot express (name↔folder match, defaults satisfying their own rules, `when` parsing and ordering — on parameters and `templating.include` entries — glob compilation, duplicate `choices` values) are enforced by the CLI's manifest parser when it loads the manifest (the same code path `generate` uses). `arkho-cli template validate` runs all of them from the command line (static checks plus, with `--full`, a dry-run through the real generate engine), so shape errors surface in the editor and everything else surfaces in `validate` - locally or as a CI gate.

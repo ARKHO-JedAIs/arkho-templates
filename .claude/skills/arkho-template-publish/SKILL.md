@@ -1,6 +1,6 @@
 ---
 name: arkho-template-publish
-description: "Trigger: validate template, publish template, push template, bump template version, release arkho template, template tag. Validate and release an ARKHO template via the manual git-tag flow (CLI publish commands are planned)."
+description: "Trigger: validate template, publish template, push template, bump template version, release arkho template, template tag. Validate an ARKHO template with the CLI's `template validate` command, then release it via the manual git-tag flow (`template push` is planned but not yet available)."
 license: Apache-2.0
 metadata:
   author: sergio-mondragon
@@ -11,9 +11,9 @@ metadata:
 
 Use when validating a finished template manifest, choosing a version bump, or publishing a template. Do NOT use for authoring parameters/structure (see `arkho-template-author`).
 
-## Status — CLI publish commands are planned
+## Status — validate ships, push is planned
 
-> 🚧 `arkho-cli template validate` and `arkho-cli template push` do NOT exist yet. The current CLI's `template` command only LISTS the catalog. Until they ship, validate and release MANUALLY (steps below). The hard rules on tag namespace, immutability, and version↔tag match still apply regardless of how the tag is created.
+`arkho-cli template validate` is available (arkho-cli 0.3.1+, published as `@jedais/arkho-cli`): static manifest/token checks, plus a `--full` dry-run through the real generate engine. Run it and require exit `0` before tagging (steps below). `arkho-cli template push` does NOT exist yet — release the tag MANUALLY. The hard rules on tag namespace, immutability, and version↔tag match still apply regardless of how the tag is created.
 
 ## Hard Rules
 
@@ -35,7 +35,27 @@ MAJOR = breaks anyone automating `generate` with flags. First publishable releas
 
 ## Execution Steps (manual release)
 
-1. **Validate.** Confirm the editor shows no `$schema` errors (shape). For coherence, parse the manifest with the CLI's own parser (`parseTemplateManifest` from the CLI's `core/manifest/template-manifest.js`, fed the YAML parsed object) — there is no standalone `validate` command yet. Fix every reported error.
+1. **Validate.** Run static checks while iterating, then `--full` before committing, then `--full --out` + a build of the output before tagging a release candidate. Fix every reported error (and review warnings) at each stage; do not proceed to tagging until the last run exits `0`.
+   ```bash
+   # Static: manifest contract (zod), folder/name match, semver, token
+   # cross-check (undeclared token = ERROR, unused parameter / optional
+   # without default = WARN). Honors templating.exclude.
+   npx @jedais/arkho-cli@latest template validate --dir templates/<name>
+
+   # Full: dry-runs the real generate engine into a temp dir. Answers come
+   # from arkho.template.fixtures.yaml (if present) -> parameter default ->
+   # constraint-satisfying synthesized value. Output is scanned for
+   # unresolved tokens. Hooks are declared but never executed. No network,
+   # no prompts, CI-safe, temp dir always cleaned up.
+   npx @jedais/arkho-cli@latest template validate --dir templates/<name> --full
+
+   # Full + out: preserves the generated project for inspection before
+   # tagging. Fails with exit 5 if <out-dir> is non-empty; a failed run
+   # leaves nothing behind.
+   npx @jedais/arkho-cli@latest template validate --dir templates/<name> --full --out <out-dir>
+   cd <out-dir> && pnpm install && pnpm run build
+   ```
+   Exit codes: `0` OK/warnings, `2` validation errors, `3` not a template dir, `5` target conflict, `7` scaffold write failure, `10` manifest parse error. OK/WARN/ERROR markers print on stderr. `template validate` MUST exit `0` before step 4 (Tag).
 2. **Bump.** Pick the bump from the table; update `version` in `arkho.template.yaml`.
 3. **Commit** the change with a clean working tree.
 4. **Tag** with the `<name>@<version>` namespace:
