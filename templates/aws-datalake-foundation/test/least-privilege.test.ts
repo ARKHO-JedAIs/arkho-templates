@@ -13,7 +13,7 @@ import { IngestionStack } from '../lib/stacks/ingestion-stack';
 describe('mínimo privilegio en roles', () => {
   const app = new cdk.App();
   const cfg = getConfig('dev');
-  const env = { account: '111111111111', region: cfg.region };
+  const env = { account: cfg.account, region: cfg.region };
 
   const security = new SecurityStack(app, 'Sec', { env, config: cfg });
   const storage = new StorageStack(app, 'Sto', { env, config: cfg, dataKey: security.dataKey });

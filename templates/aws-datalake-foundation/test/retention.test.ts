@@ -18,7 +18,7 @@ const withRetention = (
 
 const synth = (id: string, cfg: DatalakeConfig): Template => {
   const app = new cdk.App();
-  const env = { account: '111111111111', region: cfg.region };
+  const env = { account: cfg.account, region: cfg.region };
   const security = new SecurityStack(app, `${id}Sec`, { env, config: cfg });
   const storage = new StorageStack(app, `${id}Sto`, {
     env, config: cfg, dataKey: security.dataKey,
@@ -95,8 +95,10 @@ describe('config por ambiente', () => {
     }
   });
 
+  // 'staging' y no 'qa': qa es un ambiente VÁLIDO desde que el set pasó a
+  // dev|qa|stg|prod, así que sirve además como guarda del rename staging → stg.
   test('un ambiente inexistente falla con un mensaje útil', () => {
-    expect(() => getConfig('qa')).toThrow(/Ambiente desconocido/);
+    expect(() => getConfig('staging')).toThrow(/Ambiente desconocido/);
   });
 
   test('los LF-Tags y crons quedan poblados tras la generación', () => {

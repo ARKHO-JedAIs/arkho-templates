@@ -17,7 +17,7 @@ import { ProcessingStack } from '../lib/stacks/processing-stack';
 describe('contrato catálogo Glue: governance ↔ processing', () => {
   const app = new cdk.App();
   const cfg = getConfig('dev');
-  const env = { account: '111111111111', region: cfg.region };
+  const env = { account: cfg.account, region: cfg.region };
 
   const security = new SecurityStack(app, 'TestSecurity', { env, config: cfg });
   const storage = new StorageStack(app, 'TestStorage', {
