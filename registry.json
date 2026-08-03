@@ -1,19 +1,21 @@
 {
   "name": "arkho-templates",
-  "description": "ARKHO CLI template catalog.",
+  "description": "ARKHO CLI template catalog. Each entry mirrors the template's arkho.template.yaml; `version` is the latest published git tag (<name>@<version>).",
   "items": [
     {
       "name": "react-spa",
-      "type": "project:frontend",
-      "categories": ["web", "react", "spa", "auth-cognito"],
-      "description": "React SPA wired to Cognito + backend API.",
+      "version": "1.1.0",
+      "category": "frontend",
+      "tags": ["react", "spa", "typescript", "vite", "cognito"],
+      "description": "React SPA (TypeScript, Vite) wired to Cognito auth and a backend API, with atomic-design structure, shadcn/Radix UI, React Query, Axios, Zustand, and Zod.",
       "path": "templates/react-spa",
       "status": "available"
     },
     {
       "name": "aws-datalake-foundation",
-      "type": "project:infrastructure",
-      "categories": ["aws", "cdk", "datalake", "iac", "typescript", "glue", "lakeformation", "iceberg", "vpc"],
+      "version": "2.0.0",
+      "category": "datalake",
+      "tags": ["aws", "cdk", "datalake", "typescript", "iac", "glue", "lakeformation", "iceberg", "vpc"],
       "description": "Foundational AWS Data Lake on CDK v2: 4 S3 zones (Raw/Clean/Curated Iceberg/Archive), Glue ETL + Step Functions, Lake Formation FGAC, KMS, CloudTrail, and optional VPC + ingestion Lambdas.",
       "path": "templates/aws-datalake-foundation",
       "status": "available"

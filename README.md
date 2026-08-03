@@ -11,9 +11,13 @@ version produced it.
 | Template | Latest | Description |
 |---|---|---|
 | [`react-spa`](templates/react-spa/) | `react-spa@1.1.0` | React SPA (TypeScript, Vite) wired to Cognito auth and a backend API — atomic-design structure, shadcn/Radix UI, React Query, Axios, Zustand, and Zod. |
-| [`aws-datalake-foundation`](templates/aws-datalake-foundation/) | `aws-datalake-foundation@1.0.0` | Foundational AWS Data Lake on CDK v2 (TypeScript) — 3 S3 zones (Raw/Clean/Curated in Iceberg), Glue ETL orchestrated by Step Functions, Lake Formation + Glue Data Catalog governance, KMS encryption, CloudTrail auditing, split into 7 stacks with per-env config, cdk-nag and tests. |
+| [`aws-datalake-foundation`](templates/aws-datalake-foundation/) | `aws-datalake-foundation@1.0.2` | Foundational AWS Data Lake on CDK v2 (TypeScript) — 4 S3 zones (Raw/Clean/Curated in Iceberg/Archive in Glacier), Glue ETL orchestrated by Step Functions, Lake Formation + Glue Data Catalog governance, KMS encryption, CloudTrail auditing, optional VPC and ingestion Lambdas, split into 7–8 stacks with per-env config, cdk-nag and tests. |
 
 > Latest versions are the source of truth in git tags: `git tag -l '<name>@*'`.
+> `registry.json` mirrors this table and must be updated in the same commit as a
+> manifest change. Note: `aws-datalake-foundation` currently has `version: 2.0.0`
+> in its manifest, which is **not yet tagged** — the newest published tag is
+> `1.0.2`.
 
 ## Using a template
 
@@ -46,6 +50,7 @@ post-generation hooks, prints the template's `nextSteps`, and writes an
 templates/<name>/
   arkho.template.yaml   # the manifest (parameters, validation, templating rules)
   ...                   # the template source files (runnable as-is, tokens included)
+registry.json           # catalog index: one entry per template (name, version, path)
 CLAUDE.md               # agent instructions for this repo
 .claude/skills/         # authoring & publishing skills
 ```
@@ -76,6 +81,12 @@ CLAUDE.md               # agent instructions for this repo
    optional parameters a `default` so `--yes` and token substitution behave.
 3. Mark binaries and files with literal `{{ }}` under `templating.exclude`,
    internal docs under `skip`, and conditional files under `templating.include`.
+4. Add the template to `registry.json` (`name`, `version`, `category`, `tags`,
+   `path`) and to the table above.
+5. Render the template with real answers and verify the output actually builds
+   and its tests pass — a manifest that validates can still produce a broken
+   project (e.g. a `nextSteps` command that doesn't exist for every choice of an
+   enum parameter).
 
 See the [`arkho-template-author`](.claude/skills/arkho-template-author/) skill
 for the schema-driven workflow.
