@@ -29,9 +29,15 @@ const enableVpc = app.node.tryGetContext('enableVpc') === 'true';
 const vpcCidr = (app.node.tryGetContext('vpcCidr') as string | undefined) ?? '10.0.0.0/16';
 
 // ── Stack 1: Red (opcional) ───────────────────────────────────────────────────
-const network = enableVpc
-  ? new NetworkStack(app, `${p}-network`, { ...common, vpcCidr })
-  : undefined;
+// Se despliega por adelantado como building block: no se le asocia ningún
+// recurso automáticamente (ver el docstring de NetworkStack).
+if (enableVpc) {
+  new NetworkStack(app, `${p}-network`, {
+    ...common,
+    vpcCidr,
+    removalPolicy: cfg.removalPolicy,
+  });
+}
 
 // ── Stack 2: Seguridad — KMS CMKs + SNS alertas ───────────────────────────────
 const security = new SecurityStack(app, `${p}-security`, { ...common, config: cfg });
@@ -44,7 +50,7 @@ const storage = new StorageStack(app, `${p}-storage`, {
 });
 
 // ── Stack 4: Gobernanza — Glue Catalog + Lake Formation FGAC ──────────────────
-new GovernanceStack(app, `${p}-governance`, {
+const governance = new GovernanceStack(app, `${p}-governance`, {
   ...common,
   config: cfg,
   rawBucket: storage.rawBucket,
@@ -65,16 +71,22 @@ if (enableIngestionLambdas) {
 }
 
 // ── Stack 6: Procesamiento — Glue ETL + Step Functions ───────────────────────
-new ProcessingStack(app, `${p}-processing`, {
+const processing = new ProcessingStack(app, `${p}-processing`, {
   ...common,
   config: cfg,
   rawBucket: storage.rawBucket,
   cleanBucket: storage.cleanBucket,
   curatedBucket: storage.curatedBucket,
+  archiveBucket: storage.archiveBucket,
   dataKey: security.dataKey,
   opsKey: security.opsKey,
   alertsTopic: security.alertsTopic,
 });
+
+// Los crawlers referencian las bases de datos Glue por NOMBRE (string), no por
+// Ref de CloudFormation, así que no existe dependencia implícita: sin esto
+// `deploy --all` puede intentar crear los crawlers antes que sus bases.
+processing.addStackDependency(governance);
 
 // ── Stack 7: Consumo — Athena Workgroup ──────────────────────────────────────
 new ConsumptionStack(app, `${p}-consumption`, {

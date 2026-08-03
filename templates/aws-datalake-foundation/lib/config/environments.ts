@@ -38,6 +38,27 @@ export interface DatalakeConfig {
 
 const GIB = 1024 * 1024 * 1024;
 
+/** Zonas del lake que tienen base de datos en el Glue Data Catalog. */
+export type CatalogZone = 'raw' | 'clean' | 'curated';
+
+/**
+ * Nombre de la base de datos Glue de una zona. Fuente única de verdad:
+ * la usan tanto `GovernanceStack` (que las crea) como `ProcessingStack`
+ * (cuyos crawlers las referencian por nombre).
+ */
+export function catalogDb(cfg: DatalakeConfig, zone: CatalogZone): string {
+  return `{{ catalog_prefix }}_${cfg.envName}_${zone}`;
+}
+
+const csv = (value: string): string[] =>
+  value.split(',').map((s) => s.trim()).filter(Boolean);
+
+/** Valores del LF-Tag `dominio` (taxonomía de negocio). */
+export const LF_TAG_DOMAINS: string[] = csv('{{ lf_tag_domains }}');
+
+/** Valores del LF-Tag `sensibilidad` (clasificación de datos). */
+export const LF_TAG_SENSITIVITIES: string[] = csv('{{ lf_tag_sensitivities }}');
+
 export const ENVIRONMENTS: Record<EnvName, DatalakeConfig> = {
   dev: {
     envName: 'dev',
@@ -47,9 +68,12 @@ export const ENVIRONMENTS: Record<EnvName, DatalakeConfig> = {
     terminationProtection: false,
     rawTransitionDays: {{ raw_retention_days }},
     archiveRetentionYears: {{ archive_retention_years }},
-    ingestSchedule: 'cron(0 6 * * ? *)',   // 06:00 UTC diario
-    pipelineSchedule: 'cron(0 7 * * ? *)', // 1 h después de la ingesta
-    crawlerSchedule: 'cron(30 8 * * ? *)', // tras finalizar el pipeline
+    // Horarios en UTC (EventBridge siempre interpreta cron en UTC).
+    // El crawler debe partir DESPUÉS de que el pipeline termine: si tus jobs
+    // Glue se acercan al timeout de 60 min, aleja `crawlerSchedule`.
+    ingestSchedule: '{{ ingest_schedule }}',
+    pipelineSchedule: '{{ pipeline_schedule }}',
+    crawlerSchedule: '{{ crawler_schedule }}',
     glueMaxWorkers: 3,
     athenaBytesCutoff: 5 * GIB,
     alertEmail: '{{ admin_email }}',
@@ -63,9 +87,9 @@ export const ENVIRONMENTS: Record<EnvName, DatalakeConfig> = {
     terminationProtection: false,
     rawTransitionDays: {{ raw_retention_days }},
     archiveRetentionYears: {{ archive_retention_years }},
-    ingestSchedule: 'cron(0 6 * * ? *)',
-    pipelineSchedule: 'cron(0 7 * * ? *)',
-    crawlerSchedule: 'cron(30 8 * * ? *)',
+    ingestSchedule: '{{ ingest_schedule }}',
+    pipelineSchedule: '{{ pipeline_schedule }}',
+    crawlerSchedule: '{{ crawler_schedule }}',
     glueMaxWorkers: 3,
     athenaBytesCutoff: 5 * GIB,
     alertEmail: '{{ admin_email }}',
@@ -79,15 +103,17 @@ export const ENVIRONMENTS: Record<EnvName, DatalakeConfig> = {
     terminationProtection: true,
     rawTransitionDays: {{ raw_retention_days }},
     archiveRetentionYears: {{ archive_retention_years }},
-    ingestSchedule: 'cron(0 6 * * ? *)',
-    pipelineSchedule: 'cron(0 7 * * ? *)',
-    crawlerSchedule: 'cron(30 8 * * ? *)',
+    ingestSchedule: '{{ ingest_schedule }}',
+    pipelineSchedule: '{{ pipeline_schedule }}',
+    crawlerSchedule: '{{ crawler_schedule }}',
     glueMaxWorkers: 5,
     athenaBytesCutoff: 10 * GIB,
     alertEmail: '{{ admin_email }}',
     sftp: {
-      enabled: false, // habilitar tras la Fase 0 con url + trustedHostKeys reales
-      // url: 'sftp://sftp.origen.cl',
+      // Habilitar requiere `url` Y `trustedHostKeys` (obtenlas con
+      // `ssh-keyscan <host>`); el stack falla en synth si falta alguna.
+      enabled: false,
+      // url: 'sftp://sftp.example.com',
       // trustedHostKeys: ['ssh-rsa AAAA...'],
     },
   },

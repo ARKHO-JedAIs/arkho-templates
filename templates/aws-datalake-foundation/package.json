@@ -11,10 +11,15 @@
     "test": "jest",
     "cdk": "cdk",
     "synth:dev": "cdk synth --quiet -c env=dev",
+    "synth:staging": "cdk synth --quiet -c env=staging",
+    "synth:prod": "cdk synth --quiet -c env=prod",
     "diff:dev": "cdk diff -c env=dev",
+    "diff:staging": "cdk diff -c env=staging",
+    "diff:prod": "cdk diff -c env=prod",
     "deploy:dev": "cdk deploy --all -c env=dev",
+    "deploy:staging": "cdk deploy --all -c env=staging --require-approval broadening",
     "deploy:prod": "cdk deploy --all -c env=prod --require-approval broadening",
-    "nag": "cdk synth --quiet -c env=dev -c nag=true"
+    "nag": "cdk synth --quiet -c env={{ environment }} -c nag=true"
   },
   "devDependencies": {
     "@types/jest": "^29.5.12",

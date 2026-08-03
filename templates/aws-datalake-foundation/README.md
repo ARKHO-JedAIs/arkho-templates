@@ -10,14 +10,14 @@ and optional VPC isolation.
 
 | Stack | Condición | Contenido |
 |---|---|---|
-| `network` | opcional (`enableVpc=true`) | VPC, subnets privadas, NAT Gateway, gateway endpoint S3, interface endpoints Glue + Secrets Manager |
+| `network` | opcional (`enableVpc=true`) | VPC, subnets privadas, NAT Gateway, flow logs, gateway endpoint S3, interface endpoints Glue + Secrets Manager. **Building block: no se le asocia ningún recurso automáticamente** (ver más abajo) |
 | `security` | siempre | 2 KMS CMKs (data / ops), SNS topic de alertas |
 | `storage` | siempre | S3: Raw (lifecycle → Glacier IR a {{ raw_retention_days }}d), Clean, Curated, Archive (Glacier IR, expira a {{ archive_retention_years }} años), Athena results, access logs. Retención configurable (0 = desactivada) |
 | `governance` | siempre | Glue Databases por zona, LF-Tags (dominio, sensibilidad), registro Lake Formation |
-| `ingestion` | opcional (`enableIngestionLambdas=true`) | Lambdas (Node 20, ARM64), Secrets Manager, DLQ, schedules EventBridge, SFTP Connector opcional |
+| `ingestion` | opcional (`enableIngestionLambdas=true`) | Lambdas (Node 24, ARM64), Secrets Manager, DLQ + alarmas SNS, schedules EventBridge, SFTP Connector opcional |
 | `processing` | siempre | Glue Jobs Python (auto-scaling, SSE-KMS, bookmarks), Crawlers, DynamoDB config, Step Functions con reintentos + alarma SNS |
 | `consumption` | siempre | Athena WorkGroup (config forzada, bytes-scanned cutoff, resultados cifrados) |
-| `observability` | siempre | CloudTrail con data events sobre las 4 zonas (cumplimiento normativo) |
+| `observability` | siempre | CloudTrail con data events sobre las 4 zonas + bucket de logs con lifecycle |
 
 ## Requisitos
 
@@ -32,8 +32,9 @@ and optional VPC isolation.
 {{ package_manager }} install
 {{ package_manager }} run build        # compila TypeScript
 {{ package_manager }} test             # tests de infraestructura (jest + assertions)
-{{ package_manager }} run synth:{{ environment }}  # genera CloudFormation
-{{ package_manager }} run nag          # valida con cdk-nag (AwsSolutions)
+{{ package_manager }} run synth:{{ environment }}   # genera CloudFormation
+{{ package_manager }} run nag          # valida con cdk-nag (AwsSolutions); debe salir en 0
+{{ package_manager }} run diff:{{ environment }}
 {{ package_manager }} run deploy:{{ environment }}
 ```
 
@@ -61,8 +62,53 @@ parámetros claves ya fueron bakeados en la generación (aplicados a los 3 ambie
 > (`rawTransitionDays` / `archiveRetentionYears`); ponlos en `0` para desactivar
 > la transición a Glacier o la expiración, respectivamente.
 
+- LF-Tag `dominio`: **{{ lf_tag_domains }}**
+- LF-Tag `sensibilidad`: **{{ lf_tag_sensitivities }}**
+- Ingesta: `{{ ingest_schedule }}` · Pipeline: `{{ pipeline_schedule }}` · Crawlers: `{{ crawler_schedule }}` (todos en UTC)
+
+> Los crons de EventBridge son **siempre UTC**, no la zona local. Y el crawler
+> debe partir después de que el pipeline termine: si tus Glue Jobs se acercan al
+> timeout de 60 min, aleja `crawlerSchedule` — un crawler que corre a mitad de
+> escritura puede inferir el esquema de datos parciales.
+
 Nombres de recursos: prefijo `{{ project_slug }}-<env>`.
-Bases de datos Glue: `{{ catalog_prefix }}_<env>_<zona>`.
+Bases de datos Glue: `{{ catalog_prefix }}_<env>_<zona>` (fórmula única en
+`catalogDb()` de `environments.ts`: la usan tanto las bases como los crawlers).
+
+## Red (VPC) — building block deliberado
+
+Con `enableVpc=true` se despliega la VPC **pero ningún recurso queda asociado a
+ella**: los Glue Jobs, las Lambdas y un eventual DMS siguen corriendo fuera. Es
+intencional — se crea por adelantado porque habilitarla después obliga a recrear
+recursos, y se conecta cuando aparece la necesidad concreta (ingesta desde una
+red cerrada, RDS privado, SFTP interno).
+
+Para conectar recursos, usando los outputs del stack `network`:
+
+| Recurso | Cómo asociarlo |
+|---|---|
+| Glue Jobs | Crear un `glue.CfnConnection` tipo `NETWORK` con una subnet privada + security group y referenciarlo en `connections` del `CfnJob` |
+| Lambdas | Pasar `vpc` + `vpcSubnets: { subnetType: PRIVATE_WITH_EGRESS }` al `lambda.Function` |
+| DMS | Usar `PrivateSubnetIds` para el replication subnet group |
+
+Costo mientras esté habilitada: ~USD 32/mes de NAT Gateway + ~USD 14/mes de los
+interface endpoints. Si no hay caso de uso a la vista, deja `enableVpc=false`.
+
+## Lake Formation
+
+Las 3 zonas quedan registradas como data locations, así que el acceso de
+Glue/Athena pasa a ser vendido por Lake Formation. Ya viene resuelto:
+
+- el rol de Glue tiene `lakeformation:GetDataAccess`;
+- la CMK de datos permite al rol de servicio de Lake Formation descifrar
+  (sin eso, toda lectura falla con `AccessDenied` en KMS).
+
+`-c lfAdminArn=arn:...` registra el admin vía IaC. **`-c lfStrictMode=true`** es
+lo que elimina el permiso por defecto `IAMAllowedPrincipals` para tener FGAC
+real: al activarlo, todo principal necesita grant explícito — **incluidos los
+crawlers de este proyecto**, que dejarán de poder crear tablas hasta que les
+otorgues `CREATE_TABLE`/`ALTER` sobre las bases. Por eso es opt-in y no el
+comportamiento por defecto.
 
 ## Post-generación
 
@@ -71,12 +117,28 @@ Bases de datos Glue: `{{ catalog_prefix }}_<env>_<zona>`.
    - `{{ project_slug }}-<env>/ga4-api`
    - `{{ project_slug }}-<env>/meta-ads-api`
    - `{{ project_slug }}-<env>/sftp-origen` (si aplica)
-3. Habilitar SFTP Connector en `environments.ts` tras validar la Fase 0 GO/NO-GO.
+3. Habilitar el SFTP Connector en `environments.ts` con `url` **y**
+   `trustedHostKeys` (`ssh-keyscan <host>`). Falta cualquiera de las dos y el
+   synth falla con un mensaje explícito.
 4. Completar la lógica TODO en las Lambdas (`lambda/`) y scripts Glue (`glue/jobs/`).
 5. Otorgar permisos FGAC (LF-Tags → roles analistas) desde SageMaker Studio o
    con `CfnPrincipalPermissions`.
-6. Si `enableVpc=true`: asociar Glue Jobs a la VPC usando los IDs de subnet
-   exportados por el stack `network`.
+6. Enganchar el proceso de archivado a la Archive Zone: el rol de Glue ya tiene
+   permiso de escritura, pero **ningún job escribe ahí por defecto** — define tú
+   qué se archiva y cuándo.
+7. Si `enableVpc=true`: asociar los recursos a la VPC (ver la sección Red).
+
+## Notas de mantención
+
+- **`npm run nag` debe salir en 0.** Las supresiones de cdk-nag viven junto al
+  código que las justifica y cada una lleva su `reason`. Si agregas permisos,
+  acótalos en vez de ampliar una supresión.
+- **Runtime de Lambda:** está fijado al más reciente que conoce `aws-cdk-lib`.
+  Cuando `AwsSolutions-L1` avise que quedó atrás, súbelo y prueba las Lambdas —
+  es la regla funcionando, no un falso positivo.
+- **Rotación de secretos:** las credenciales de APIs externas (GA4, Meta, SFTP)
+  no se rotan automáticamente; la renovación es manual y está suprimida en
+  cdk-nag con esa evidencia.
 
 ## Prácticas aplicadas
 

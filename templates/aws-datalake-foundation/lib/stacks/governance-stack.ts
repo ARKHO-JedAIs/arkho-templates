@@ -3,7 +3,13 @@ import { Construct } from 'constructs';
 import * as glue from 'aws-cdk-lib/aws-glue';
 import * as lakeformation from 'aws-cdk-lib/aws-lakeformation';
 import * as s3 from 'aws-cdk-lib/aws-s3';
-import { DatalakeConfig } from '../config/environments';
+import {
+  CatalogZone,
+  DatalakeConfig,
+  LF_TAG_DOMAINS,
+  LF_TAG_SENSITIVITIES,
+  catalogDb,
+} from '../config/environments';
 
 export interface GovernanceStackProps extends cdk.StackProps {
   readonly config: DatalakeConfig;
@@ -22,6 +28,11 @@ export interface GovernanceStackProps extends cdk.StackProps {
  * para registrar el admin vía IaC. Los permisos FGAC (grants por LF-Tag a
  * roles de analistas) se gestionan luego desde SageMaker Unified Studio o
  * con CfnPrincipalPermissions adicionales.
+ *
+ * Al registrar las zonas como data locations, el acceso de Glue/Athena pasa a
+ * ser vendido por Lake Formation: los roles que leen datos necesitan
+ * `lakeformation:GetDataAccess` (ver `ProcessingStack`) y el rol de servicio de
+ * Lake Formation necesita permiso sobre la CMK (ver `SecurityStack`).
  */
 export class GovernanceStack extends cdk.Stack {
   public readonly databases: Record<'raw' | 'clean' | 'curated', glue.CfnDatabase>;
@@ -31,41 +42,49 @@ export class GovernanceStack extends cdk.Stack {
     const cfg = props.config;
 
     // --- Catálogo técnico: una base de datos por zona ---
-    const mkDb = (zone: string, description: string) =>
-      new glue.CfnDatabase(this, `${zone}Db`, {
+    // El nombre viene de `catalogDb()`: los crawlers de ProcessingStack
+    // referencian estas bases por nombre, así que la fórmula vive en un solo lugar.
+    const mkDb = (zone: CatalogZone, description: string) =>
+      new glue.CfnDatabase(this, `${zone.charAt(0).toUpperCase()}${zone.slice(1)}Db`, {
         catalogId: this.account,
         databaseInput: {
-          name: `{{ catalog_prefix }}_${cfg.envName}_${zone.toLowerCase()}`,
+          name: catalogDb(cfg, zone),
           description,
         },
       });
 
     this.databases = {
-      raw: mkDb('Raw', 'Datos originales tal como llegan de las fuentes (SFTP, GA4, Meta)'),
-      clean: mkDb('Clean', 'Datos validados y estandarizados'),
-      curated: mkDb('Curated', 'Datos en Iceberg/Parquet optimizados para consumo analítico'),
+      raw: mkDb('raw', 'Datos originales tal como llegan de las fuentes de ingesta'),
+      clean: mkDb('clean', 'Datos validados y estandarizados'),
+      curated: mkDb('curated', 'Datos en Iceberg/Parquet optimizados para consumo analítico'),
     };
 
     // --- Admin de Lake Formation (opcional, vía contexto) ---
     const lfAdminArn = this.node.tryGetContext('lfAdminArn') as string | undefined;
+    // FGAC estricto: elimina el permiso por defecto "IAMAllowedPrincipals".
+    // OJO: al activarlo, TODO principal necesita un grant explícito de Lake
+    // Formation — incluidos los crawlers de este mismo proyecto, que dejarán de
+    // poder crear tablas hasta que les otorgues CREATE_TABLE/ALTER sobre estas
+    // bases (ver README, sección Lake Formation). Por eso es opt-in.
+    const lfStrictMode = this.node.tryGetContext('lfStrictMode') === 'true';
     let settings: lakeformation.CfnDataLakeSettings | undefined;
     if (lfAdminArn) {
       settings = new lakeformation.CfnDataLakeSettings(this, 'DataLakeSettings', {
         admins: [{ dataLakePrincipalIdentifier: lfAdminArn }],
-        // Elimina los permisos "IAMAllowedPrincipals" por defecto: FGAC real
-        createDatabaseDefaultPermissions: [],
-        createTableDefaultPermissions: [],
+        ...(lfStrictMode
+          ? { createDatabaseDefaultPermissions: [], createTableDefaultPermissions: [] }
+          : {}),
       });
     }
 
-    // --- LF-Tags: taxonomía de dominio y sensibilidad (normativa chilena) ---
+    // --- LF-Tags: taxonomía de dominio y sensibilidad (parametrizada) ---
     const tagDominio = new lakeformation.CfnTag(this, 'LfTagDominio', {
       tagKey: 'dominio',
-      tagValues: ['marketing', 'operaciones', 'finanzas'],
+      tagValues: LF_TAG_DOMAINS,
     });
     const tagSensibilidad = new lakeformation.CfnTag(this, 'LfTagSensibilidad', {
       tagKey: 'sensibilidad',
-      tagValues: ['pii', 'interno', 'publico'],
+      tagValues: LF_TAG_SENSITIVITIES,
     });
     if (settings) {
       tagDominio.addDependency(settings);

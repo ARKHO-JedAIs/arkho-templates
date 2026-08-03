@@ -28,6 +28,10 @@ parameters:
     required: true
     minLength: 2
     maxLength: 60
+    # Interpolated into single-quoted TypeScript string literals, so quotes and
+    # backslashes would break the generated code.
+    pattern: "^[^'\"\\\\`$]+$"
+    patternHint: "any text without quotes, backticks, dollar signs or backslashes, e.g. Acme Corp"
 
   - name: environment
     type: choice
@@ -79,6 +83,41 @@ parameters:
     default: 7
     minimum: 0
     maximum: 99
+
+  - name: lf_tag_domains
+    type: string
+    prompt: "Lake Formation 'dominio' tag values? (comma-separated business domains)"
+    default: "marketing,operaciones,finanzas"
+    pattern: "^[a-z0-9_-]+(,[a-z0-9_-]+)*$"
+    patternHint: "comma-separated lowercase values, no spaces, e.g. ventas,riesgo,finanzas"
+
+  - name: lf_tag_sensitivities
+    type: string
+    prompt: "Lake Formation 'sensibilidad' tag values? (comma-separated data classifications)"
+    default: "pii,interno,publico"
+    pattern: "^[a-z0-9_-]+(,[a-z0-9_-]+)*$"
+    patternHint: "comma-separated lowercase values, no spaces, e.g. pii,interno,publico"
+
+  - name: ingest_schedule
+    type: string
+    prompt: "EventBridge cron for the ingestion Lambdas? (UTC)"
+    default: "cron(0 6 * * ? *)"
+    pattern: "^cron\\(.+\\)$"
+    patternHint: "an EventBridge cron expression in UTC, e.g. cron(0 6 * * ? *) for 06:00 UTC daily"
+
+  - name: pipeline_schedule
+    type: string
+    prompt: "EventBridge cron for the Step Functions pipeline? (UTC, must run after ingestion)"
+    default: "cron(0 7 * * ? *)"
+    pattern: "^cron\\(.+\\)$"
+    patternHint: "an EventBridge cron expression in UTC, e.g. cron(0 7 * * ? *)"
+
+  - name: crawler_schedule
+    type: string
+    prompt: "EventBridge cron for the Glue crawlers? (UTC, must run after the pipeline finishes)"
+    default: "cron(30 8 * * ? *)"
+    pattern: "^cron\\(.+\\)$"
+    patternHint: "an EventBridge cron expression in UTC, e.g. cron(30 8 * * ? *)"
 
   - name: package_manager
     type: choice

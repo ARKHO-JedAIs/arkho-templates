@@ -46,14 +46,49 @@ export class SecurityStack extends cdk.Stack {
       enforceSSL: true,
     });
 
-    // CloudWatch Alarms y EventBridge deben poder publicar en el tópico cifrado
-    for (const svc of ['cloudwatch.amazonaws.com', 'events.amazonaws.com']) {
-      this.opsKey.grant(
-        new iam.ServicePrincipal(svc),
-        'kms:Decrypt',
-        'kms:GenerateDataKey*',
-      );
-    }
+    // CloudWatch Alarms debe poder publicar en el tópico cifrado.
+    // `aws:SourceAccount` evita el problema del "confused deputy": limita el uso
+    // de la key a recursos de esta misma cuenta.
+    this.opsKey.addToResourcePolicy(new iam.PolicyStatement({
+      principals: [new iam.ServicePrincipal('cloudwatch.amazonaws.com')],
+      actions: ['kms:Decrypt', 'kms:GenerateDataKey*'],
+      resources: ['*'],
+      conditions: { StringEquals: { 'aws:SourceAccount': this.account } },
+    }));
+
+    // Los log groups de Glue y Step Functions van cifrados con la data key, así
+    // que CloudWatch Logs necesita poder usarla. La condición de contexto de
+    // cifrado la acota a log groups de esta cuenta y región.
+    this.dataKey.addToResourcePolicy(new iam.PolicyStatement({
+      sid: 'AllowCloudWatchLogsEncryption',
+      principals: [new iam.ServicePrincipal(`logs.${cfg.region}.amazonaws.com`)],
+      actions: [
+        'kms:Encrypt*', 'kms:Decrypt*', 'kms:ReEncrypt*',
+        'kms:GenerateDataKey*', 'kms:Describe*',
+      ],
+      resources: ['*'],
+      conditions: {
+        ArnLike: {
+          'kms:EncryptionContext:aws:logs:arn':
+            `arn:${this.partition}:logs:${cfg.region}:${this.account}:log-group:*`,
+        },
+      },
+    }));
+
+    // Lake Formation vende credenciales para leer las zonas cifradas del lake.
+    // Su rol de servicio necesita estar en la KEY POLICY (no basta una identity
+    // policy) o toda lectura vía LF/Athena falla con AccessDenied en KMS.
+    this.dataKey.addToResourcePolicy(new iam.PolicyStatement({
+      sid: 'AllowLakeFormationServiceRole',
+      principals: [
+        new iam.ArnPrincipal(
+          `arn:${this.partition}:iam::${this.account}:role/aws-service-role/` +
+            'lakeformation.amazonaws.com/AWSServiceRoleForLakeFormationDataAccess',
+        ),
+      ],
+      actions: ['kms:Decrypt', 'kms:DescribeKey', 'kms:GenerateDataKey*'],
+      resources: ['*'],
+    }));
 
     if (cfg.alertEmail) {
       this.alertsTopic.addSubscription(new subs.EmailSubscription(cfg.alertEmail));

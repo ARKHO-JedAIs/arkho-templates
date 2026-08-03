@@ -14,14 +14,16 @@ import * as s3assets from 'aws-cdk-lib/aws-s3-assets';
 import * as sns from 'aws-cdk-lib/aws-sns';
 import * as sfn from 'aws-cdk-lib/aws-stepfunctions';
 import * as tasks from 'aws-cdk-lib/aws-stepfunctions-tasks';
+import { NagSuppressions } from 'cdk-nag';
 import * as path from 'path';
-import { DatalakeConfig, prefix } from '../config/environments';
+import { DatalakeConfig, catalogDb, prefix } from '../config/environments';
 
 export interface ProcessingStackProps extends cdk.StackProps {
   readonly config: DatalakeConfig;
   readonly rawBucket: s3.IBucket;
   readonly cleanBucket: s3.IBucket;
   readonly curatedBucket: s3.IBucket;
+  readonly archiveBucket: s3.IBucket;
   readonly dataKey: kms.IKey;
   readonly opsKey: kms.IKey;
   readonly alertsTopic: sns.ITopic;
@@ -52,6 +54,8 @@ export class ProcessingStack extends cdk.Stack {
       bucketArn: props.cleanBucket.bucketArn, encryptionKey: dataKey });
     const curatedBucket = s3.Bucket.fromBucketAttributes(this, 'CuratedRef', {
       bucketArn: props.curatedBucket.bucketArn, encryptionKey: dataKey });
+    const archiveBucket = s3.Bucket.fromBucketAttributes(this, 'ArchiveRef', {
+      bucketArn: props.archiveBucket.bucketArn, encryptionKey: dataKey });
     const alertsTopic = sns.Topic.fromTopicArn(this, 'AlertsRef', props.alertsTopic.topicArn);
 
     // --- Tabla de configuración/estado de jobs ---
@@ -66,16 +70,75 @@ export class ProcessingStack extends cdk.Stack {
       removalPolicy: cfg.removalPolicy,
     });
 
-    // --- Rol de Glue (mínimo privilegio sobre buckets y tabla) ---
+    // --- Rol de Glue (mínimo privilegio sobre buckets, catálogo y tabla) ---
+    // Deliberadamente NO usamos la managed policy `AWSGlueServiceRole`: esa
+    // otorga `glue:*` sobre `*`, con lo que un script comprometido podría borrar
+    // cualquier base, job o crawler de la cuenta. Aquí acotamos al catálogo de
+    // este proyecto.
     const glueRole = new iam.Role(this, 'GlueJobRole', {
       assumedBy: new iam.ServicePrincipal('glue.amazonaws.com'),
-      managedPolicies: [
-        iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSGlueServiceRole'),
-      ],
+      description: 'Rol de ejecución de los Glue Jobs y Crawlers del data lake',
     });
+
+    const catalogArns = [
+      `arn:${this.partition}:glue:${this.region}:${this.account}:catalog`,
+      ...(['raw', 'clean', 'curated'] as const).flatMap((zone) => {
+        const db = catalogDb(cfg, zone);
+        return [
+          `arn:${this.partition}:glue:${this.region}:${this.account}:database/${db}`,
+          `arn:${this.partition}:glue:${this.region}:${this.account}:table/${db}/*`,
+        ];
+      }),
+    ];
+
+    glueRole.addToPolicy(new iam.PolicyStatement({
+      sid: 'GlueCatalogAccessScopedToThisLake',
+      actions: [
+        'glue:GetDatabase', 'glue:GetDatabases',
+        'glue:GetTable', 'glue:GetTables', 'glue:GetTableVersion', 'glue:GetTableVersions',
+        'glue:CreateTable', 'glue:UpdateTable', 'glue:DeleteTable',
+        'glue:GetPartition', 'glue:GetPartitions', 'glue:BatchGetPartition',
+        'glue:CreatePartition', 'glue:BatchCreatePartition',
+        'glue:UpdatePartition', 'glue:DeletePartition', 'glue:BatchDeletePartition',
+      ],
+      resources: catalogArns,
+    }));
+
+    // Los crawlers necesitan leer su propia definición para ejecutarse.
+    glueRole.addToPolicy(new iam.PolicyStatement({
+      sid: 'GlueCrawlerSelfRead',
+      actions: ['glue:GetCrawler', 'glue:GetCrawlers'],
+      resources: [`arn:${this.partition}:glue:${this.region}:${this.account}:crawler/${p}-*`],
+    }));
+
+    // Logging continuo de Glue (`--enable-continuous-cloudwatch-log`).
+    // `AssociateKmsKey` es necesario porque los log groups van cifrados con CMK.
+    glueRole.addToPolicy(new iam.PolicyStatement({
+      sid: 'GlueContinuousLogging',
+      actions: [
+        'logs:CreateLogGroup',
+        'logs:CreateLogStream',
+        'logs:PutLogEvents',
+        'logs:AssociateKmsKey',
+      ],
+      resources: [
+        `arn:${this.partition}:logs:${this.region}:${this.account}:log-group:/aws-glue/*`,
+      ],
+    }));
+
+    // Las zonas están registradas en Lake Formation, que vende las credenciales
+    // de acceso a S3. Sin esto, Glue lee "a través" de LF y falla.
+    glueRole.addToPolicy(new iam.PolicyStatement({
+      sid: 'LakeFormationVendedCredentials',
+      actions: ['lakeformation:GetDataAccess'],
+      resources: ['*'], // la acción no admite recursos acotados
+    }));
+
     rawBucket.grantRead(glueRole);
     cleanBucket.grantReadWrite(glueRole);
     curatedBucket.grantReadWrite(glueRole);
+    // La Archive Zone es el destino de los procesos de archivado del cliente.
+    archiveBucket.grantWrite(glueRole);
     jobConfigTable.grantReadWriteData(glueRole);
 
     // --- Scripts ETL versionados como assets (se suben al bucket de bootstrap) ---
@@ -98,6 +161,12 @@ export class ProcessingStack extends cdk.Stack {
         ],
         jobBookmarksEncryption: {
           jobBookmarksEncryptionMode: 'CSE-KMS',
+          kmsKeyArn: dataKey.keyArn,
+        },
+        // Los logs de Glue pueden contener datos a nivel de registro durante el
+        // debugging: van cifrados con la misma CMK que los datos.
+        cloudWatchEncryption: {
+          cloudWatchEncryptionMode: 'SSE-KMS',
           kmsKeyArn: dataKey.keyArn,
         },
       },
@@ -167,9 +236,11 @@ export class ProcessingStack extends cdk.Stack {
       new glue.CfnCrawler(this, `${zone}Crawler`, {
         name: `${p}-${zone}-crawler`,
         role: glueRole.roleArn,
-        databaseName: `{{ catalog_prefix }}_${cfg.envName}_${zone}`,
+        databaseName: catalogDb(cfg, zone),
         targets: { s3Targets: [{ path: `s3://${bucket.bucketName}/` }] },
         schedule: { scheduleExpression: cfg.crawlerSchedule },
+        // Misma security configuration que los jobs: cifra los logs del crawler.
+        crawlerSecurityConfiguration: securityConfigName,
         schemaChangePolicy: {
           updateBehavior: 'UPDATE_IN_DATABASE',
           deleteBehavior: 'DEPRECATE_IN_DATABASE',
@@ -217,6 +288,7 @@ export class ProcessingStack extends cdk.Stack {
     const sfnLogs = new logs.LogGroup(this, 'PipelineLogs', {
       retention: logs.RetentionDays.ONE_MONTH,
       removalPolicy: cfg.removalPolicy,
+      encryptionKey: dataKey,
     });
 
     this.stateMachine = new sfn.StateMachine(this, 'PipelineStateMachine', {
@@ -248,5 +320,92 @@ export class ProcessingStack extends cdk.Stack {
       treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
     });
     failedAlarm.addAlarmAction(new cwActions.SnsAction(alertsTopic));
+
+    // ── cdk-nag: supresiones con evidencia ──────────────────────────────────
+    // Regla: solo se suprime lo que NO se puede acotar más. Si agregas permisos,
+    // revisa si de verdad caen en uno de estos casos antes de ampliar la lista.
+    NagSuppressions.addResourceSuppressions(
+      glueRole,
+      [
+        {
+          id: 'AwsSolutions-IAM5',
+          reason:
+            'lakeformation:GetDataAccess no admite ARN de recurso: la API es a nivel de cuenta ' +
+            'y el control de acceso real lo aplica Lake Formation por tabla/columna.',
+          appliesTo: ['Resource::*'],
+        },
+        {
+          id: 'AwsSolutions-IAM5',
+          reason:
+            'Wildcards generados por los grants de CDK, acotados al bucket/prefijo de cada zona ' +
+            'y al catálogo Glue de este data lake. El objeto individual no se conoce en síntesis ' +
+            '(los datos llegan particionados por fecha).',
+          appliesTo: [
+            'Action::s3:GetObject*', 'Action::s3:GetBucket*', 'Action::s3:List*',
+            'Action::s3:DeleteObject*', 'Action::s3:Abort*',
+            'Action::kms:ReEncrypt*', 'Action::kms:GenerateDataKey*',
+          ],
+        },
+      ],
+      true,
+    );
+
+    // Los ARN de bucket llevan el hash del logical ID de CDK, así que se
+    // suprimen por patrón en vez de por string literal.
+    NagSuppressions.addResourceSuppressions(
+      glueRole,
+      [
+        {
+          id: 'AwsSolutions-IAM5',
+          reason:
+            'Acceso a nivel de objeto dentro de las zonas del lake. El objeto concreto no se ' +
+            'conoce en síntesis: los datos llegan particionados por fecha.',
+          appliesTo: [{ regex: '/^Resource::.*ZoneBucket.*\\.Arn>\\/\\*$/g' }],
+        },
+        {
+          id: 'AwsSolutions-IAM5',
+          reason:
+            'Tablas y crawlers del catálogo de ESTE data lake. Las tablas las crean los ' +
+            'crawlers en runtime, por lo que no se pueden enumerar en síntesis.',
+          appliesTo: [{ regex: '/^Resource::arn:.*:glue:.*:(table|crawler)\\/.*$/g' }],
+        },
+        {
+          id: 'AwsSolutions-IAM5',
+          reason:
+            'Log groups /aws-glue/*: Glue crea un log group por ejecución de job, con nombres ' +
+            'que no existen en síntesis.',
+          appliesTo: [{ regex: '/^Resource::arn:.*:logs:.*log-group:\\/aws-glue\\/\\*$/g' }],
+        },
+        {
+          id: 'AwsSolutions-IAM5',
+          reason:
+            'Bucket de assets del bootstrap de CDK: contiene los scripts ETL versionados, cuya ' +
+            'clave S3 es un hash que cambia en cada deploy.',
+          appliesTo: [{ regex: '/^Resource::arn:.*:s3:::cdk-.*-assets-.*\\/\\*$/g' }],
+        },
+      ],
+      true,
+    );
+
+    NagSuppressions.addResourceSuppressions(
+      this.stateMachine,
+      [
+        {
+          id: 'AwsSolutions-IAM5',
+          reason:
+            'Wildcards de la policy que CDK genera para el rol de Step Functions: X-Ray no ' +
+            'admite ARN de recurso y kms:GenerateDataKey* está acotado a la ops key.',
+          appliesTo: ['Resource::*', 'Action::kms:GenerateDataKey*'],
+        },
+        {
+          id: 'AwsSolutions-SF1',
+          reason:
+            'Se registran solo eventos ERROR a propósito: el volumen de eventos ALL en un ' +
+            'pipeline diario multiplica el costo de CloudWatch Logs sin aportar señal. Los ' +
+            'fallos ya notifican por SNS vía PipelineFailedAlarm y el tracing X-Ray está activo.',
+        },
+      ],
+      true,
+    );
   }
 }
