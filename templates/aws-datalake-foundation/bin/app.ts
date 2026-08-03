@@ -12,7 +12,9 @@ import { ObservabilityStack } from '../lib/stacks/observability-stack';
 import { NetworkStack } from '../lib/stacks/network-stack';
 
 const app = new cdk.App();
-const cfg = getConfig(app.node.tryGetContext('env') ?? '{{ environment }}');
+// `env` viene del context en cdk.json (baked a {{ environment }}); se puede
+// sobreescribir en despliegue con `-c env=staging|prod`.
+const cfg = getConfig(app.node.tryGetContext('env'));
 const p = prefix(cfg);
 
 const env: cdk.Environment = {
