@@ -93,9 +93,33 @@ for the schema-driven workflow.
 
 ## Validating & publishing
 
-> 🚧 **`arkho-cli template validate` and `arkho-cli template push` are planned
-> and not yet available** — the current CLI's `template` command only lists the
-> catalog. Until they ship, release manually:
+Before tagging a version, validate the template with `arkho-cli`:
+
+```bash
+# Static checks: manifest contract, folder/name match, semver, token
+# cross-check (undeclared token errors, unused parameter / optional-without-
+# default warns).
+npx @jedais/arkho-cli@latest template validate --dir templates/react-spa
+
+# Dry-run through the real generate engine into a temp dir: answers come from
+# arkho.template.fixtures.yaml (if present), else each parameter's default,
+# else a constraint-satisfying synthesized value. No network, no prompts,
+# hooks are declared but never executed, temp dir is always cleaned up.
+npx @jedais/arkho-cli@latest template validate --dir templates/react-spa --full
+
+# Preserve the generated project for inspection before tagging a release
+# candidate (fails fast if <dir> is non-empty; a failed run leaves nothing
+# behind).
+npx @jedais/arkho-cli@latest template validate --dir templates/react-spa --full --out /tmp/react-spa-check
+cd /tmp/react-spa-check && pnpm install && pnpm run build
+```
+
+Exit codes: `0` OK/warnings, `2` validation errors, `3` not a template dir,
+`5` target conflict, `7` scaffold write failure, `10` manifest parse error.
+`template validate` must exit `0` before tagging.
+
+> 🚧 **`arkho-cli template push` is planned and not yet available** — release
+> the tag manually:
 
 ```bash
 # 1. Bump `version` in templates/<name>/arkho.template.yaml, then commit (clean tree).

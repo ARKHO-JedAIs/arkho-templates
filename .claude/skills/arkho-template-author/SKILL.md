@@ -23,6 +23,7 @@ Use when creating a template folder under `templates/<name>/` or editing its `ar
 - `when` references ONLY prior parameters; small grammar (`== != > >= < <=`, `'x' in multichoice`, `&& || !`), no arithmetic/functions/external access.
 - `templating.engine: token` (default) does FLAT `{{ token }}` substitution only — in **file contents** (the CLI does NOT substitute file/path names). NO conditionals/loops/helpers (`{{#if}}`/`{{#each}}` do not exist); an unknown/absent token becomes empty (give optional params a `default`). Conditionality is whole-file (`include`/`skip`/`exclude`), NEVER logic inside a file — template files stay runnable source.
 - `hooks.post` executes template code on the consumer's machine — reserve for mechanical init (`git init`, `chmod +x`). NOT dependency installs; route those through `nextSteps`.
+- Optional `arkho.template.fixtures.yaml` next to the manifest supplies deterministic answers for `--full` dry-run validation: `schemaVersion: 1` + `answers:` map. Each value is validated against its parameter's constraints (an invalid fixture is a validation ERROR naming the parameter); unknown keys WARN; a `secret` parameter must never appear in it (ERROR). Never copied into generated output.
 
 ## Decision Gates
 
@@ -36,14 +37,15 @@ Use when creating a template folder under `templates/<name>/` or editing its `ar
 | Ask a parameter only in some cases | `when` over a prior parameter (governs the prompt, not files) |
 | Emit a FILE only in some cases | `templating.include` entry `{ path, when }` — the only way to make output conditional |
 | Literal copy, no variables | `templating.engine: none` |
+| Deterministic answers for `--full` dry-run validation | optional `arkho.template.fixtures.yaml` next to the manifest |
 
 ## Execution Steps
 
 1. Copy `assets/arkho.template.yaml` into `templates/<name>/` and set the `$schema` line.
 2. Set `name` (= folder), `description`, `version` (`1.0.0` if usable, `0.x` if experimental); optional `title`/`category`/`tags`/`maintainers`/`requires`.
 3. Define `parameters` in ask-order (list order = prompt order). Per parameter: pick `type`, write `prompt` as a real question, set `required`/`default`/`when`, add type-matched validation — see `references/parameters.md`.
-4. Configure `templating.exclude`/`skip`, and `templating.include` (`{ path, when }`) for any file that should appear only under a condition; add `hooks.post` only for mechanical init; fill `nextSteps` (supports `{{ }}`).
-5. Validate before opening a PR — hand off to `arkho-template-publish`.
+4. Configure `templating.exclude`/`skip`, and `templating.include` (`{ path, when }`) for any file that should appear only under a condition; add `hooks.post` only for mechanical init; fill `nextSteps` (supports `{{ }}`). Optionally add `arkho.template.fixtures.yaml` if the template has required parameters without an obvious default, so `--full` validation has deterministic answers.
+5. Run `arkho-cli template validate --dir templates/<name>` while iterating, then `--full` before handing off — both must exit `0`. See `arkho-template-publish` for the full validate/release flow before opening a PR.
 
 ## Output Contract
 
