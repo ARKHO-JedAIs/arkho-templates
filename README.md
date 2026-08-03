@@ -11,7 +11,7 @@ version produced it.
 | Template | Latest | Description |
 |---|---|---|
 | [`react-spa`](templates/react-spa/) | `react-spa@1.1.0` | React SPA (TypeScript, Vite) wired to Cognito auth and a backend API — atomic-design structure, shadcn/Radix UI, React Query, Axios, Zustand, and Zod. |
-| [`aws-datalake-foundation`](templates/aws-datalake-foundation/) | `aws-datalake-foundation@1.0.2` | Foundational AWS Data Lake on CDK v2 (TypeScript) — 4 S3 zones (Raw/Clean/Curated in Iceberg/Archive in Glacier), Glue ETL orchestrated by Step Functions, Lake Formation + Glue Data Catalog governance, KMS encryption, CloudTrail auditing, optional VPC and ingestion Lambdas, split into 7–8 stacks with per-env config, cdk-nag and tests. |
+| [`aws-datalake-foundation`](templates/aws-datalake-foundation/) | `aws-datalake-foundation@1.0.2` | Foundational AWS Data Lake on CDK v2 (TypeScript) — 4 S3 zones (Raw/Clean/Curated in Iceberg/Archive in Glacier), Glue ETL orchestrated by Step Functions, Lake Formation + Glue Data Catalog governance, KMS encryption, CloudTrail auditing, optional VPC and ingestion Lambdas, split into 7–8 stacks. Four environments (dev/qa/stg/prod) deployable to one shared AWS account or one account each, governed resource tagging, cdk-nag and tests. |
 
 > Latest versions are the source of truth in git tags: `git tag -l '<name>@*'`.
 > `registry.json` mirrors this table and must be updated in the same commit as a

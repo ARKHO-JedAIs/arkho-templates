@@ -15,8 +15,8 @@
       "name": "aws-datalake-foundation",
       "version": "2.0.0",
       "category": "datalake",
-      "tags": ["aws", "cdk", "datalake", "typescript", "iac", "glue", "lakeformation", "iceberg", "vpc"],
-      "description": "Foundational AWS Data Lake on CDK v2: 4 S3 zones (Raw/Clean/Curated Iceberg/Archive), Glue ETL + Step Functions, Lake Formation FGAC, KMS, CloudTrail, and optional VPC + ingestion Lambdas.",
+      "tags": ["aws", "cdk", "datalake", "typescript", "iac", "glue", "lakeformation", "iceberg", "vpc", "multi-account", "finops"],
+      "description": "Foundational AWS Data Lake on CDK v2: 4 S3 zones (Raw/Clean/Curated Iceberg/Archive), Glue ETL + Step Functions, Lake Formation FGAC, KMS, CloudTrail, optional VPC + ingestion Lambdas. Four environments (dev/qa/stg/prod) in one shared AWS account or one account each, plus governed resource tagging for cost allocation.",
       "path": "templates/aws-datalake-foundation",
       "status": "available"
     }

@@ -21,15 +21,27 @@ renders into a project that won't build. To verify a change to
 `templates/aws-datalake-foundation`:
 
 1. Copy the template to a scratch dir and substitute every token with realistic
-   values. Do this **twice**, with contrasting answers — e.g. `dev` + retention
-   on + VPC off, and `prod` + retention `0` + VPC on. Several past defects only
-   appeared in one branch.
+   values. Do this **twice**, with contrasting answers — e.g. `account_strategy`
+   `shared` + retention on + VPC off + no extra tags, and `per_environment` +
+   retention `0` + VPC on + extra tags set. Several past defects only appeared in
+   one branch.
 2. In each render: `npm install && npm run build && npm test`, then
-   `npx cdk synth -c env=<env>` and `npm run nag`.
-3. `npm run nag` must exit 0. It is a real gate — cdk-nag suppressions live next
-   to the code they excuse and every one carries a `reason`. If you add a
-   permission, scope it rather than widening a suppression.
+   `npx cdk synth -c env=<env>` for **all four** environments and `npm run nag:all`.
+3. `npm run nag:all` must exit 0 for every environment. It is a real gate —
+   cdk-nag suppressions live next to the code they excuse and every one carries a
+   `reason`. If you add a permission, scope it rather than widening a suppression.
 4. Confirm no `{{ }}` survives in the rendered `.ts`/`.json` output.
+5. Check `cdk.out/manifest.json` — every artifact's `environment` must be
+   `aws://<expected-account>/<region>`. In `shared` all four envs show the same
+   account; in `per_environment` they differ. This is what catches broken account
+   coalescing.
+
+**Token substitution gotcha that shapes the design:** a parameter with no answer
+and no `default` renders the **literal** `{{ token }}` into the output file (see
+`arkho-cli` `core/scaffold/materialize.ts`), not an empty string. So every
+parameter carrying a `when` MUST declare a `default`. `environments.ts` relies on
+this: the per-environment account tokens render as `''` in `shared` mode and are
+coalesced in TypeScript by `accountOr()`. That empty string is by design.
 
 Note `synth` for stacks with concrete accounts can need AWS credentials if any
 construct does a context lookup. `NetworkStack` pins `availabilityZones`
@@ -52,6 +64,17 @@ as a manifest change. See `.claude/skills/arkho-template-publish/`.
 - Glue crawlers run on their own schedule rather than inside the Step Functions
   pipeline. Keep `crawler_schedule` comfortably after `pipeline_schedule` — a
   crawler that fires mid-pipeline can infer a schema from partial writes.
+- LF-Tag keys are suffixed with the environment (`dominio_dev`). This is load
+  bearing, not cosmetic: LF-Tags are singletons per account+region, so fixed keys
+  make the second environment deployed into a shared account fail with
+  `AlreadyExistsException` mid-deploy. Don't "simplify" it back.
+- `Tags.of(app)` covers every taggable resource, including the Glue L1s (CDK models
+  Glue's free-form JSON tag map via `TagType.MAP`). The types in
+  `UNTAGGABLE_TYPES` genuinely have no `Tags` property in their CloudFormation
+  schema — an aspect with `addPropertyOverride('Tags', …)` would produce a template
+  CloudFormation rejects, so don't add one.
+- Don't add the `@aws-cdk/core:explicitStackTags` feature flag to `cdk.json`: it
+  makes `Tags.of()` stop emitting stack-level tags.
 
 ## Spec Kit
 
