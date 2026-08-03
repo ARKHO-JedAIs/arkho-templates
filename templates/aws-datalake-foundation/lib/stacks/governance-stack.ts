@@ -78,12 +78,17 @@ export class GovernanceStack extends cdk.Stack {
     }
 
     // --- LF-Tags: taxonomía de dominio y sensibilidad (parametrizada) ---
+    // Las claves van SUFIJADAS con el ambiente porque los LF-Tags son singletons
+    // por cuenta+región, no por stack: con claves fijas, desplegar un segundo
+    // ambiente en la misma cuenta falla con AlreadyExistsException a mitad del
+    // deploy. El sufijo también aísla los grants FGAC — un grant de dev no puede
+    // alcanzar datos de prod.
     const tagDominio = new lakeformation.CfnTag(this, 'LfTagDominio', {
-      tagKey: 'dominio',
+      tagKey: `dominio_${cfg.envName}`,
       tagValues: LF_TAG_DOMAINS,
     });
     const tagSensibilidad = new lakeformation.CfnTag(this, 'LfTagSensibilidad', {
-      tagKey: 'sensibilidad',
+      tagKey: `sensibilidad_${cfg.envName}`,
       tagValues: LF_TAG_SENSITIVITIES,
     });
     if (settings) {

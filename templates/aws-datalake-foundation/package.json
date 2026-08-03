@@ -11,15 +11,19 @@
     "test": "jest",
     "cdk": "cdk",
     "synth:dev": "cdk synth --quiet -c env=dev",
-    "synth:staging": "cdk synth --quiet -c env=staging",
+    "synth:qa": "cdk synth --quiet -c env=qa",
+    "synth:stg": "cdk synth --quiet -c env=stg",
     "synth:prod": "cdk synth --quiet -c env=prod",
     "diff:dev": "cdk diff -c env=dev",
-    "diff:staging": "cdk diff -c env=staging",
+    "diff:qa": "cdk diff -c env=qa",
+    "diff:stg": "cdk diff -c env=stg",
     "diff:prod": "cdk diff -c env=prod",
     "deploy:dev": "cdk deploy --all -c env=dev",
-    "deploy:staging": "cdk deploy --all -c env=staging --require-approval broadening",
+    "deploy:qa": "cdk deploy --all -c env=qa",
+    "deploy:stg": "cdk deploy --all -c env=stg --require-approval broadening",
     "deploy:prod": "cdk deploy --all -c env=prod --require-approval broadening",
-    "nag": "cdk synth --quiet -c env={{ environment }} -c nag=true"
+    "nag": "cdk synth --quiet -c env={{ environment }} -c nag=true",
+    "nag:all": "cdk synth --quiet -c env=dev -c nag=true && cdk synth --quiet -c env=qa -c nag=true && cdk synth --quiet -c env=stg -c nag=true && cdk synth --quiet -c env=prod -c nag=true"
   },
   "devDependencies": {
     "@types/jest": "^29.5.12",

@@ -1,6 +1,6 @@
 import { RemovalPolicy } from 'aws-cdk-lib';
 
-export type EnvName = 'dev' | 'staging' | 'prod';
+export type EnvName = 'dev' | 'qa' | 'stg' | 'prod';
 
 export interface SftpConfig {
   /** Habilita el SFTP Connector (requiere `url` y `trustedHostKeys`). */
@@ -13,6 +13,17 @@ export interface SftpConfig {
 
 export interface DatalakeConfig {
   readonly envName: EnvName;
+  /**
+   * Cuenta AWS destino (12 dígitos). Fuente única de verdad de dónde despliega
+   * cada ambiente — ver el bloque de resolución de cuentas más abajo.
+   */
+  readonly account: string;
+  /**
+   * Región destino. Se preguntó UNA vez en la generación y se aplicó a los 4
+   * ambientes, pero es un campo POR AMBIENTE a propósito: puedes mover `prod` a
+   * otra región editando su entrada. Si divergen, haz `cdk bootstrap` en cada
+   * par cuenta/región.
+   */
   readonly region: string;
   readonly removalPolicy: RemovalPolicy;
   readonly autoDeleteObjects: boolean;
@@ -59,9 +70,34 @@ export const LF_TAG_DOMAINS: string[] = csv('{{ lf_tag_domains }}');
 /** Valores del LF-Tag `sensibilidad` (clasificación de datos). */
 export const LF_TAG_SENSITIVITIES: string[] = csv('{{ lf_tag_sensitivities }}');
 
+// ── Resolución de cuentas AWS ────────────────────────────────────────────────
+// El template soporta dos estrategias, elegidas en la generación:
+//
+//   shared          → los 4 ambientes despliegan en UNA cuenta
+//   per_environment → cada ambiente tiene la suya
+//
+// El mismo archivo generado sirve para ambas. `dev` usa directamente la cuenta
+// respondida; los otros tres caen en ella cuando su token quedó vacío.
+
+/**
+ * Cuenta respondida en la generación (`aws_account_id`). Con la estrategia
+ * compartida es la de los 4 ambientes; con una cuenta por ambiente es la de
+ * `dev` y el fallback del resto.
+ */
+const DEFAULT_ACCOUNT = '{{ aws_account_id }}';
+
+/**
+ * Los IDs por ambiente solo se preguntan con la estrategia "una cuenta por
+ * ambiente". Con la compartida el generador los deja VACÍOS y el ambiente cae en
+ * `DEFAULT_ACCOUNT`: el string vacío es una señal de diseño, no un token sin
+ * resolver. Para separar un ambiente después, escribe su ID de 12 dígitos aquí.
+ */
+const accountOr = (perEnv: string): string => perEnv.trim() || DEFAULT_ACCOUNT;
+
 export const ENVIRONMENTS: Record<EnvName, DatalakeConfig> = {
   dev: {
     envName: 'dev',
+    account: DEFAULT_ACCOUNT,
     region: '{{ aws_region }}',
     removalPolicy: RemovalPolicy.DESTROY,
     autoDeleteObjects: true,
@@ -79,8 +115,30 @@ export const ENVIRONMENTS: Record<EnvName, DatalakeConfig> = {
     alertEmail: '{{ admin_email }}',
     sftp: { enabled: false },
   },
-  staging: {
-    envName: 'staging',
+  qa: {
+    envName: 'qa',
+    account: accountOr('{{ aws_account_id_qa }}'),
+    region: '{{ aws_region }}',
+    removalPolicy: RemovalPolicy.RETAIN,
+    autoDeleteObjects: false,
+    terminationProtection: false,
+    rawTransitionDays: {{ raw_retention_days }},
+    archiveRetentionYears: {{ archive_retention_years }},
+    ingestSchedule: '{{ ingest_schedule }}',
+    pipelineSchedule: '{{ pipeline_schedule }}',
+    crawlerSchedule: '{{ crawler_schedule }}',
+    glueMaxWorkers: 3,
+    athenaBytesCutoff: 5 * GIB,
+    alertEmail: '{{ admin_email }}',
+    sftp: { enabled: false },
+  },
+  // `stg` y `qa` son idénticos salvo el nombre y la cuenta: el endurecimiento
+  // real (protección de terminación, más workers, cutoff mayor) ocurre en `prod`.
+  // Si quieres ensayos de performance representativos en stg, súbele
+  // glueMaxWorkers y athenaBytesCutoff a los valores de prod — duplica su costo Glue.
+  stg: {
+    envName: 'stg',
+    account: accountOr('{{ aws_account_id_stg }}'),
     region: '{{ aws_region }}',
     removalPolicy: RemovalPolicy.RETAIN,
     autoDeleteObjects: false,
@@ -97,6 +155,7 @@ export const ENVIRONMENTS: Record<EnvName, DatalakeConfig> = {
   },
   prod: {
     envName: 'prod',
+    account: accountOr('{{ aws_account_id_prod }}'),
     region: '{{ aws_region }}',
     removalPolicy: RemovalPolicy.RETAIN,
     autoDeleteObjects: false,
@@ -119,10 +178,31 @@ export const ENVIRONMENTS: Record<EnvName, DatalakeConfig> = {
   },
 };
 
+const ACCOUNT_RE = /^[0-9]{12}$/;
+
+/**
+ * Único embudo para obtener la config de un ambiente. Valida acá (y no en
+ * `bin/app.ts`) porque tanto la app como los tests pasan por esta función, así
+ * que `npm test` ejercita las guardas gratis.
+ */
 export function getConfig(envName: string): DatalakeConfig {
-  const cfg = ENVIRONMENTS[envName as EnvName];
+  // `hasOwnProperty`: ENVIRONMENTS es un objeto literal y hereda de
+  // Object.prototype, así que un índice directo resolvía miembros heredados
+  // (getConfig('toString') devolvía una función en vez de lanzar).
+  const cfg = Object.prototype.hasOwnProperty.call(ENVIRONMENTS, envName)
+    ? ENVIRONMENTS[envName as EnvName]
+    : undefined;
   if (!cfg) {
-    throw new Error(`Ambiente desconocido '${envName}'. Usa -c env=dev|staging|prod`);
+    throw new Error(`Ambiente desconocido '${envName}'. Usa -c env=dev|qa|stg|prod`);
+  }
+  // Falla antes de cualquier llamada a AWS: con la estrategia de una cuenta por
+  // ambiente, un ID sin completar produciría stacks sin cuenta y el error real
+  // aparecería recién en el deploy.
+  if (!ACCOUNT_RE.test(cfg.account)) {
+    throw new Error(
+      `Cuenta AWS inválida para el ambiente '${cfg.envName}': '${cfg.account}'. ` +
+        'Debe ser un ID de 12 dígitos; complétala en lib/config/environments.ts.',
+    );
   }
   return cfg;
 }

@@ -2,6 +2,7 @@
 import * as cdk from 'aws-cdk-lib';
 import { AwsSolutionsChecks } from 'cdk-nag';
 import { getConfig, prefix } from '../lib/config/environments';
+import { applyStandardTags } from '../lib/config/tags';
 import { SecurityStack } from '../lib/stacks/security-stack';
 import { StorageStack } from '../lib/stacks/storage-stack';
 import { GovernanceStack } from '../lib/stacks/governance-stack';
@@ -13,12 +14,17 @@ import { NetworkStack } from '../lib/stacks/network-stack';
 
 const app = new cdk.App();
 // `env` viene del context en cdk.json (baked a {{ environment }}); se puede
-// sobreescribir en despliegue con `-c env=staging|prod`.
+// sobreescribir en despliegue con `-c env=qa|stg|prod`.
 const cfg = getConfig(app.node.tryGetContext('env'));
 const p = prefix(cfg);
 
+// Cuenta y región salen del ambiente: con la estrategia de una cuenta por
+// ambiente, cada uno apunta a la suya. `getConfig` ya validó los 12 dígitos, y
+// fijar la cuenta explícitamente hace que el CDK CLI aborte si las credenciales
+// activas (AWS_PROFILE) son de otra cuenta — es el seguro contra desplegar prod
+// con el perfil de dev.
 const env: cdk.Environment = {
-  account: '{{ aws_account_id }}',
+  account: cfg.account,
   region: cfg.region,
 };
 const common = { env, terminationProtection: cfg.terminationProtection };
@@ -109,11 +115,9 @@ new ObservabilityStack(app, `${p}-observability`, {
 });
 
 // ── Tags transversales (FinOps + trazabilidad) ────────────────────────────────
-cdk.Tags.of(app).add('proyecto', '{{ project_slug }}');
-cdk.Tags.of(app).add('cliente', '{{ client_name }}');
-cdk.Tags.of(app).add('ambiente', cfg.envName);
-cdk.Tags.of(app).add('gestionado-por', 'cdk');
-cdk.Tags.of(app).add('owner', 'arkho');
+// Set base + los tags extra que exija la organización del cliente. La lógica vive
+// en lib/config/tags.ts; acá solo se aplica al app para que alcance todos los stacks.
+applyStandardTags(app, cfg);
 
 // cdk-nag (AWS Solutions checks): ejecutar con `{{ package_manager }} run nag`
 if (app.node.tryGetContext('nag') === 'true') {

@@ -9,7 +9,8 @@ description: >
   governance with Lake Formation + Glue Data Catalog, KMS encryption end-to-end,
   CloudTrail auditing, and configurable retention. Split into 7–8 stacks (security,
   storage, governance, ingestion, processing, consumption, observability, optional
-  network) with per-environment config (dev/staging/prod), cdk-nag and tests.
+  network) with per-environment config (dev/qa/stg/prod) that supports either one
+  shared AWS account or one account per environment, cdk-nag and tests.
 version: 2.0.0
 category: datalake
 tags: [aws, cdk, datalake, typescript, iac, glue, lakeformation, iceberg, vpc]
@@ -39,22 +40,76 @@ parameters:
     default: dev
     choices:
       - { value: dev }
-      - { value: staging }
+      - { value: qa }
+      - { value: stg }
       - { value: prod }
 
   - name: aws_region
     type: string
     prompt: "Target AWS region?"
+    description: >
+      Asked once and applied to all four environments, but `region` stays a
+      per-environment field in lib/config/environments.ts so you can move one
+      environment to another region later by editing it.
     default: us-east-1
     pattern: "^[a-z]{2}-[a-z]+-[0-9]$"
     patternHint: "an AWS region such as us-east-1"
 
+  # Must stay immediately before the account parameters: a `when` expression may
+  # only reference parameters declared EARLIER than itself.
+  - name: account_strategy
+    type: choice
+    prompt: "How are AWS accounts organized across the four environments?"
+    default: shared
+    choices:
+      - value: shared
+        label: "One shared account"
+        hint: "dev, qa, stg and prod all deploy into the same AWS account"
+      - value: per_environment
+        label: "One account per environment"
+        hint: "you will also be asked for the qa, stg and prod account IDs"
+
   - name: aws_account_id
     type: string
-    prompt: "AWS account ID (12 digits)?"
+    prompt: "AWS account ID for `dev` (12 digits)?"
+    description: >
+      With one shared account every environment deploys here. With one account per
+      environment this is dev's account, and the fallback for any environment left
+      blank in lib/config/environments.ts.
     required: true
     pattern: "^[0-9]{12}$"
     patternHint: "exactly 12 numeric digits"
+
+  # Only asked with `per_environment`. `default: ""` is REQUIRED, not cosmetic: a
+  # parameter with no answer and no default renders the LITERAL `{{ token }}` into
+  # the generated TypeScript. The empty string is the designed signal that
+  # environments.ts coalesces against dev's account.
+  - name: aws_account_id_qa
+    type: string
+    prompt: "AWS account ID for `qa` (12 digits)?"
+    required: true
+    default: ""
+    pattern: "^([0-9]{12})?$"
+    patternHint: "exactly 12 numeric digits"
+    when: "account_strategy == 'per_environment'"
+
+  - name: aws_account_id_stg
+    type: string
+    prompt: "AWS account ID for `stg` (12 digits)?"
+    required: true
+    default: ""
+    pattern: "^([0-9]{12})?$"
+    patternHint: "exactly 12 numeric digits"
+    when: "account_strategy == 'per_environment'"
+
+  - name: aws_account_id_prod
+    type: string
+    prompt: "AWS account ID for `prod` (12 digits)?"
+    required: true
+    default: ""
+    pattern: "^([0-9]{12})?$"
+    patternHint: "exactly 12 numeric digits"
+    when: "account_strategy == 'per_environment'"
 
   - name: catalog_prefix
     type: string
@@ -69,6 +124,35 @@ parameters:
     required: true
     pattern: "^[^@]+@[^@]+\\.[^@]+$"
     patternHint: "a valid email address, e.g. ops@empresa.com"
+
+  - name: tag_owner
+    type: string
+    prompt: "Owner tag value? (team or organization accountable for these resources)"
+    default: "arkho"
+    # AWS tag values allow letters, digits, spaces and + - = . _ : / @ (max 256).
+    # À-ɏ keeps accented letters, which AWS accepts (its own validation
+    # is \p{L}) — the same range lib/config/tags.ts uses, so the manifest never
+    # rejects something the generated code would happily accept.
+    pattern: "^[A-Za-z0-9\\u00C0-\\u024F +=._:/@-]{1,256}$"
+    patternHint: "letters (accents included), digits, spaces and + - = . _ : / @ (max 256), e.g. data-platform"
+
+  # `default: ""` is REQUIRED: with no answer and no default the CLI renders the
+  # literal `{{ extra_tags }}` into the generated TypeScript, which then becomes a
+  # bogus tag. The empty string is handled explicitly by the parser.
+  - name: extra_tags
+    type: string
+    prompt: "Extra tags mandated by the client? (comma-separated key=value, blank for none)"
+    default: ""
+    maxLength: 2048
+    # Anchored because the CLI calls `new RegExp(pattern).test(value)` unanchored.
+    # Key class omits `=` and `,` (the grammar's separators); the value class keeps
+    # `=` because the parser splits on the FIRST `=`. Lengths encode the AWS
+    # 128/256 limits. The `aws:` prefix is reserved by AWS, and is spelled out
+    # case-by-case because the CLI compiles the pattern without the `i` flag.
+    # Quotes/backticks/`$` are excluded for the same reason as client_name: the
+    # value lands inside single-quoted TypeScript literals.
+    pattern: "^(?![Aa][Ww][Ss]:)[A-Za-z0-9\\u00C0-\\u024F +._:/@-]{1,128}=[A-Za-z0-9\\u00C0-\\u024F +=._:/@-]{1,256}(,(?![Aa][Ww][Ss]:)[A-Za-z0-9\\u00C0-\\u024F +._:/@-]{1,128}=[A-Za-z0-9\\u00C0-\\u024F +=._:/@-]{1,256})*$"
+    patternHint: "comma-separated key=value pairs, e.g. cost-center=1234,team=data (no 'aws:' prefix, no empty values; leave blank for none)"
 
   - name: raw_retention_days
     type: integer
@@ -160,6 +244,7 @@ nextSteps:
   - "{{ package_manager }} install"
   - "{{ package_manager }} run build"
   - "{{ package_manager }} test"
-  - "Bootstrap the account once: npx cdk bootstrap aws://{{ aws_account_id }}/{{ aws_region }}"
+  - "Bootstrap: npx cdk bootstrap aws://{{ aws_account_id }}/{{ aws_region }} — repeat it for every distinct `account` in lib/config/environments.ts (up to 4 with one account per environment)"
   - "Confirm the SNS alert subscription sent to {{ admin_email }}"
-  - "{{ package_manager }} run deploy:{{ environment }}"
+  - "AWS_PROFILE=<profile-for-that-account> {{ package_manager }} run deploy:{{ environment }}"
+  - "Activate the new tag keys under Billing → Cost allocation tags (payer account, up to 24h to appear) or Cost Explorer cannot group by them"

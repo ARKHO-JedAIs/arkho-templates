@@ -22,7 +22,10 @@ and optional VPC isolation.
 ## Requisitos
 
 - Node.js 20+, AWS CLI configurado
-- Bootstrap de cuenta/región: `npx cdk bootstrap aws://{{ aws_account_id }}/{{ aws_region }}`
+- Bootstrap por cada par cuenta/región en uso. Con una cuenta compartida basta uno:
+  `npx cdk bootstrap aws://{{ aws_account_id }}/{{ aws_region }}`. Con una cuenta
+  por ambiente, repítelo por cada `account` distinto de `lib/config/environments.ts`
+  (hasta 4).
 - Para `governance`: el principal que despliega debe ser admin de Lake Formation
   (o pasar `-c lfAdminArn=arn:...`)
 
@@ -40,20 +43,56 @@ and optional VPC isolation.
 
 ## Ambientes disponibles
 
-| Ambiente | RemovalPolicy | Terminación protegida | Workers Glue | Athena cutoff |
-|---|---|---|---|---|
-| `dev` | DESTROY | No | 3 | 5 GiB |
-| `staging` | RETAIN | No | 3 | 5 GiB |
-| `prod` | RETAIN | Sí | 5 | 10 GiB |
+| Ambiente | RemovalPolicy | autoDelete | Terminación protegida | Workers Glue | Athena cutoff | Aprobación en deploy |
+|---|---|---|---|---|---|---|
+| `dev` | DESTROY | Sí | No | 3 | 5 GiB | — |
+| `qa` | RETAIN | No | No | 3 | 5 GiB | — |
+| `stg` | RETAIN | No | No | 3 | 5 GiB | broadening |
+| `prod` | RETAIN | No | Sí | 5 | 10 GiB | broadening |
 
 Sobreescribir en despliegue: `cdk deploy -c env=prod`
+
+La **cuenta AWS de cada ambiente** vive en el campo `account` de
+`lib/config/environments.ts` — fuente única de verdad de dónde despliega cada uno.
+
+## Cuentas y credenciales
+
+Este proyecto se generó con la estrategia **`{{ account_strategy }}`**:
+
+- `shared` → los 4 ambientes despliegan en la misma cuenta. Coexisten sin chocar
+  porque todo nombre físico lleva el prefijo `{{ project_slug }}-<ambiente>` y las
+  claves de LF-Tag van sufijadas por ambiente.
+- `per_environment` → cada ambiente tiene su cuenta. `dev` usa la cuenta
+  respondida en la generación; los otros la suya. Un ambiente cuyo ID quedó vacío
+  cae en la de `dev`.
+
+Los scripts de npm **no llevan `--profile` a propósito**: el perfil se elige por
+variable de entorno, así el mismo script sirve para cualquier organización de
+perfiles (incluido CI con roles OIDC, donde no hay perfiles).
+
+```bash
+AWS_PROFILE=<perfil-dev>  {{ package_manager }} run deploy:dev
+AWS_PROFILE=<perfil-qa>   {{ package_manager }} run deploy:qa
+AWS_PROFILE=<perfil-stg>  {{ package_manager }} run deploy:stg
+AWS_PROFILE=<perfil-prod> {{ package_manager }} run deploy:prod
+```
+
+Como la cuenta va fijada explícitamente en cada stack, el CDK CLI **aborta** si las
+credenciales activas son de otra cuenta ("Need to perform AWS calls for account X,
+but the current credentials are for Y"). Ese es el seguro contra desplegar prod con
+el perfil de dev — no lo desactives dejando las cuentas agnósticas.
+
+`synth`, `test` y `nag` **no necesitan credenciales**: no hay lookups de contexto
+(`NetworkStack` fija sus AZs justamente por eso).
 
 ## Configuración
 
 El archivo `lib/config/environments.ts` centraliza la config por ambiente. Los
-parámetros claves ya fueron bakeados en la generación (aplicados a los 3 ambientes):
+parámetros claves ya fueron bakeados en la generación (aplicados a los 4 ambientes):
 
-- Región: **{{ aws_region }}**
+- Región: **{{ aws_region }}** (se preguntó una vez, pero `region` es un campo **por
+  ambiente**: puedes mover uno a otra región editando su entrada — recuerda hacer
+  `cdk bootstrap` en el nuevo par cuenta/región)
 - Transición Raw → Glacier IR: **{{ raw_retention_days }} días** (0 = sin transición, los datos quedan en S3 Standard)
 - Retención Archive: **{{ archive_retention_years }} años** (0 = sin expiración, retención indefinida)
 - Email de alertas: **{{ admin_email }}** (confirmar suscripción SNS post-deploy)
@@ -62,8 +101,9 @@ parámetros claves ya fueron bakeados en la generación (aplicados a los 3 ambie
 > (`rawTransitionDays` / `archiveRetentionYears`); ponlos en `0` para desactivar
 > la transición a Glacier o la expiración, respectivamente.
 
-- LF-Tag `dominio`: **{{ lf_tag_domains }}**
-- LF-Tag `sensibilidad`: **{{ lf_tag_sensitivities }}**
+- LF-Tag `dominio_<ambiente>`: **{{ lf_tag_domains }}**
+- LF-Tag `sensibilidad_<ambiente>`: **{{ lf_tag_sensitivities }}**
+- Tag `Owner`: **{{ tag_owner }}** · Tags extra: **{{ extra_tags }}**
 - Ingesta: `{{ ingest_schedule }}` · Pipeline: `{{ pipeline_schedule }}` · Crawlers: `{{ crawler_schedule }}` (todos en UTC)
 
 > Los crons de EventBridge son **siempre UTC**, no la zona local. Y el crawler
@@ -74,6 +114,62 @@ parámetros claves ya fueron bakeados en la generación (aplicados a los 3 ambie
 Nombres de recursos: prefijo `{{ project_slug }}-<env>`.
 Bases de datos Glue: `{{ catalog_prefix }}_<env>_<zona>` (fórmula única en
 `catalogDb()` de `environments.ts`: la usan tanto las bases como los crawlers).
+
+## Etiquetado (tags)
+
+Toda la lógica vive en `lib/config/tags.ts`, el **único** archivo que llama a
+`cdk.Tags.of(...)`. Se aplica a nivel de app, así que alcanza todos los stacks.
+
+| Clave | Valor | Origen |
+|---|---|---|
+| `Project` | `{{ project_slug }}` | parámetro `project_slug` |
+| `Client` | nombre del cliente | `client_name`, saneado (ver abajo) |
+| `Environment` | `dev` \| `qa` \| `stg` \| `prod` | ambiente en despliegue |
+| `ManagedBy` | `cdk` | fijo |
+| `Owner` | `{{ tag_owner }}` | parámetro `tag_owner` |
+
+Los **tags extra** se declaran como CSV `clave=valor` (parámetro `extra_tags`) y se
+aplican junto al set base. Reglas que valida el código en cada `synth`, no solo en
+la generación: máximo 128 caracteres de clave y 256 de valor, sin prefijo `aws:`
+(reservado por AWS), sin claves duplicadas, sin colisionar con una clave del set
+base, y máximo 50 tags por recurso contando el set base. Cualquier violación **falla
+el synth** con un mensaje que empieza en `extra_tags:` — deliberadamente, porque un
+`cost-center` perdido en silencio es invisible hasta que finanzas nota un mes de
+gasto sin asignar.
+
+> El valor de `Client` pasa por `sanitizeTagValue()`: `client_name` admite `&`, `#`
+> y paréntesis porque también se usa en prosa y descripciones, pero AWS los rechaza
+> en valores de tag. Los acentos **sí** se preservan (AWS los acepta). Por eso el
+> tag `Client` puede diferir del nombre para mostrar.
+
+### Qué NO se etiqueta, y por qué
+
+No es una omisión: estos tipos **no tienen propiedad `Tags`** en su schema de
+CloudFormation, así que ni un `tags:` explícito ni un aspecto pueden agregarla.
+
+- `AWS::Glue::Database` y `AWS::Glue::SecurityConfiguration` — Glue no expone
+  tagging para bases del catálogo.
+- Todo `AWS::LakeFormation::*`.
+- Políticas y accesorios: `IAM::Policy`, `S3::BucketPolicy`, `SQS::QueuePolicy`,
+  `SNS::Subscription`, `KMS::Alias`, `Lambda::Permission`.
+- El provider de `autoDeleteObjects` (solo en `dev`): CDK lo crea fuera del árbol
+  de constructs, así que el aspecto de tagging no lo alcanza.
+
+Todos son recursos de metadata o de política, **de costo cero**, así que la
+asignación de costos no se ve afectada. La lista vive en `UNTAGGABLE_TYPES` y
+`test/tagging.test.ts` la verifica: si agregas un recurso de un tipo nuevo sin tags,
+el test falla hasta que lo clasifiques — la brecha no puede crecer en silencio.
+
+> Nada de esto tiene que ver con los **LF-Tags** de Lake Formation, que son
+> gobierno del catálogo de datos, no etiquetas de recursos. Ver la sección
+> Lake Formation.
+
+### Activación en facturación
+
+Los tags existen pero Cost Explorer **no puede agrupar por ellos** hasta que los
+actives en Billing → Cost allocation tags (desde la cuenta pagadora; tarda hasta
+24 h en aparecer). Sin ese paso, todo el propósito FinOps del etiquetado queda sin
+efecto.
 
 ## Red (VPC) — building block deliberado
 
@@ -103,6 +199,18 @@ Glue/Athena pasa a ser vendido por Lake Formation. Ya viene resuelto:
 - la CMK de datos permite al rol de servicio de Lake Formation descifrar
   (sin eso, toda lectura falla con `AccessDenied` en KMS).
 
+Las claves de LF-Tag van **sufijadas con el ambiente** (`dominio_dev`,
+`sensibilidad_prod`, …). No es cosmético: los LF-Tags son singletons por
+cuenta+región, no por stack, así que con claves fijas el segundo ambiente
+desplegado en una misma cuenta fallaría con `AlreadyExistsException` a mitad del
+deploy. El sufijo también aísla los grants — un grant de `dev` no puede alcanzar
+datos de `prod`. **Tus `CfnPrincipalPermissions` y los grants hechos desde
+SageMaker Studio deben usar la clave con sufijo.**
+
+> Si dos ambientes comparten cuenta y usas `-c lfAdminArn`, ambos gestionan el
+> singleton `CfnDataLakeSettings` de la cuenta: último escritor gana, y destruir un
+> stack puede dejar sin admin de Lake Formation al otro.
+
 `-c lfAdminArn=arn:...` registra el admin vía IaC. **`-c lfStrictMode=true`** es
 lo que elimina el permiso por defecto `IAMAllowedPrincipals` para tener FGAC
 real: al activarlo, todo principal necesita grant explícito — **incluidos los
@@ -127,12 +235,16 @@ comportamiento por defecto.
    permiso de escritura, pero **ningún job escribe ahí por defecto** — define tú
    qué se archiva y cuándo.
 7. Si `enableVpc=true`: asociar los recursos a la VPC (ver la sección Red).
+8. Activar los tags en Billing → Cost allocation tags (ver Etiquetado). Sin esto
+   Cost Explorer no puede agrupar por ellos.
 
 ## Notas de mantención
 
 - **`npm run nag` debe salir en 0.** Las supresiones de cdk-nag viven junto al
   código que las justifica y cada una lleva su `reason`. Si agregas permisos,
-  acótalos en vez de ampliar una supresión.
+  acótalos en vez de ampliar una supresión. `npm run nag:all` corre los 4
+  ambientes — úsalo antes de un release, porque `nag` solo cubre el ambiente
+  por defecto.
 - **Runtime de Lambda:** está fijado al más reciente que conoce `aws-cdk-lib`.
   Cuando `AwsSolutions-L1` avise que quedó atrás, súbelo y prueba las Lambdas —
   es la regla funcionando, no un falso positivo.
@@ -142,9 +254,32 @@ comportamiento por defecto.
 
 ## Prácticas aplicadas
 
-Config tipada por ambiente; sin nombres físicos de buckets (evita colisiones);
-cifrado E2E KMS con CMK en S3/DynamoDB/SNS/SQS/Secrets/Glue; mínimo privilegio
-(grants por prefijo y recurso); SSL forzado y BlockPublicAccess en todos los
-buckets; bucket keys para reducir costo KMS; DLQs y reintentos; Step Functions
-con backoff exponencial; CloudTrail con validación de integridad; cdk-nag
-(AWS Solutions); tests CDK assertions.
+Config tipada por ambiente con cuenta AWS por ambiente; sin nombres físicos de
+buckets (evita colisiones); cifrado E2E KMS con CMK en
+S3/DynamoDB/SNS/SQS/Secrets/Glue/Logs; mínimo privilegio (grants por prefijo y
+recurso, sin managed policies amplias); SSL forzado y BlockPublicAccess en todos
+los buckets; bucket keys para reducir costo KMS; DLQs, alarmas y reintentos; Step
+Functions con backoff exponencial; CloudTrail con validación de integridad;
+etiquetado transversal para asignación de costos; cdk-nag (AWS Solutions) como
+gate real; tests CDK assertions.
+
+## Migración desde una versión anterior del template
+
+Si regeneras un proyecto **ya desplegado**, tres cambios no son retrocompatibles:
+
+1. **`staging` → `stg`** y se agrega `qa`. Cambian los nombres de stack
+   (`proj-staging-*` → `proj-stg-*`) y de las bases Glue
+   (`cat_staging_raw` → `cat_stg_raw`), así que CloudFormation **recrearía** esos
+   recursos. Con `RemovalPolicy.RETAIN` los datos quedan, pero los stacks viejos
+   hay que retirarlos a mano.
+2. **Claves de tag en español → inglés** (`proyecto`→`Project`, `cliente`→`Client`,
+   `ambiente`→`Environment`, `gestionado-por`→`ManagedBy`, `owner`→`Owner`).
+   CloudFormation elimina las viejas y agrega las nuevas: hay que **reactivar** los
+   cost allocation tags (hasta 24 h) y el histórico de Cost Explorer queda con las
+   claves antiguas. Revisa también políticas IAM/SCP con
+   `aws:ResourceTag/proyecto`, reglas de AWS Config y selecciones de Backup.
+3. **Claves de LF-Tag sufijadas** (`dominio` → `dominio_<ambiente>`). Hay que
+   actualizar los `CfnPrincipalPermissions` y los grants hechos desde SageMaker
+   Studio.
+
+Para proyectos nuevos nada de esto aplica.
