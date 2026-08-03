@@ -68,16 +68,16 @@ parameters:
 
   - name: raw_retention_days
     type: integer
-    prompt: "Days before the Raw zone transitions to Glacier Instant Retrieval?"
+    prompt: "Days before the Raw zone transitions to Glacier Instant Retrieval? (0 = no transition, keep in Standard)"
     default: 90
-    minimum: 30
+    minimum: 0
     maximum: 3650
 
   - name: archive_retention_years
     type: integer
-    prompt: "Years to retain objects in the Archive zone (Glacier) before expiration?"
+    prompt: "Years to retain objects in the Archive zone before expiration? (0 = never expire, retain indefinitely)"
     default: 7
-    minimum: 1
+    minimum: 0
     maximum: 99
 
   - name: package_manager

@@ -18,9 +18,10 @@ export interface StorageStackProps extends cdk.StackProps {
  * - BlockPublicAccess total, SSL forzado, versionado y cifrado SSE-KMS (CMK).
  * - Server access logs centralizados en un bucket SSE-S3 dedicado.
  * - Lifecycle diferenciado por zona:
- *   Raw → Glacier IR a los rawTransitionDays (sin expiración automática).
+ *   Raw → Glacier IR a los rawTransitionDays (0 = sin transición, queda en Standard).
  *   Clean/Curated → limpieza de versiones no actuales y multipart incompletos.
- *   Archive → Glacier IR desde el día 1, expira a los archiveRetentionYears.
+ *   Archive → Glacier IR desde el día 1, expira a los archiveRetentionYears
+ *             (0 = sin expiración, retención indefinida).
  *   AthenaResults → expira a los 30 días (resultados transitorios).
  */
 export class StorageStack extends cdk.Stack {
@@ -58,21 +59,26 @@ export class StorageStack extends cdk.Stack {
       autoDeleteObjects: cfg.autoDeleteObjects,
     };
 
+    // rawTransitionDays === 0 → sin transición a Glacier (los datos quedan en Standard).
+    const rawRule: s3.LifecycleRule = {
+      noncurrentVersionExpiration: cdk.Duration.days(30),
+      abortIncompleteMultipartUploadAfter: cdk.Duration.days(7),
+      ...(cfg.rawTransitionDays > 0
+        ? {
+            transitions: [
+              {
+                storageClass: s3.StorageClass.GLACIER_INSTANT_RETRIEVAL,
+                transitionAfter: cdk.Duration.days(cfg.rawTransitionDays),
+              },
+            ],
+          }
+        : {}),
+    };
+
     this.rawBucket = new s3.Bucket(this, 'RawZoneBucket', {
       ...zoneDefaults,
       serverAccessLogsPrefix: 'raw/',
-      lifecycleRules: [
-        {
-          transitions: [
-            {
-              storageClass: s3.StorageClass.GLACIER_INSTANT_RETRIEVAL,
-              transitionAfter: cdk.Duration.days(cfg.rawTransitionDays),
-            },
-          ],
-          noncurrentVersionExpiration: cdk.Duration.days(30),
-          abortIncompleteMultipartUploadAfter: cdk.Duration.days(7),
-        },
-      ],
+      lifecycleRules: [rawRule],
     });
 
     this.cleanBucket = new s3.Bucket(this, 'CleanZoneBucket', {
@@ -100,22 +106,25 @@ export class StorageStack extends cdk.Stack {
 
     // Archive: Glacier IR desde día 1, expiración a los N años configurados.
     // Usar para datos que deben retenerse por normativa pero rara vez se acceden.
+    // archiveRetentionYears === 0 → sin expiración (retención indefinida).
+    const archiveRule: s3.LifecycleRule = {
+      transitions: [
+        {
+          storageClass: s3.StorageClass.GLACIER_INSTANT_RETRIEVAL,
+          transitionAfter: cdk.Duration.days(1),
+        },
+      ],
+      noncurrentVersionExpiration: cdk.Duration.days(30),
+      abortIncompleteMultipartUploadAfter: cdk.Duration.days(7),
+      ...(cfg.archiveRetentionYears > 0
+        ? { expiration: cdk.Duration.days(cfg.archiveRetentionYears * 365) }
+        : {}),
+    };
+
     this.archiveBucket = new s3.Bucket(this, 'ArchiveZoneBucket', {
       ...zoneDefaults,
       serverAccessLogsPrefix: 'archive/',
-      lifecycleRules: [
-        {
-          transitions: [
-            {
-              storageClass: s3.StorageClass.GLACIER_INSTANT_RETRIEVAL,
-              transitionAfter: cdk.Duration.days(1),
-            },
-          ],
-          expiration: cdk.Duration.days(cfg.archiveRetentionYears * 365),
-          noncurrentVersionExpiration: cdk.Duration.days(30),
-          abortIncompleteMultipartUploadAfter: cdk.Duration.days(7),
-        },
-      ],
+      lifecycleRules: [archiveRule],
     });
 
     this.athenaResultsBucket = new s3.Bucket(this, 'AthenaResultsBucket', {

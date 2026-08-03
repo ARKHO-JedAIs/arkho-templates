@@ -12,7 +12,7 @@ and optional VPC isolation.
 |---|---|---|
 | `network` | opcional (`enableVpc=true`) | VPC, subnets privadas, NAT Gateway, gateway endpoint S3, interface endpoints Glue + Secrets Manager |
 | `security` | siempre | 2 KMS CMKs (data / ops), SNS topic de alertas |
-| `storage` | siempre | S3: Raw (lifecycle → Glacier IR a {{ raw_retention_days }}d), Clean, Curated, Archive (Glacier IR, expira a {{ archive_retention_years }} años), Athena results, access logs |
+| `storage` | siempre | S3: Raw (lifecycle → Glacier IR a {{ raw_retention_days }}d), Clean, Curated, Archive (Glacier IR, expira a {{ archive_retention_years }} años), Athena results, access logs. Retención configurable (0 = desactivada) |
 | `governance` | siempre | Glue Databases por zona, LF-Tags (dominio, sensibilidad), registro Lake Formation |
 | `ingestion` | opcional (`enableIngestionLambdas=true`) | Lambdas (Node 20, ARM64), Secrets Manager, DLQ, schedules EventBridge, SFTP Connector opcional |
 | `processing` | siempre | Glue Jobs Python (auto-scaling, SSE-KMS, bookmarks), Crawlers, DynamoDB config, Step Functions con reintentos + alarma SNS |
@@ -50,12 +50,16 @@ Sobreescribir en despliegue: `cdk deploy -c env=prod`
 ## Configuración
 
 El archivo `lib/config/environments.ts` centraliza la config por ambiente. Los
-parámetros claves ya fueron bakeados en la generación:
+parámetros claves ya fueron bakeados en la generación (aplicados a los 3 ambientes):
 
 - Región: **{{ aws_region }}**
-- Transición Raw → Glacier IR: **{{ raw_retention_days }} días**
-- Retención Archive: **{{ archive_retention_years }} años**
+- Transición Raw → Glacier IR: **{{ raw_retention_days }} días** (0 = sin transición, los datos quedan en S3 Standard)
+- Retención Archive: **{{ archive_retention_years }} años** (0 = sin expiración, retención indefinida)
 - Email de alertas: **{{ admin_email }}** (confirmar suscripción SNS post-deploy)
+
+> Los valores de retención son editables por ambiente en `environments.ts`
+> (`rawTransitionDays` / `archiveRetentionYears`); ponlos en `0` para desactivar
+> la transición a Glacier o la expiración, respectivamente.
 
 Nombres de recursos: prefijo `{{ project_slug }}-<env>`.
 Bases de datos Glue: `{{ catalog_prefix }}_<env>_<zona>`.
