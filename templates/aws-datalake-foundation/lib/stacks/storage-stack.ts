@@ -1,10 +1,8 @@
 import * as cdk from 'aws-cdk-lib';
 import { Construct } from 'constructs';
-import * as iam from 'aws-cdk-lib/aws-iam';
 import * as kms from 'aws-cdk-lib/aws-kms';
 import * as s3 from 'aws-cdk-lib/aws-s3';
-import { NagSuppressions } from 'cdk-nag';
-import { DatalakeConfig, prefix } from '../config/environments';
+import { DatalakeConfig } from '../config/environments';
 
 export interface StorageStackProps extends cdk.StackProps {
   readonly config: DatalakeConfig;
@@ -67,13 +65,10 @@ export class StorageStack extends cdk.Stack {
   public readonly quarantineBucket: s3.Bucket;
   public readonly athenaResultsBucket: s3.Bucket;
   public readonly accessLogsBucket: s3.Bucket;
-  /** Rol que asume la ingesta del cliente para escribir en la Raw Zone. */
-  public readonly ingestWriterRole: iam.Role;
 
   constructor(scope: Construct, id: string, props: StorageStackProps) {
     super(scope, id, props);
     const cfg = props.config;
-    const p = prefix(cfg);
 
     // Access logs: S3 solo admite SSE-S3 en el bucket destino de logs
     this.accessLogsBucket = new s3.Bucket(this, 'AccessLogsBucket', {
@@ -192,57 +187,7 @@ export class StorageStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'RawBucketName', { value: this.rawBucket.bucketName });
     new cdk.CfnOutput(this, 'CleanBucketName', { value: this.cleanBucket.bucketName });
     new cdk.CfnOutput(this, 'CuratedBucketName', { value: this.curatedBucket.bucketName });
-    // ── Rol de escritura de la Raw Zone ───────────────────────────────────────
-    // Único camino de entrada al lake, y lo ÚNICO que este template aporta sobre la
-    // ingesta. La ingesta en sí no viene resuelta a propósito: varía demasiado entre
-    // proyectos (API de terceros, SFTP, DMS, Kinesis, un job on-premise) y cualquier
-    // implementación concreta sería código que el cliente borra. Lo fundacional es el
-    // permiso y el contrato de layout, no el productor.
-    //
-    // Tu proceso de ingesta asume este rol y escribe en:
-    //   s3://<raw>/<fuente>/dt=YYYY-MM-DD/<archivo>
-    // El segmento `<fuente>` es el que registras como `raw_prefix` en la tabla de
-    // configuración; `dt=` es la partición que el ETL espera.
-    const ingestPrincipalArn = (
-      this.node.tryGetContext('ingestPrincipalArn') as string | undefined
-    )?.trim();
-    this.ingestWriterRole = new iam.Role(this, 'IngestWriterRole', {
-      roleName: `${p}-ingest-writer`,
-      assumedBy: ingestPrincipalArn
-        ? new iam.ArnPrincipal(ingestPrincipalArn)
-        : new iam.AccountRootPrincipal(),
-      description:
-        'Rol que asume el proceso de ingesta del cliente para escribir en la Raw Zone',
-    });
-    // `grantPut` y NO `grantWrite`: este último incluye `s3:DeleteObject*`, y un
-    // productor no tiene por qué poder borrar lo que ya aterrizó.
-    this.rawBucket.grantPut(this.ingestWriterRole);
-    props.dataKey.grantEncrypt(this.ingestWriterRole);
-
     new cdk.CfnOutput(this, 'ArchiveBucketName', { value: this.archiveBucket.bucketName });
     new cdk.CfnOutput(this, 'QuarantineBucketName', { value: this.quarantineBucket.bucketName });
-    new cdk.CfnOutput(this, 'IngestWriterRoleArn', {
-      value: this.ingestWriterRole.roleArn,
-      description: 'Rol a asumir por el proceso de ingesta para escribir en Raw',
-    });
-
-    NagSuppressions.addResourceSuppressions(
-      this.ingestWriterRole,
-      [
-        {
-          id: 'AwsSolutions-IAM5',
-          reason:
-            'Wildcards de los grants de CDK sobre la Raw Zone y la data key: el objeto ' +
-            'concreto que escribe la ingesta no se conoce en síntesis. El rol NO tiene ' +
-            'ninguna acción de borrado.',
-          appliesTo: [
-            'Action::s3:Abort*',
-            'Action::kms:ReEncrypt*', 'Action::kms:GenerateDataKey*',
-            { regex: '/^Resource::.*RawZoneBucket.*\\.Arn>\\/\\*$/g' },
-          ],
-        },
-      ],
-      true,
-    );
   }
 }

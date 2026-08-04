@@ -7,10 +7,11 @@ description: >
   Foundational AWS Data Lake on CDK v2 (TypeScript): 5 S3 zones (Raw/Clean/Curated in
   Iceberg/Archive with Object Lock/Quarantine), a generic Glue ETL skeleton with a
   validation gate, Step Functions orchestration, enforced Lake Formation governance,
-  KMS end-to-end and multi-region CloudTrail. Ingestion is deliberately NOT included —
-  it varies too much per project; the template ships the writer role and the layout
-  contract instead. Split into 6–7 stacks (security, storage, governance, processing,
-  consumption, observability, optional network) with per-environment config
+  KMS end-to-end and multi-region CloudTrail. The ingestion stack is a doorway, not an
+  implementation: it ships the Raw-zone writer role and a Secrets Manager secret for the
+  source database, and nothing else — the producer varies too much per project. Split
+  into 7–8 stacks (security, storage, governance, ingestion, processing, consumption,
+  observability, optional network) with per-environment config
   (dev/qa/stg/prod) in one shared AWS account or one account each, cdk-nag and tests.
 version: 2.0.0
 category: datalake
@@ -260,6 +261,7 @@ nextSteps:
   - "Bootstrap: npx cdk bootstrap aws://{{ aws_account_id }}/{{ aws_region }} — repeat it for every distinct `account` in lib/config/environments.ts (up to 4 with one account per environment)"
   - "Confirm the SNS alert subscription sent to {{ admin_email }}"
   - "AWS_PROFILE=<profile-for-that-account> {{ package_manager }} run deploy:{{ environment }}"
-  - "Point your ingestion process at the Raw zone: assume the `{{ project_slug }}-<env>-ingest-writer` role (ingestion is NOT part of this template — see the README)"
+  - "Load the source database credentials into the `{{ project_slug }}-<env>/source-db` secret"
+  - "Point your ingestion process at the Raw zone: assume the `{{ project_slug }}-<env>-ingest-writer` role (the producer itself is NOT part of this template — see the README)"
   - "Register your sources and curated tables in the `{{ project_slug }}-<env>-job-config` DynamoDB table, then implement transform() and build_model() in glue/jobs/"
   - "Activate the new tag keys under Billing → Cost allocation tags (payer account, up to 24h to appear) or Cost Explorer cannot group by them"

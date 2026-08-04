@@ -6,6 +6,7 @@ import { applyStandardTags } from '../lib/config/tags';
 import { SecurityStack } from '../lib/stacks/security-stack';
 import { StorageStack } from '../lib/stacks/storage-stack';
 import { GovernanceStack } from '../lib/stacks/governance-stack';
+import { IngestionStack } from '../lib/stacks/ingestion-stack';
 import { ProcessingStack } from '../lib/stacks/processing-stack';
 import { ConsumptionStack } from '../lib/stacks/consumption-stack';
 import { ObservabilityStack } from '../lib/stacks/observability-stack';
@@ -66,13 +67,19 @@ const governance = new GovernanceStack(app, `${p}-governance`, {
   dataKey: security.dataKey,
 });
 
-// NO hay stack de ingesta, a propósito. La ingesta varía demasiado entre proyectos
-// (API de terceros, SFTP, DMS, Kinesis, un job on-premise) para venir resuelta, y
-// cualquier implementación concreta sería código que el cliente borra. Lo que sí es
-// fundacional viaja en StorageStack: el rol `-ingest-writer` que tu proceso asume
-// para escribir en la Raw Zone, y el contrato de layout documentado en el README.
+// ── Stack 5: Ingesta — puerta de entrada (rol de escritura + secreto) ─────────
+// NO implementa la ingesta: entrega el rol que tu proceso asume para escribir en Raw
+// y el secreto donde cargas las credenciales de la base origen. El productor lo traes
+// tú — varía demasiado entre proyectos para venir resuelto (ver el docstring).
+new IngestionStack(app, `${p}-ingestion`, {
+  ...common,
+  config: cfg,
+  rawBucket: storage.rawBucket,
+  dataKey: security.dataKey,
+  opsKey: security.opsKey,
+});
 
-// ── Stack 5: Procesamiento — Glue ETL + Step Functions ───────────────────────
+// ── Stack 6: Procesamiento — Glue ETL + Step Functions ───────────────────────
 const processing = new ProcessingStack(app, `${p}-processing`, {
   ...common,
   config: cfg,
@@ -91,7 +98,7 @@ const processing = new ProcessingStack(app, `${p}-processing`, {
 // `deploy --all` puede intentar crear los crawlers antes que sus bases.
 processing.addStackDependency(governance);
 
-// ── Stack 6: Consumo — Athena Workgroup ──────────────────────────────────────
+// ── Stack 7: Consumo — Athena Workgroup ──────────────────────────────────────
 new ConsumptionStack(app, `${p}-consumption`, {
   ...common,
   config: cfg,
@@ -99,7 +106,7 @@ new ConsumptionStack(app, `${p}-consumption`, {
   dataKey: security.dataKey,
 });
 
-// ── Stack 7: Observabilidad — CloudTrail + alarmas + dashboard ───────────────
+// ── Stack 8: Observabilidad — CloudTrail + alarmas + dashboard ───────────────
 new ObservabilityStack(app, `${p}-observability`, {
   ...common,
   config: cfg,

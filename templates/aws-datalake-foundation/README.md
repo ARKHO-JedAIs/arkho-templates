@@ -6,11 +6,11 @@ Quarantine), a generic Glue ETL skeleton orchestrated by Step Functions, enforce
 governance with Lake Formation + Glue Data Catalog, KMS encryption end-to-end,
 multi-region CloudTrail auditing, and optional VPC isolation.
 
-> **La ingesta no viene incluida, a propósito.** Varía demasiado entre proyectos
-> (API de terceros, SFTP, DMS, Kinesis, un job on-premise) para que una
-> implementación concreta sirva de algo: sería código que borras. Lo que sí trae el
-> template es el **rol de escritura** de la Raw Zone y el **contrato de layout** —
-> ver "Cómo entran los datos".
+> **El stack de ingesta es una puerta de entrada, no una implementación.** Entrega el
+> rol de escritura de la Raw Zone y el secreto donde cargas las credenciales de la
+> base origen — nada más. El productor lo traes tú, y es deliberado: la ingesta varía
+> demasiado entre proyectos (API de terceros, SFTP, DMS, Kinesis, un job on-premise)
+> para que una implementación concreta sirva de algo. Ver "Cómo entran los datos".
 
 ## Stacks
 
@@ -20,6 +20,7 @@ multi-region CloudTrail auditing, and optional VPC isolation.
 | `security` | siempre | 2 KMS CMKs (data / ops), SNS topic de alertas |
 | `storage` | siempre | S3: Raw (lifecycle → Glacier IR a {{ raw_retention_days }}d), Clean, Curated, Archive (Glacier IR + Object Lock), **Quarantine**, Athena results, access logs. Retención configurable (0 = desactivada) |
 | `governance` | siempre | Glue Databases por zona, LF-Tags **asociados a las bases**, registro Lake Formation de las 4 zonas de datos, **rol de analista con grant por LF-Tag** |
+| `ingestion` | siempre | Rol de escritura de la Raw Zone (`PutObject`, sin borrado) + secreto para las credenciales de la base origen. **No implementa la ingesta** |
 | `processing` | siempre | Glue Jobs Python (auto-scaling, SSE-KMS, bookmarks reales), **gate de calidad + cuarentena**, **mantenimiento Iceberg semanal** (bloque desacoplable), 4 Crawlers, DynamoDB config, Step Functions con reintentos + alarmas SNS |
 | `consumption` | siempre | Athena WorkGroup (config forzada, bytes-scanned cutoff, resultados cifrados) |
 | `observability` | siempre | CloudTrail multi-región con data events + salida a CloudWatch Logs, alarmas sobre el trail, **alarma de "el pipeline no corrió"**, alarmas de Glue por EventBridge, **dashboard** |
@@ -179,15 +180,38 @@ efecto.
 
 ## Cómo entran los datos (la ingesta la traes tú)
 
-El template **no** implementa ingesta. Lo que entrega es el permiso y el contrato:
+El stack `ingestion` **no** implementa ingesta: son tres recursos que entregan el
+permiso, las credenciales y el contrato.
 
 **El rol.** `{{ project_slug }}-<env>-ingest-writer`, cuyo ARN queda en el output
-`IngestWriterRoleArn` del stack `storage`. Tu proceso lo asume y puede hacer
-`PutObject` en la Raw Zone y usar la CMK — **nada más**: no tiene permiso de borrado,
-porque un productor no debería poder eliminar lo que ya aterrizó.
+`IngestWriterRoleArn`. Tu proceso lo asume y puede hacer `PutObject` en la Raw Zone,
+usar la CMK y leer el secreto — **nada más**: no tiene permiso de borrado, porque un
+productor no debería poder eliminar lo que ya aterrizó.
 
 Por defecto lo asume la cuenta root; acótalo al principal real con
 `-c ingestPrincipalArn=arn:aws:iam::<cuenta>:role/<tu-proceso>`.
+
+**El secreto.** `{{ project_slug }}-<env>/source-db`, cifrado con la ops key y con la
+forma que AWS usa por convención para credenciales de base de datos, así que DMS, las
+Glue connections y los SDK la reconocen sin traducción:
+
+```json
+{ "engine": "", "host": "", "port": "", "dbname": "", "username": "", "password": "..." }
+```
+
+Se crea con esa plantilla y una contraseña aleatoria de relleno. Carga los valores
+reales post-deploy:
+
+```bash
+aws secretsmanager put-secret-value \
+  --secret-id {{ project_slug }}-<env>/source-db \
+  --secret-string '{"engine":"postgres","host":"...","port":"5432","dbname":"...","username":"...","password":"..."}'
+```
+
+Sigue el `removalPolicy` del ambiente: en qa/stg/prod un `cdk destroy` **no** se lleva
+las credenciales. No se rota automáticamente — Secrets Manager necesitaría una Lambda
+de rotación específica del motor y con acceso de red al origen, y rotar a ciegas
+rompería la conexión; la renovación es del dueño de esa base.
 
 **El layout.** El ETL espera:
 
@@ -364,9 +388,11 @@ tabla y columna desde SageMaker Studio o con más `CfnTagAssociation`.
 ## Post-generación
 
 1. Confirmar la suscripción SNS enviada a **{{ admin_email }}**.
-2. **Conectar tu ingesta**: hacer que asuma el rol `IngestWriterRoleArn` y escriba
-   con el layout de "Cómo entran los datos". Acotar el trust del rol con
-   `-c ingestPrincipalArn=...`.
+2. **Cargar las credenciales de la base origen** en el secreto
+   `{{ project_slug }}-<env>/source-db` (ver "Cómo entran los datos"). Se crea con una
+   contraseña aleatoria de relleno.
+3. **Conectar tu ingesta**: hacer que asuma el rol `IngestWriterRoleArn` y escriba con
+   el layout documentado. Acotar el trust con `-c ingestPrincipalArn=...`.
 3. **Cargar las fuentes y tablas en DynamoDB** e implementar `transform()` y
    `build_model()` (ver "El pipeline de datos"). Hasta que haya items activos los
    jobs corren y terminan sin hacer nada, lo cual es intencional.
@@ -428,18 +454,20 @@ excepciones deliberadas, ambas SSE-S3 y comentadas en el código: el bucket de a
 logs y el del trail — S3 solo admite SSE-S3 como destino de server access logs, y para
 CloudTrail es lo que AWS recomienda para no acoplar la data key a la auditoría.
 
-**Sin capa de ingesta** a propósito: el template no trae Lambdas de proveedores ni
-conectores. Las alarmas que sí trae cubren el pipeline, la cuarentena, los jobs y
-crawlers de Glue, y el contenido del trail.
+**El stack de ingesta no trae productores**: ni Lambdas de proveedores ni conectores,
+solo el rol de escritura y el secreto de la base origen. Las alarmas que sí trae el
+template cubren el pipeline, la cuarentena, los jobs y crawlers de Glue, y el
+contenido del trail.
 
 ## Migración desde una versión anterior del template
 
 Si regeneras un proyecto **ya desplegado**, estos cambios no son retrocompatibles.
 
-**Primero, la ingesta:** el stack `ingestion` desaparece. Un proyecto desplegado
-pierde las Lambdas, sus secretos, la DLQ y sus alarmas. Los secretos con
-`RemovalPolicy.RETAIN` quedan huérfanos y hay que borrarlos a mano. Si dependías de
-esas Lambdas, guárdalas antes de regenerar: no están en el template nuevo.
+**Primero, la ingesta:** el stack `ingestion` se reduce a un rol y un secreto. Un
+proyecto desplegado pierde las Lambdas de GA4 y Meta Ads, el SFTP Connector, la DLQ y
+sus alarmas. Los secretos viejos (`/ga4-api`, `/meta-ads-api`, `/sftp-origen`) tienen
+`RemovalPolicy.RETAIN`, así que quedan huérfanos y hay que borrarlos a mano. Si
+dependías de esas Lambdas, guárdalas antes de regenerar: no están en el template nuevo.
 
 **Segundo, parámetros que se movieron:** `quarantine_retention_days`,
 `quarantine_alarm_threshold`, `iceberg_snapshot_retention_days` y
