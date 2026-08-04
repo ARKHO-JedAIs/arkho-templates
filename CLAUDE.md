@@ -64,6 +64,26 @@ as a manifest change. See `.claude/skills/arkho-template-publish/`.
 - Glue crawlers run on their own schedule rather than inside the Step Functions
   pipeline. Keep `crawler_schedule` comfortably after `pipeline_schedule` — a
   crawler that fires mid-pipeline can infer a schema from partial writes.
+- **Iceberg confs go in `--conf` on the job, never `spark.conf.set` in the script.**
+  `spark.sql.extensions` is a *static* session conf: setting it after the
+  SparkContext exists silently does nothing, and `MERGE INTO` plus every
+  `CALL system.*` fails at runtime while synth, tests and cdk-nag stay green.
+  `test/foundation.test.ts` guards this.
+- The data-quality gate lives **inside** `raw_to_clean.py`, not in a Step Functions
+  `Choice`. `GlueStartJobRun` with `RUN_JOB` does not return the job's output, so the
+  state machine cannot read the row counts; the job can, so it fails itself.
+- LF-Tag keys carry an environment suffix on purpose (LF-Tags are account+region
+  singletons). Don't "simplify" it back — the second environment in a shared account
+  would fail mid-deploy with `AlreadyExistsException`.
+- The `/aws-glue/*` log groups are deliberately **not** managed here: they are shared
+  account-wide across every Glue workload, so this stack setting their retention would
+  decide for other projects. It's a documented post-generation account task.
+- The Iceberg maintenance job discovers tables at runtime instead of taking a list,
+  because `glue.CfnTableOptimizer` requires `tableName` at synth time and this
+  template creates no tables.
+- Object Lock is enabled at bucket creation and is irreversible; the default retention
+  *rule* is applied only when `!autoDeleteObjects`, or the auto-delete custom resource
+  cannot empty the bucket on `destroy`.
 - LF-Tag keys are suffixed with the environment (`dominio_dev`). This is load
   bearing, not cosmetic: LF-Tags are singletons per account+region, so fixed keys
   make the second environment deployed into a shared account fail with
