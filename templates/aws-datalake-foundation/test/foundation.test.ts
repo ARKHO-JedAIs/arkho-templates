@@ -93,13 +93,23 @@ describe('Iceberg: configuración y mantenimiento', () => {
   });
 });
 
-describe('sin capa de ingesta', () => {
-  const { storage, processing, governance } = buildEnv('NoIng', 'dev');
+describe('ingesta: puerta de entrada, no implementación', () => {
+  const { ingestion, storage, processing, governance } = buildEnv('Ing', 'dev');
+  const t = Template.fromStack(ingestion);
+
+  test('el stack es exactamente un rol y un secreto', () => {
+    // Si crece, alguien volvió a meter un productor concreto. La ingesta varía
+    // demasiado entre proyectos para venir resuelta: lo fundacional es el permiso
+    // y el lugar de las credenciales.
+    t.resourceCountIs('AWS::IAM::Role', 1);
+    t.resourceCountIs('AWS::SecretsManager::Secret', 1);
+    t.resourceCountIs('AWS::Lambda::Function', 0);
+  });
 
   test('ningún stack crea Lambdas propias', () => {
-    // La ingesta era el único origen de Lambdas. Si reaparece una acá, alguien
-    // volvió a meter un productor concreto o un target que necesita intermediario.
-    for (const stack of [storage, processing, governance]) {
+    // Si reaparece una, alguien metió un productor o un target de EventBridge que
+    // necesita intermediario.
+    for (const stack of [ingestion, storage, processing, governance]) {
       const fns = Object.entries<any>(
         Template.fromStack(stack).toJSON().Resources ?? {})
         .filter(([k, v]) => v.Type === 'AWS::Lambda::Function'
@@ -108,16 +118,39 @@ describe('sin capa de ingesta', () => {
     }
   });
 
-  test('existe el rol de escritura de Raw, y es lo único que reemplaza la ingesta', () => {
-    const t = Template.fromStack(storage);
-    // Se excluye el rol del provider de autoDeleteObjects, que CDK crea solo en dev.
-    const ours = Object.entries<any>(t.findResources('AWS::IAM::Role'))
-      .filter(([k]) => !k.startsWith('CustomS3AutoDeleteObjects'));
-    expect(ours).toHaveLength(1);
-    expect(ours[0][1].Properties.RoleName).toMatch(/-ingest-writer$/);
-    // Sin colas ni secretos: eran de la ingesta.
-    t.resourceCountIs('AWS::SQS::Queue', 0);
-    t.resourceCountIs('AWS::SecretsManager::Secret', 0);
+  test('el rol puede escribir en Raw y leer el secreto, pero NO borrar', () => {
+    const actions = Object.values<any>(t.findResources('AWS::IAM::Policy'))
+      .flatMap((p) => p.Properties.PolicyDocument.Statement as any[])
+      .flatMap((s) => [].concat(s.Action ?? []) as string[]);
+    expect(actions.some((a) => /^s3:PutObject/.test(a))).toBe(true);
+    expect(actions).toContain('secretsmanager:GetSecretValue');
+    // `grantPut` y no `grantWrite`: un productor no borra lo que ya aterrizó.
+    expect(actions.filter((a) => /^s3:Delete/.test(a))).toHaveLength(0);
+  });
+
+  test('el secreto va cifrado con la ops key y sigue el removalPolicy del ambiente', () => {
+    const secret = Object.values<any>(t.findResources('AWS::SecretsManager::Secret'))[0];
+    expect(secret.Properties.KmsKeyId).toBeDefined();
+    // dev: DESTROY. En qa/stg/prod un `destroy` no se lleva las credenciales.
+    expect(secret.DeletionPolicy).toBe('Delete');
+  });
+
+  test('el secreto documenta la forma esperada de las credenciales', () => {
+    // Las claves son las que AWS usa por convención, así que DMS, las Glue
+    // connections y los SDK las reconocen sin traducción.
+    const secret = Object.values<any>(t.findResources('AWS::SecretsManager::Secret'))[0];
+    const tpl = secret.Properties.GenerateSecretString.SecretStringTemplate;
+    for (const key of ['engine', 'host', 'port', 'dbname', 'username']) {
+      expect(tpl).toContain(key);
+    }
+    expect(secret.Properties.GenerateSecretString.GenerateStringKey).toBe('password');
+  });
+
+  test('prod retiene el secreto', () => {
+    const prodSecret = Object.values<any>(
+      Template.fromStack(buildEnv('IngProd', 'prod').ingestion)
+        .findResources('AWS::SecretsManager::Secret'))[0];
+    expect(prodSecret.DeletionPolicy).toBe('Retain');
   });
 });
 

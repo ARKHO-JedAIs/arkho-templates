@@ -6,10 +6,10 @@ import { buildEnv } from './helpers';
  * accidente en un refactor y el efecto no se nota hasta una auditoría.
  */
 describe('mínimo privilegio en roles', () => {
-  const { processing, storage, governance } = buildEnv('Lp', 'dev');
+  const { processing, ingestion, governance } = buildEnv('Lp', 'dev');
 
   const procTemplate = Template.fromStack(processing);
-  const stoTemplate = Template.fromStack(storage);
+  const ingTemplate = Template.fromStack(ingestion);
   const govTemplate = Template.fromStack(governance);
 
   const allStatements = (t: Template) =>
@@ -38,10 +38,10 @@ describe('mínimo privilegio en roles', () => {
   });
 
   test('el rol de escritura de Raw puede PONER objetos pero NO borrarlos', () => {
-    // Es el único camino de entrada al lake ahora que no hay stack de ingesta. Un
-    // productor no tiene por qué poder borrar lo que ya aterrizó, así que se usa
-    // `grantPut` y no `grantWrite` — que incluiría `s3:DeleteObject*`.
-    const actions = allStatements(stoTemplate)
+    // Es el único camino de entrada al lake. Un productor no tiene por qué poder
+    // borrar lo que ya aterrizó, así que se usa `grantPut` y no `grantWrite` — que
+    // incluiría `s3:DeleteObject*`.
+    const actions = allStatements(ingTemplate)
       .flatMap((s) => [].concat(s.Action ?? []) as string[]);
     expect(actions.some((a) => /^s3:PutObject/.test(a))).toBe(true);
     expect(actions.filter((a) => /^s3:Delete/.test(a))).toHaveLength(0);

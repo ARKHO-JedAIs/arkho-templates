@@ -3,6 +3,7 @@ import { DatalakeConfig, getConfig } from '../lib/config/environments';
 import { SecurityStack } from '../lib/stacks/security-stack';
 import { StorageStack } from '../lib/stacks/storage-stack';
 import { GovernanceStack } from '../lib/stacks/governance-stack';
+import { IngestionStack } from '../lib/stacks/ingestion-stack';
 import { ProcessingStack } from '../lib/stacks/processing-stack';
 import { NetworkStack } from '../lib/stacks/network-stack';
 import { ConsumptionStack } from '../lib/stacks/consumption-stack';
@@ -29,6 +30,7 @@ export interface BuiltStacks {
   readonly storage: StorageStack;
   readonly governance: GovernanceStack;
   readonly processing: ProcessingStack;
+  readonly ingestion: IngestionStack;
   readonly network: NetworkStack;
   readonly consumption: ConsumptionStack;
   readonly observability: ObservabilityStack;
@@ -73,6 +75,12 @@ export function buildStacks(
     opsKey: security.opsKey,
     alertsTopic: security.alertsTopic,
   });
+  const ingestion = new IngestionStack(app, `${prefix}Ingestion`, {
+    ...common,
+    rawBucket: storage.rawBucket,
+    dataKey: security.dataKey,
+    opsKey: security.opsKey,
+  });
   // NetworkStack se construye siempre en los tests aunque el app lo haga condicional:
   // sin esto el barrido de tags nunca verificaba sus recursos y las entradas
   // AWS::EC2::* de UNTAGGABLE_TYPES quedaban sin comprobar.
@@ -99,7 +107,7 @@ export function buildStacks(
 
   return {
     app, cfg, security, storage, governance,
-    processing, consumption, observability, network,
+    processing, ingestion, consumption, observability, network,
   };
 }
 
