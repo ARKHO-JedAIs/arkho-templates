@@ -68,11 +68,16 @@ Prefer a field in `environments.ts`.
 
 ## Known deliberate choices
 
-- **There is no ingestion layer, and that is the point.** Ingestion varies too much
-  per project for a concrete implementation to be reusable — it would be code the
-  client deletes. What the template ships is the `-ingest-writer` role
-  (`grantPut`, no delete) and the documented Raw layout. Don't add vendor-specific
-  ingestion back; that is what was removed.
+- **`IngestionStack` is a doorway, not an implementation** — three resources: the
+  `-ingest-writer` role (`grantPut`, never `grantWrite`: a producer must not be able
+  to delete what already landed), a Secrets Manager secret for the source database,
+  and the role's policy. Ingestion itself varies too much per project for a concrete
+  implementation to be reusable — it would be code the client deletes. Vendor-specific
+  producers (GA4/Meta Lambdas, an SFTP connector) were removed on purpose; don't add
+  them back. If this stack grows past those three resources, question it.
+  The secret uses AWS's conventional DB-credential keys (`engine`/`host`/`port`/
+  `dbname`/`username`/`password`) so DMS, Glue connections and the SDKs read it
+  without translation.
 - `enable_vpc` ships a VPC that nothing is attached to. That is intentional: it
   is a building block deployed up front because retrofitting it later forces
   resource recreation. Developers wire Glue/DMS/their own ingestion to it when a
