@@ -53,12 +53,43 @@ Versions are annotated git tags `<name>@<version>` and are **immutable**. The
 manifest `version` must match the tag. Update `registry.json` in the same commit
 as a manifest change. See `.claude/skills/arkho-template-publish/`.
 
+## What gets asked vs what lives in code
+
+The questionnaire asks **only what cannot change later without pain**: identity,
+accounts, region, catalog prefix, alert email, tags, and the structural flags
+(Object Lock — irreversible; VPC). Every operational tunable — retentions,
+thresholds, crons, sizing — lives in `lib/config/environments.ts`, editable per
+environment. Deploy-time knobs go in `cdk.json` context (`lfAdminArn`,
+`lfStrictMode`, `analystPrincipalArn`, `ingestPrincipalArn`).
+
+Adding a parameter is the expensive option: it lengthens the questionnaire for every
+future client and bakes a value that can never be changed without regenerating.
+Prefer a field in `environments.ts`.
+
 ## Known deliberate choices
 
+- **There is no ingestion layer, and that is the point.** Ingestion varies too much
+  per project for a concrete implementation to be reusable — it would be code the
+  client deletes. What the template ships is the `-ingest-writer` role
+  (`grantPut`, no delete) and the documented Raw layout. Don't add vendor-specific
+  ingestion back; that is what was removed.
 - `enable_vpc` ships a VPC that nothing is attached to. That is intentional: it
   is a building block deployed up front because retrofitting it later forces
-  resource recreation. Developers wire Glue/Lambda/DMS to it when a private-network
-  need appears.
+  resource recreation. Developers wire Glue/DMS/their own ingestion to it when a
+  private-network need appears.
+- The data-quality gate is plain PySpark, not Glue Data Quality. `EvaluateDataQuality`
+  was tried and removed: `process_rows` returns a `DynamicFrameCollection` (not a
+  `DynamicFrame`), the role would need `glue:*DataQuality*`, and the CloudWatch
+  namespace condition blocks its metrics. The extension point is `validate()` in
+  `raw_to_clean.py` — Python in the repo, reviewable, not DQDL strings in DynamoDB.
+- Glue scripts have **no automated tests**: the verification pipeline has no Python
+  runtime. They are reviewed by inspection. The one invariant to guard when editing
+  `raw_to_clean.py`: PASS means **zero** failed checks, never "passed at least one".
+- Crawlers: `recrawlPolicy: CRAWL_NEW_FOLDERS_ONLY` forces `updateBehavior` and
+  `deleteBehavior` to `LOG`, so it is applied only to the append-only zones (raw,
+  clean) and never to Curated or Quarantine, where partitions get rewritten.
+  `Grouping: CombineCompatibleSchemas` is deliberately absent everywhere — it can
+  merge two distinct tables into one catalog table.
 - The Archive zone has a writer grant but no pipeline writing to it; clients
   attach their own archival process.
 - Glue crawlers run on their own schedule rather than inside the Step Functions
