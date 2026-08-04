@@ -9,6 +9,7 @@
     "enableIngestionLambdas": "{{ enable_ingestion_lambdas }}",
     "enableVpc": "{{ enable_vpc }}",
     "vpcCidr": "{{ vpc_cidr }}",
+    "enableObjectLock": "{{ enable_object_lock }}",
     "@aws-cdk/aws-iam:minimizePolicies": true,
     "@aws-cdk/core:checkSecretUsage": true,
     "@aws-cdk/aws-s3:createDefaultLoggingPolicy": true,

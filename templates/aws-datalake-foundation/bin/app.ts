@@ -49,10 +49,15 @@ if (enableVpc) {
 const security = new SecurityStack(app, `${p}-security`, { ...common, config: cfg });
 
 // ── Stack 3: Storage — 4 zonas S3 + Athena results + access logs ──────────────
+// `enableObjectLock` es IRREVERSIBLE en los buckets que lo reciben: solo se puede
+// activar al crearlos y nunca desactivar. Ver StorageStack.
+const enableObjectLock = app.node.tryGetContext('enableObjectLock') !== 'false';
+
 const storage = new StorageStack(app, `${p}-storage`, {
   ...common,
   config: cfg,
   dataKey: security.dataKey,
+  enableObjectLock,
 });
 
 // ── Stack 4: Gobernanza — Glue Catalog + Lake Formation FGAC ──────────────────
@@ -62,6 +67,9 @@ const governance = new GovernanceStack(app, `${p}-governance`, {
   rawBucket: storage.rawBucket,
   cleanBucket: storage.cleanBucket,
   curatedBucket: storage.curatedBucket,
+  archiveBucket: storage.archiveBucket,
+  athenaResultsBucket: storage.athenaResultsBucket,
+  dataKey: security.dataKey,
 });
 
 // ── Stack 5: Ingesta (opcional) — Lambdas API + SFTP Connector ────────────────
@@ -84,6 +92,7 @@ const processing = new ProcessingStack(app, `${p}-processing`, {
   cleanBucket: storage.cleanBucket,
   curatedBucket: storage.curatedBucket,
   archiveBucket: storage.archiveBucket,
+  quarantineBucket: storage.quarantineBucket,
   dataKey: security.dataKey,
   opsKey: security.opsKey,
   alertsTopic: security.alertsTopic,
@@ -112,6 +121,10 @@ new ObservabilityStack(app, `${p}-observability`, {
     storage.curatedBucket,
     storage.archiveBucket,
   ],
+  // La alarma de "el pipeline no corrió" necesita la máquina de estados.
+  stateMachine: processing.stateMachine,
+  alertsTopic: security.alertsTopic,
+  enableObjectLock,
 });
 
 // ── Tags transversales (FinOps + trazabilidad) ────────────────────────────────

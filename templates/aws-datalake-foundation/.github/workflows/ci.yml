@@ -1,0 +1,79 @@
+name: CI
+
+# build, test y cdk-nag en cada PR y en cada push a main.
+#
+# `nag:all` cubre los 4 ambientes: `nag` solo mira el ambiente por defecto, así que
+# una regresión que solo aparece en prod pasaría sin que nadie la vea.
+#
+# `cdk diff` necesita credenciales; si no configuraste el rol OIDC ese job se salta
+# y el resto igual corre. Ver el README, sección "Integración continua".
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Sin permisos de escritura salvo el token OIDC que pide aws-actions.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build, test y cdk-nag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: Compilar
+        run: npm run build
+
+      - name: Tests de infraestructura
+        run: npm test
+
+      # No necesita credenciales AWS: no hay lookups de contexto (NetworkStack fija
+      # sus AZs justamente por eso), así que esto corre en cualquier runner limpio.
+      - name: cdk-nag en los 4 ambientes
+        run: npm run nag:all
+
+  diff:
+    name: cdk diff (${{ matrix.env }})
+    runs-on: ubuntu-latest
+    needs: build
+    # Solo con rol OIDC configurado y solo en PRs: en push a main el diff ya no
+    # aporta, lo que importa es el deploy.
+    if: github.event_name == 'pull_request' && vars.AWS_DEPLOY_ROLE_ARN != ''
+    permissions:
+      contents: read
+      id-token: write   # requerido para OIDC
+    strategy:
+      fail-fast: false
+      matrix:
+        env: [dev, qa, stg, prod]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: cdk diff
+        run: npx cdk diff --all -c env=${{ matrix.env }}

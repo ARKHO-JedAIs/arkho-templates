@@ -12,12 +12,12 @@ and optional VPC isolation.
 |---|---|---|
 | `network` | opcional (`enableVpc=true`) | VPC, subnets privadas, NAT Gateway, flow logs, gateway endpoint S3, interface endpoints Glue + Secrets Manager. **Building block: no se le asocia ningún recurso automáticamente** (ver más abajo) |
 | `security` | siempre | 2 KMS CMKs (data / ops), SNS topic de alertas |
-| `storage` | siempre | S3: Raw (lifecycle → Glacier IR a {{ raw_retention_days }}d), Clean, Curated, Archive (Glacier IR, expira a {{ archive_retention_years }} años), Athena results, access logs. Retención configurable (0 = desactivada) |
-| `governance` | siempre | Glue Databases por zona, LF-Tags (dominio, sensibilidad), registro Lake Formation |
+| `storage` | siempre | S3: Raw (lifecycle → Glacier IR a {{ raw_retention_days }}d), Clean, Curated, Archive (Glacier IR + Object Lock), **Quarantine**, Athena results, access logs. Retención configurable (0 = desactivada) |
+| `governance` | siempre | Glue Databases por zona, LF-Tags **asociados a las bases**, registro Lake Formation de las 4 zonas, **rol de analista con grant por LF-Tag** |
 | `ingestion` | opcional (`enableIngestionLambdas=true`) | Lambdas (Node 24, ARM64), Secrets Manager, DLQ + alarmas SNS, schedules EventBridge, SFTP Connector opcional |
-| `processing` | siempre | Glue Jobs Python (auto-scaling, SSE-KMS, bookmarks), Crawlers, DynamoDB config, Step Functions con reintentos + alarma SNS |
+| `processing` | siempre | Glue Jobs Python (auto-scaling, SSE-KMS, bookmarks reales), **gate de calidad + cuarentena**, **mantenimiento Iceberg semanal**, 3 Crawlers, DynamoDB config, Step Functions con reintentos + alarmas SNS |
 | `consumption` | siempre | Athena WorkGroup (config forzada, bytes-scanned cutoff, resultados cifrados) |
-| `observability` | siempre | CloudTrail con data events sobre las 4 zonas + bucket de logs con lifecycle |
+| `observability` | siempre | CloudTrail multi-región con data events + salida a CloudWatch Logs, alarmas sobre el trail, **alarma de "el pipeline no corrió"**, alarmas de Glue por EventBridge, **dashboard** |
 
 ## Requisitos
 
@@ -171,6 +171,94 @@ actives en Billing → Cost allocation tags (desde la cuenta pagadora; tarda has
 24 h en aparecer). Sin ese paso, todo el propósito FinOps del etiquetado queda sin
 efecto.
 
+## El pipeline de datos: qué ya funciona y qué te toca escribir
+
+La **mecánica de plataforma está completa y funcionando**. Lo único que falta es la
+lógica de tu negocio, en dos funciones marcadas:
+
+| Ya resuelto | Te toca |
+|---|---|
+| Lectura incremental con bookmarks reales (`transformation_ctx`), agrupación de archivos chicos | `transform(df, source)` en `glue/jobs/raw_to_clean.py` |
+| Gate de calidad con `EvaluateDataQuality`, ruteo de rechazos a cuarentena con su causa | `build_model(sources, table)` en `glue/jobs/clean_to_curated.py` |
+| Escritura Parquet+Snappy particionada, idempotente (partición dinámica, no `append`) | Las reglas DQDL por fuente (hay un ruleset base si no defines) |
+| DDL Iceberg con propiedades explícitas y `MERGE INTO` por clave de negocio | Las llamadas reales a GA4 / Meta en `lambda/*/index.js` |
+| Compactación, expiración de snapshots y limpieza de huérfanos semanal | — |
+
+### Configuración de fuentes y tablas (DynamoDB)
+
+Los jobs leen qué procesar desde la tabla `{{ project_slug }}-<env>-job-config`. Sin
+items activos **no fallan**: loguean y terminan. Para empezar:
+
+```bash
+# Una fuente de la Raw Zone
+aws dynamodb put-item --table-name {{ project_slug }}-<env>-job-config --item '{
+  "jobName": {"S": "raw_to_clean"}, "sk": {"S": "source#ga4"},
+  "enabled": {"BOOL": true}, "raw_prefix": {"S": "ga4/"}, "format": {"S": "json"},
+  "partition_keys": {"L": [{"S": "dt"}]},
+  "required_columns": {"L": [{"S": "event_date"}]}
+}'
+
+# Una tabla analítica en Curated (merge_keys es obligatorio)
+aws dynamodb put-item --table-name {{ project_slug }}-<env>-job-config --item '{
+  "jobName": {"S": "clean_to_curated"}, "sk": {"S": "table#sesiones"},
+  "enabled": {"BOOL": true}, "source_tables": {"L": [{"S": "ga4"}]},
+  "merge_keys": {"L": [{"S": "session_id"}]}, "partition_by": {"S": "days(dt)"}
+}'
+```
+
+## Calidad de datos y zona de cuarentena
+
+Cada fuente pasa por un ruleset DQDL antes de escribirse en Clean. Las filas que
+fallan van a `s3://<quarantine>/<fuente>/` con la causa en `_quarantine_reason`, en
+vez de propagarse en silencio o reventar el job — que eran las dos únicas opciones
+posibles antes de que existiera la zona.
+
+El **gate de pipeline** vive dentro del job, no en un estado del Step Functions: por
+encima de **{{ quarantine_alarm_threshold }}** filas rechazadas el job falla, la
+alarma SNS se dispara y `clean_to_curated` **no corre**, así que los datos malos no
+llegan a Curated. Está en el job y no en un `Choice` porque `GlueStartJobRun` con
+`RUN_JOB` no devuelve la salida del job: la máquina de estados no puede leer esos
+contadores, el job sí.
+
+Los rechazos se retienen **{{ quarantine_retention_days }} días**.
+
+## Iceberg: propiedades y mantenimiento
+
+Las tablas de Curated se crean con `format-version=2`, `write.target-file-size-bytes`,
+compresión Snappy, `write.distribution-mode=hash` y limpieza de metadata. El
+particionado es oculto (`days(dt)` por defecto, configurable por tabla).
+
+> Las confs de Iceberg —incluida `spark.sql.extensions`— llegan por `--conf` en la
+> definición del job y **no** por `spark.conf.set` en el script. No es estilo:
+> `spark.sql.extensions` es una conf **estática** de la sesión, así que aplicarla
+> después de crear el SparkContext no tiene efecto y `MERGE INTO` junto con los
+> `CALL system.*` fallarían en runtime mientras synth, tests y cdk-nag pasan en verde.
+
+**Mantenimiento semanal** (domingo 03:00 UTC): compactación, `rewrite_manifests`,
+`expire_snapshots` con ventana de **{{ iceberg_snapshot_retention_days }} días** de
+time-travel, y `remove_orphan_files`. Sin esto una tabla Iceberg se degrada de forma
+garantizada: archivos chicos acumulados y metadata creciendo sin límite.
+
+El job **descubre** las tablas en runtime en vez de recibir una lista, así que
+funciona con cero configuración y se adapta a medida que aparecen. `CfnTableOptimizer`
+—el mecanismo gestionado de AWS— no sirve acá porque exige el nombre de la tabla en
+tiempo de síntesis y este template no crea tablas. Cuando tus tablas sean estables,
+migrar a `CfnTableOptimizer` es el upgrade natural: lo gestiona AWS y te ahorra el job.
+
+## Integración continua
+
+`.github/workflows/ci.yml` corre en cada PR: `build`, `test` y `nag:all` sin
+credenciales AWS (no hay lookups de contexto). El `cdk diff` de los 4 ambientes es
+opcional y requiere configurar en el repo de GitHub:
+
+| Variable de repo | Valor |
+|---|---|
+| `AWS_DEPLOY_ROLE_ARN` | `{{ oidc_role_arn }}` |
+| `AWS_REGION` | `{{ aws_region }}` |
+
+Van por `vars` de GitHub y no por token de generación a propósito: son configuración
+de despliegue, y el rol OIDC normalmente no existe todavía cuando se genera el proyecto.
+
 ## Red (VPC) — building block deliberado
 
 Con `enableVpc=true` se despliega la VPC **pero ningún recurso queda asociado a
@@ -211,12 +299,31 @@ SageMaker Studio deben usar la clave con sufijo.**
 > singleton `CfnDataLakeSettings` de la cuenta: último escritor gana, y destruir un
 > stack puede dejar sin admin de Lake Formation al otro.
 
-`-c lfAdminArn=arn:...` registra el admin vía IaC. **`-c lfStrictMode=true`** es
-lo que elimina el permiso por defecto `IAMAllowedPrincipals` para tener FGAC
-real: al activarlo, todo principal necesita grant explícito — **incluidos los
-crawlers de este proyecto**, que dejarán de poder crear tablas hasta que les
-otorgues `CREATE_TABLE`/`ALTER` sobre las bases. Por eso es opt-in y no el
-comportamiento por defecto.
+`-c lfAdminArn=arn:...` registra el admin vía IaC.
+
+**FGAC estricto viene ACTIVADO por defecto**: se elimina el permiso
+`IAMAllowedPrincipals`, que es lo que convierte a Lake Formation en un control real
+en vez de decorativo. Eso es viable porque los grants necesarios ya existen en el
+template: el rol de Glue recibe `DESCRIBE`/`CREATE_TABLE`/`ALTER`/`DROP` sobre las
+bases (en `ProcessingStack`), y el rol de analista un grant **por LF-Tag**. Antes era
+opt-in precisamente porque sin esos grants los crawlers del propio proyecto se
+quedaban sin poder crear tablas.
+
+Para volver atrás: `-c lfStrictMode=false`.
+
+### Rol de analista
+
+Se crea `{{ project_slug }}-<env>-analyst`, asumible por
+**{{ analyst_principal_arn }}** (vacío = cuenta root, acótalo). Puede usar el
+WorkGroup de Athena, leer el catálogo y sus propios resultados — pero el acceso a los
+DATOS lo da Lake Formation, no IAM: un grant por expresión de LF-Tag que excluye la
+clasificación más sensible. Como es una expresión sobre tags y no una lista de tablas,
+una tabla nueva queda cubierta sin tocar IaC.
+
+Las bases quedan etiquetadas con `dominio_<env>` y `sensibilidad_<env>` por defecto:
+Raw y Clean con la clasificación **más restrictiva** (en Raw todavía no se sabe qué
+contiene, así que se asume lo peor) y Curated con la más abierta. Refina a nivel de
+tabla y columna desde SageMaker Studio o con más `CfnTagAssociation`.
 
 ## Post-generación
 
@@ -228,15 +335,28 @@ comportamiento por defecto.
 3. Habilitar el SFTP Connector en `environments.ts` con `url` **y**
    `trustedHostKeys` (`ssh-keyscan <host>`). Falta cualquiera de las dos y el
    synth falla con un mensaje explícito.
-4. Completar la lógica TODO en las Lambdas (`lambda/`) y scripts Glue (`glue/jobs/`).
-5. Otorgar permisos FGAC (LF-Tags → roles analistas) desde SageMaker Studio o
-   con `CfnPrincipalPermissions`.
+4. **Cargar las fuentes y tablas en DynamoDB** e implementar `transform()` y
+   `build_model()` (ver "El pipeline de datos"). Hasta que haya items activos los
+   jobs corren y terminan sin hacer nada, lo cual es intencional.
+5. Acotar el trust del rol de analista si dejaste `analyst_principal_arn` vacío, y
+   refinar los LF-Tags a nivel de tabla/columna.
 6. Enganchar el proceso de archivado a la Archive Zone: el rol de Glue ya tiene
-   permiso de escritura, pero **ningún job escribe ahí por defecto** — define tú
-   qué se archiva y cuándo.
+   permiso de escritura (solo `PutObject`, **no** borrado), pero **ningún job escribe
+   ahí por defecto** — define tú qué se archiva y cuándo.
 7. Si `enableVpc=true`: asociar los recursos a la VPC (ver la sección Red).
 8. Activar los tags en Billing → Cost allocation tags (ver Etiquetado). Sin esto
    Cost Explorer no puede agrupar por ellos.
+9. Configurar `AWS_DEPLOY_ROLE_ARN` y `AWS_REGION` en el repo de GitHub si quieres
+   el `cdk diff` de CI (ver "Integración continua").
+10. **Fijar retención a los log groups de Glue**, que el servicio crea en runtime y
+    quedan sin expiración. Deliberadamente no se administran desde este stack: son
+    compartidos a nivel de cuenta entre todos los workloads Glue, así que fijarlos
+    desde acá decidiría sobre los logs de otros proyectos. Es una tarea de cuenta:
+    ```bash
+    for g in /aws-glue/jobs/output /aws-glue/jobs/error /aws-glue/crawlers; do
+      aws logs put-retention-policy --log-group-name $g --retention-in-days {{ log_retention_days }}
+    done
+    ```
 
 ## Notas de mantención
 
@@ -255,17 +375,30 @@ comportamiento por defecto.
 ## Prácticas aplicadas
 
 Config tipada por ambiente con cuenta AWS por ambiente; sin nombres físicos de
-buckets (evita colisiones); cifrado E2E KMS con CMK en
-S3/DynamoDB/SNS/SQS/Secrets/Glue/Logs; mínimo privilegio (grants por prefijo y
-recurso, sin managed policies amplias); SSL forzado y BlockPublicAccess en todos
-los buckets; bucket keys para reducir costo KMS; DLQs, alarmas y reintentos; Step
-Functions con backoff exponencial; CloudTrail con validación de integridad;
-etiquetado transversal para asignación de costos; cdk-nag (AWS Solutions) como
-gate real; tests CDK assertions.
+buckets (evita colisiones); mínimo privilegio (grants por prefijo y recurso, sin
+managed policies amplias); SSL forzado y BlockPublicAccess en todos los buckets;
+bucket keys para reducir costo KMS; gate de calidad con cuarentena; cargas
+idempotentes (partición dinámica y `MERGE INTO`, no `append`); mantenimiento
+automático de Iceberg; FGAC de Lake Formation efectivo, no declarativo; Object Lock
+en las zonas de retención; Step Functions con backoff exponencial; alarmas que cubren
+también la ausencia de ejecuciones; CloudTrail multi-región con validación de
+integridad y alarmas sobre su contenido; etiquetado transversal para asignación de
+costos; cdk-nag (AWS Solutions) como gate real en los 4 ambientes; 109 tests de
+infraestructura.
+
+**Cifrado con CMK** en S3 (las 5 zonas + resultados de Athena), DynamoDB, SNS, SQS,
+Secrets Manager, Glue (datos, bookmarks y logs) y los log groups del proyecto. Dos
+excepciones deliberadas, ambas SSE-S3 y comentadas en el código: el bucket de access
+logs y el del trail — S3 solo admite SSE-S3 como destino de server access logs, y para
+CloudTrail es lo que AWS recomienda para no acoplar la data key a la auditoría.
+
+**DLQ y alarmas de ingesta** existen en el stack `ingestion`, que es opcional: con
+`enable_ingestion_lambdas=false` el proyecto queda con las alarmas de pipeline,
+cuarentena, Glue y trail, pero sin DLQ.
 
 ## Migración desde una versión anterior del template
 
-Si regeneras un proyecto **ya desplegado**, tres cambios no son retrocompatibles:
+Si regeneras un proyecto **ya desplegado**, estos cambios no son retrocompatibles:
 
 1. **`staging` → `stg`** y se agrega `qa`. Cambian los nombres de stack
    (`proj-staging-*` → `proj-stg-*`) y de las bases Glue
@@ -281,5 +414,15 @@ Si regeneras un proyecto **ya desplegado**, tres cambios no son retrocompatibles
 3. **Claves de LF-Tag sufijadas** (`dominio` → `dominio_<ambiente>`). Hay que
    actualizar los `CfnPrincipalPermissions` y los grants hechos desde SageMaker
    Studio.
+4. **Object Lock es IRREVERSIBLE** y solo se puede habilitar al CREAR el bucket. Un
+   proyecto ya desplegado necesita un bucket nuevo y migrar los objetos; CloudFormation
+   no puede activarlo sobre el existente. Si prefieres postergarlo, genera con
+   `enable_object_lock=false`.
+5. **`lfStrictMode` pasa a `true` por defecto.** Un lake existente cuyos permisos se
+   apoyaban en `IAMAllowedPrincipals` deja de funcionar hasta que los principals
+   tengan grants explícitos de Lake Formation. Despliega con `-c lfStrictMode=false`
+   primero, otorga los grants, y recién entonces activa el modo estricto.
+6. **La Archive Zone pierde permiso de borrado** (`grantWrite` → `grantPut`). Si algún
+   proceso tuyo borraba objetos ahí con el rol de Glue, dejará de poder.
 
 Para proyectos nuevos nada de esto aplica.

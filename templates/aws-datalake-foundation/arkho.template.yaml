@@ -168,6 +168,82 @@ parameters:
     minimum: 0
     maximum: 99
 
+  - name: enable_object_lock
+    type: choice
+    prompt: "Enable S3 Object Lock (WORM) on the Archive and audit-trail buckets?"
+    description: >
+      Required if you claim regulatory retention. GOVERNANCE mode, so a principal with
+      s3:BypassGovernanceRetention can still correct mistakes. The default retention rule
+      is applied only in environments that do not auto-delete objects (i.e. not dev).
+      IRREVERSIBLE: Object Lock can only be enabled when a bucket is created and can
+      never be turned off.
+    default: "true"
+    choices:
+      - { value: "true", label: "Yes" }
+      - { value: "false", label: "No" }
+
+  - name: quarantine_retention_days
+    type: integer
+    prompt: "Days to keep rejected records in the Quarantine zone?"
+    description: >
+      Rows that fail the data-quality gate are written to the Quarantine zone with the
+      reason for rejection, instead of being silently dropped or crashing the job.
+    default: 30
+    minimum: 1
+    maximum: 3650
+
+  - name: quarantine_alarm_threshold
+    type: integer
+    prompt: "Rejected rows per pipeline run that should raise an alarm?"
+    description: >
+      Above this, the SNS alert fires. Without it the Quarantine zone is a pit nobody
+      looks into.
+    default: 100
+    minimum: 1
+    maximum: 10000000
+
+  - name: iceberg_snapshot_retention_days
+    type: integer
+    prompt: "Days of Iceberg snapshot history to retain? (time-travel window)"
+    description: >
+      The weekly maintenance job expires snapshots older than this and compacts small
+      files. Without maintenance an Iceberg table degrades: metadata grows without bound
+      and queries slow down.
+    default: 7
+    minimum: 1
+    maximum: 365
+
+  - name: log_retention_days
+    type: integer
+    prompt: "CloudWatch log retention in days for the default environment?"
+    description: >
+      Applied per environment in lib/config/environments.ts (prod defaults higher).
+      Must be a value CloudWatch accepts (1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180,
+      365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288, 3653).
+    default: 30
+    minimum: 1
+    maximum: 3653
+
+  - name: analyst_principal_arn
+    type: string
+    prompt: "IAM principal ARN allowed to assume the analyst role? (blank = account root)"
+    description: >
+      The analyst role gets Lake Formation SELECT on non-PII data plus use of the Athena
+      workgroup. Leave blank to trust the account root and restrict it later.
+    default: ""
+    pattern: "^(arn:aws[a-z-]*:iam::[0-9]{12}:(root|user/.+|role/.+))?$"
+    patternHint: "an IAM user or role ARN, e.g. arn:aws:iam::123456789012:role/analysts (or blank)"
+
+  - name: oidc_role_arn
+    type: string
+    prompt: "IAM role ARN for the GitHub Actions OIDC deploy role? (blank = CI runs read-only checks)"
+    description: >
+      Used by the generated .github/workflows/ci.yml. Blank still runs build, test and
+      nag; cdk diff needs credentials so it is skipped without a role.
+    default: ""
+    pattern: "^(arn:aws[a-z-]*:iam::[0-9]{12}:role/.+)?$"
+    patternHint: "an IAM role ARN, e.g. arn:aws:iam::123456789012:role/gha-deploy (or blank)"
+
   - name: lf_tag_domains
     type: string
     prompt: "Lake Formation 'dominio' tag values? (comma-separated business domains)"

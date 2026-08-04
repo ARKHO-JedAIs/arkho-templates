@@ -46,6 +46,14 @@ export const UNTAGGABLE_TYPES: readonly string[] = [
   'AWS::LakeFormation::Tag',
   'AWS::LakeFormation::Resource',
   'AWS::LakeFormation::DataLakeSettings',
+  'AWS::LakeFormation::PrincipalPermissions',
+  'AWS::LakeFormation::TagAssociation',
+  // Un metric filter es configuración de su log group (que sí lleva tags), no un
+  // recurso independiente: el schema CFN no expone Tags.
+  'AWS::Logs::MetricFilter',
+  // La API de EventBridge Scheduler admite tags, pero el recurso CloudFormation
+  // AWS::Scheduler::Schedule no expone la propiedad.
+  'AWS::Scheduler::Schedule',
   // Políticas y recursos accesorios.
   'AWS::IAM::Policy',
   'AWS::S3::BucketPolicy',
@@ -60,9 +68,11 @@ export const UNTAGGABLE_TYPES: readonly string[] = [
   'AWS::EC2::Route',
   'AWS::EC2::SubnetRouteTableAssociation',
   'AWS::EC2::VPCGatewayAttachment',
-  // Generados por CDK, no por este código.
+  // Generados por CDK, no por este código. Son invocaciones de custom resources:
+  // la Lambda que las atiende sí lleva tags, el nodo de invocación no.
   'AWS::CDK::Metadata',
   'Custom::S3AutoDeleteObjects',
+  'Custom::LogRetention',
 ];
 
 /**

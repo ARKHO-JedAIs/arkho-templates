@@ -1,4 +1,5 @@
 import { RemovalPolicy } from 'aws-cdk-lib';
+import * as logs from 'aws-cdk-lib/aws-logs';
 
 export type EnvName = 'dev' | 'qa' | 'stg' | 'prod';
 
@@ -44,6 +45,14 @@ export interface DatalakeConfig {
   readonly athenaBytesCutoff: number;
   /** Email para alertas operacionales (SNS). */
   readonly alertEmail: string;
+  /** Días de retención de los logs en CloudWatch. */
+  readonly logRetentionDays: number;
+  /** Días que los registros rechazados permanecen en la Quarantine Zone. */
+  readonly quarantineRetentionDays: number;
+  /** Filas rechazadas por corrida a partir de las cuales se alarma. */
+  readonly quarantineAlarmThreshold: number;
+  /** Ventana de time-travel de Iceberg: snapshots más viejos se expiran. */
+  readonly icebergSnapshotRetentionDays: number;
   readonly sftp: SftpConfig;
 }
 
@@ -51,6 +60,17 @@ const GIB = 1024 * 1024 * 1024;
 
 /** Zonas del lake que tienen base de datos en el Glue Data Catalog. */
 export type CatalogZone = 'raw' | 'clean' | 'curated';
+
+/** Todas las zonas catalogadas, en orden de flujo. */
+export const CATALOG_ZONES: readonly CatalogZone[] = ['raw', 'clean', 'curated'];
+
+/**
+ * Namespace de las métricas custom que publican los jobs Glue (filas procesadas,
+ * filas en cuarentena). Compartido entre el job que las publica y las alarmas que
+ * las consumen: si se separan, la alarma queda mirando un namespace vacío para
+ * siempre y nadie se entera.
+ */
+export const METRIC_NAMESPACE = '{{ project_slug }}/datalake';
 
 /**
  * Nombre de la base de datos Glue de una zona. Fuente única de verdad:
@@ -63,6 +83,29 @@ export function catalogDb(cfg: DatalakeConfig, zone: CatalogZone): string {
 
 const csv = (value: string): string[] =>
   value.split(',').map((s) => s.trim()).filter(Boolean);
+
+/**
+ * Principal autorizado a asumir el rol de analista. Vacío = cuenta root, que se
+ * documenta como punto de partida a acotar.
+ */
+export const ANALYST_PRINCIPAL_ARN = '{{ analyst_principal_arn }}'.trim();
+
+/**
+ * Convierte días a un `RetentionDays` válido.
+ *
+ * CloudWatch solo acepta un conjunto discreto de valores; cualquier otro número lo
+ * rechaza en el deploy, no en el synth. Se redondea hacia ARRIBA al valor permitido
+ * más cercano: quedarse corto en retención de auditoría es peor que pasarse.
+ */
+export function logRetention(cfg: DatalakeConfig): logs.RetentionDays {
+  const allowed = [
+    1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731,
+    1096, 1827, 2192, 2557, 2922, 3288, 3653,
+  ];
+  const days = cfg.logRetentionDays;
+  const match = allowed.find((v) => v >= days) ?? allowed[allowed.length - 1];
+  return match as logs.RetentionDays;
+}
 
 /** Valores del LF-Tag `dominio` (taxonomía de negocio). */
 export const LF_TAG_DOMAINS: string[] = csv('{{ lf_tag_domains }}');
@@ -113,6 +156,10 @@ export const ENVIRONMENTS: Record<EnvName, DatalakeConfig> = {
     glueMaxWorkers: 3,
     athenaBytesCutoff: 5 * GIB,
     alertEmail: '{{ admin_email }}',
+    logRetentionDays: {{ log_retention_days }},
+    quarantineRetentionDays: {{ quarantine_retention_days }},
+    quarantineAlarmThreshold: {{ quarantine_alarm_threshold }},
+    icebergSnapshotRetentionDays: {{ iceberg_snapshot_retention_days }},
     sftp: { enabled: false },
   },
   qa: {
@@ -130,6 +177,10 @@ export const ENVIRONMENTS: Record<EnvName, DatalakeConfig> = {
     glueMaxWorkers: 3,
     athenaBytesCutoff: 5 * GIB,
     alertEmail: '{{ admin_email }}',
+    logRetentionDays: {{ log_retention_days }},
+    quarantineRetentionDays: {{ quarantine_retention_days }},
+    quarantineAlarmThreshold: {{ quarantine_alarm_threshold }},
+    icebergSnapshotRetentionDays: {{ iceberg_snapshot_retention_days }},
     sftp: { enabled: false },
   },
   // `stg` y `qa` son idénticos salvo el nombre y la cuenta: el endurecimiento
@@ -151,6 +202,10 @@ export const ENVIRONMENTS: Record<EnvName, DatalakeConfig> = {
     glueMaxWorkers: 3,
     athenaBytesCutoff: 5 * GIB,
     alertEmail: '{{ admin_email }}',
+    logRetentionDays: {{ log_retention_days }},
+    quarantineRetentionDays: {{ quarantine_retention_days }},
+    quarantineAlarmThreshold: {{ quarantine_alarm_threshold }},
+    icebergSnapshotRetentionDays: {{ iceberg_snapshot_retention_days }},
     sftp: { enabled: false },
   },
   prod: {
@@ -168,6 +223,12 @@ export const ENVIRONMENTS: Record<EnvName, DatalakeConfig> = {
     glueMaxWorkers: 5,
     athenaBytesCutoff: 10 * GIB,
     alertEmail: '{{ admin_email }}',
+    // Prod nunca baja de un año de logs, sin importar lo respondido en la
+    // generación: por debajo de eso no se sostiene una auditoría.
+    logRetentionDays: Math.max({{ log_retention_days }}, 365),
+    quarantineRetentionDays: {{ quarantine_retention_days }},
+    quarantineAlarmThreshold: {{ quarantine_alarm_threshold }},
+    icebergSnapshotRetentionDays: {{ iceberg_snapshot_retention_days }},
     sftp: {
       // Habilitar requiere `url` Y `trustedHostKeys` (obtenlas con
       // `ssh-keyscan <host>`); el stack falla en synth si falta alguna.
