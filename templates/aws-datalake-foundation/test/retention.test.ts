@@ -1,8 +1,7 @@
 import * as cdk from 'aws-cdk-lib';
 import { Template } from 'aws-cdk-lib/assertions';
 import { DatalakeConfig, getConfig } from '../lib/config/environments';
-import { SecurityStack } from '../lib/stacks/security-stack';
-import { StorageStack } from '../lib/stacks/storage-stack';
+import { buildStacks } from './helpers';
 
 /**
  * Las dos ramas de retención (activada / desactivada con 0) se prueban con
@@ -16,15 +15,8 @@ const withRetention = (
   archiveRetentionYears: number,
 ): DatalakeConfig => ({ ...base, rawTransitionDays, archiveRetentionYears });
 
-const synth = (id: string, cfg: DatalakeConfig): Template => {
-  const app = new cdk.App();
-  const env = { account: cfg.account, region: cfg.region };
-  const security = new SecurityStack(app, `${id}Sec`, { env, config: cfg });
-  const storage = new StorageStack(app, `${id}Sto`, {
-    env, config: cfg, dataKey: security.dataKey,
-  });
-  return Template.fromStack(storage);
-};
+const synth = (id: string, cfg: DatalakeConfig): Template =>
+  Template.fromStack(buildStacks(id, cfg).storage);
 
 const bucketByPrefix = (t: Template, prefix: string) => {
   const buckets = t.findResources('AWS::S3::Bucket');

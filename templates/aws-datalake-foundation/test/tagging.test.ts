@@ -1,6 +1,6 @@
-import * as cdk from 'aws-cdk-lib';
 import { Template } from 'aws-cdk-lib/assertions';
 import { ENVIRONMENTS, EnvName, getConfig } from '../lib/config/environments';
+import { buildEnv } from './helpers';
 import {
   BASE_TAG_KEYS,
   UNTAGGABLE_TYPES,
@@ -10,13 +10,6 @@ import {
   parseExtraTags,
   sanitizeTagValue,
 } from '../lib/config/tags';
-import { SecurityStack } from '../lib/stacks/security-stack';
-import { StorageStack } from '../lib/stacks/storage-stack';
-import { GovernanceStack } from '../lib/stacks/governance-stack';
-import { ProcessingStack } from '../lib/stacks/processing-stack';
-import { IngestionStack } from '../lib/stacks/ingestion-stack';
-import { ConsumptionStack } from '../lib/stacks/consumption-stack';
-import { ObservabilityStack } from '../lib/stacks/observability-stack';
 
 /**
  * Ningún test acá puede afirmar sobre el VALOR bakeado de `extra_tags` o
@@ -138,50 +131,11 @@ const readTags = (props: Record<string, unknown>): Record<string, string> | unde
 };
 
 describe('cobertura de tags en los recursos sintetizados', () => {
-  const cfg = getConfig('dev');
   const EXTRAS = { 'cost-center': '1234', team: 'data' };
-  const app = new cdk.App();
-  const env = { account: cfg.account, region: cfg.region };
-
-  const security = new SecurityStack(app, 'Sec', { env, config: cfg });
-  const storage = new StorageStack(app, 'Sto', { env, config: cfg, dataKey: security.dataKey });
-  const governance = new GovernanceStack(app, 'Gov', {
-    env,
-    config: cfg,
-    rawBucket: storage.rawBucket,
-    cleanBucket: storage.cleanBucket,
-    curatedBucket: storage.curatedBucket,
-  });
-  const processing = new ProcessingStack(app, 'Proc', {
-    env,
-    config: cfg,
-    rawBucket: storage.rawBucket,
-    cleanBucket: storage.cleanBucket,
-    curatedBucket: storage.curatedBucket,
-    archiveBucket: storage.archiveBucket,
-    dataKey: security.dataKey,
-    opsKey: security.opsKey,
-    alertsTopic: security.alertsTopic,
-  });
-  const ingestion = new IngestionStack(app, 'Ing', {
-    env,
-    config: cfg,
-    rawBucket: storage.rawBucket,
-    dataKey: security.dataKey,
-    opsKey: security.opsKey,
-    alertsTopic: security.alertsTopic,
-  });
-  const consumption = new ConsumptionStack(app, 'Con', {
-    env,
-    config: cfg,
-    athenaResultsBucket: storage.athenaResultsBucket,
-    dataKey: security.dataKey,
-  });
-  const observability = new ObservabilityStack(app, 'Obs', {
-    env,
-    config: cfg,
-    dataBuckets: [storage.rawBucket, storage.cleanBucket, storage.curatedBucket],
-  });
+  const {
+    app, cfg, security, storage, governance,
+    processing, ingestion, consumption, observability,
+  } = buildEnv('Tag', 'dev');
 
   // Debe correr ANTES del primer Template.fromStack: esa llamada sintetiza y
   // ejecuta los aspectos, incluido el que aplica los tags.

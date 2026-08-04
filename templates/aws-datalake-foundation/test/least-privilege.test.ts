@@ -1,41 +1,12 @@
-import * as cdk from 'aws-cdk-lib';
 import { Template } from 'aws-cdk-lib/assertions';
-import { getConfig } from '../lib/config/environments';
-import { SecurityStack } from '../lib/stacks/security-stack';
-import { StorageStack } from '../lib/stacks/storage-stack';
-import { ProcessingStack } from '../lib/stacks/processing-stack';
-import { IngestionStack } from '../lib/stacks/ingestion-stack';
+import { buildEnv } from './helpers';
 
 /**
  * Guardas de mínimo privilegio. Los grants de IAM son fáciles de ampliar por
  * accidente en un refactor y el efecto no se nota hasta una auditoría.
  */
 describe('mínimo privilegio en roles', () => {
-  const app = new cdk.App();
-  const cfg = getConfig('dev');
-  const env = { account: cfg.account, region: cfg.region };
-
-  const security = new SecurityStack(app, 'Sec', { env, config: cfg });
-  const storage = new StorageStack(app, 'Sto', { env, config: cfg, dataKey: security.dataKey });
-  const processing = new ProcessingStack(app, 'Proc', {
-    env,
-    config: cfg,
-    rawBucket: storage.rawBucket,
-    cleanBucket: storage.cleanBucket,
-    curatedBucket: storage.curatedBucket,
-    archiveBucket: storage.archiveBucket,
-    dataKey: security.dataKey,
-    opsKey: security.opsKey,
-    alertsTopic: security.alertsTopic,
-  });
-  const ingestion = new IngestionStack(app, 'Ing', {
-    env,
-    config: cfg,
-    rawBucket: storage.rawBucket,
-    dataKey: security.dataKey,
-    opsKey: security.opsKey,
-    alertsTopic: security.alertsTopic,
-  });
+  const { processing, ingestion } = buildEnv('Lp', 'dev');
 
   const procTemplate = Template.fromStack(processing);
   const ingTemplate = Template.fromStack(ingestion);

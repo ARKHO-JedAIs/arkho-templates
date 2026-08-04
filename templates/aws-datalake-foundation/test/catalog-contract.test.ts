@@ -1,10 +1,6 @@
-import * as cdk from 'aws-cdk-lib';
 import { Template } from 'aws-cdk-lib/assertions';
-import { catalogDb, getConfig } from '../lib/config/environments';
-import { SecurityStack } from '../lib/stacks/security-stack';
-import { StorageStack } from '../lib/stacks/storage-stack';
-import { GovernanceStack } from '../lib/stacks/governance-stack';
-import { ProcessingStack } from '../lib/stacks/processing-stack';
+import { catalogDb } from '../lib/config/environments';
+import { buildEnv } from './helpers';
 
 /**
  * El contrato más frágil del proyecto: los crawlers de ProcessingStack
@@ -15,32 +11,7 @@ import { ProcessingStack } from '../lib/stacks/processing-stack';
  * Estos tests fallan si alguien cambia una de las dos puntas.
  */
 describe('contrato catálogo Glue: governance ↔ processing', () => {
-  const app = new cdk.App();
-  const cfg = getConfig('dev');
-  const env = { account: cfg.account, region: cfg.region };
-
-  const security = new SecurityStack(app, 'TestSecurity', { env, config: cfg });
-  const storage = new StorageStack(app, 'TestStorage', {
-    env, config: cfg, dataKey: security.dataKey,
-  });
-  const governance = new GovernanceStack(app, 'TestGovernance', {
-    env,
-    config: cfg,
-    rawBucket: storage.rawBucket,
-    cleanBucket: storage.cleanBucket,
-    curatedBucket: storage.curatedBucket,
-  });
-  const processing = new ProcessingStack(app, 'TestProcessing', {
-    env,
-    config: cfg,
-    rawBucket: storage.rawBucket,
-    cleanBucket: storage.cleanBucket,
-    curatedBucket: storage.curatedBucket,
-    archiveBucket: storage.archiveBucket,
-    dataKey: security.dataKey,
-    opsKey: security.opsKey,
-    alertsTopic: security.alertsTopic,
-  });
+  const { cfg, governance, processing } = buildEnv('Cc', 'dev');
 
   const govTemplate = Template.fromStack(governance);
   const procTemplate = Template.fromStack(processing);

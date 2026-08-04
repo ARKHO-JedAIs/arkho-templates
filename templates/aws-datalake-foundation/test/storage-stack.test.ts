@@ -1,23 +1,12 @@
-import * as cdk from 'aws-cdk-lib';
 import { Match, Template } from 'aws-cdk-lib/assertions';
-import { getConfig } from '../lib/config/environments';
-import { SecurityStack } from '../lib/stacks/security-stack';
-import { StorageStack } from '../lib/stacks/storage-stack';
+import { buildEnv } from './helpers';
 
 describe('StorageStack', () => {
-  const app = new cdk.App();
-  const cfg = getConfig('dev');
-  const env = { account: cfg.account, region: cfg.region };
-  const security = new SecurityStack(app, 'TestSecurity', { env, config: cfg });
-  const storage = new StorageStack(app, 'TestStorage', {
-    env,
-    config: cfg,
-    dataKey: security.dataKey,
-  });
+  const { cfg, storage } = buildEnv('Test', 'dev');
   const template = Template.fromStack(storage);
 
-  test('crea las 4 zonas + Athena results + access logs (6 buckets)', () => {
-    template.resourceCountIs('AWS::S3::Bucket', 6);
+  test('crea las 5 zonas + Athena results + access logs (7 buckets)', () => {
+    template.resourceCountIs('AWS::S3::Bucket', 7);
   });
 
   test('todos los buckets bloquean acceso público', () => {
