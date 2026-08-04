@@ -3,15 +3,6 @@ import * as logs from 'aws-cdk-lib/aws-logs';
 
 export type EnvName = 'dev' | 'qa' | 'stg' | 'prod';
 
-export interface SftpConfig {
-  /** Habilita el SFTP Connector (requiere `url` y `trustedHostKeys`). */
-  readonly enabled: boolean;
-  /** URL del servidor SFTP origen, ej: sftp://sftp.origen.cl */
-  readonly url?: string;
-  /** Host keys públicas del servidor origen (ssh-keyscan). */
-  readonly trustedHostKeys?: string[];
-}
-
 export interface DatalakeConfig {
   readonly envName: EnvName;
   /**
@@ -29,13 +20,11 @@ export interface DatalakeConfig {
   readonly removalPolicy: RemovalPolicy;
   readonly autoDeleteObjects: boolean;
   readonly terminationProtection: boolean;
-  /** Días antes de transicionar Raw Zone a Glacier Instant Retrieval. */
+  /** Días antes de transicionar Raw Zone a Glacier Instant Retrieval (0 = nunca). */
   readonly rawTransitionDays: number;
-  /** Años de retención en Archive Zone (Glacier) antes de expirar. */
+  /** Años de retención en Archive Zone antes de expirar (0 = indefinida). */
   readonly archiveRetentionYears: number;
-  /** Cron EventBridge de la ingesta por APIs (GA4/Meta). */
-  readonly ingestSchedule: string;
-  /** Cron EventBridge del pipeline Step Functions (posterior a la ingesta). */
+  /** Cron EventBridge del pipeline Step Functions. */
   readonly pipelineSchedule: string;
   /** Cron de los Glue Crawlers (posterior al pipeline). */
   readonly crawlerSchedule: string;
@@ -49,20 +38,25 @@ export interface DatalakeConfig {
   readonly logRetentionDays: number;
   /** Días que los registros rechazados permanecen en la Quarantine Zone. */
   readonly quarantineRetentionDays: number;
-  /** Filas rechazadas por corrida a partir de las cuales se alarma. */
+  /**
+   * Filas rechazadas por corrida a partir de las cuales el pipeline se detiene y
+   * se dispara la alarma. Es un valor ABSOLUTO: en un día de 10 millones de filas
+   * 100 rechazos no lo cortan, y en uno de 10 mil sí. Ajústalo al volumen real.
+   */
   readonly quarantineAlarmThreshold: number;
   /** Ventana de time-travel de Iceberg: snapshots más viejos se expiran. */
   readonly icebergSnapshotRetentionDays: number;
-  readonly sftp: SftpConfig;
 }
 
 const GIB = 1024 * 1024 * 1024;
 
 /** Zonas del lake que tienen base de datos en el Glue Data Catalog. */
-export type CatalogZone = 'raw' | 'clean' | 'curated';
+export type CatalogZone = 'raw' | 'clean' | 'curated' | 'quarantine';
 
 /** Todas las zonas catalogadas, en orden de flujo. */
-export const CATALOG_ZONES: readonly CatalogZone[] = ['raw', 'clean', 'curated'];
+export const CATALOG_ZONES: readonly CatalogZone[] = [
+  'raw', 'clean', 'curated', 'quarantine',
+];
 
 /**
  * Namespace de las métricas custom que publican los jobs Glue (filas procesadas,
@@ -85,10 +79,27 @@ const csv = (value: string): string[] =>
   value.split(',').map((s) => s.trim()).filter(Boolean);
 
 /**
- * Principal autorizado a asumir el rol de analista. Vacío = cuenta root, que se
- * documenta como punto de partida a acotar.
+ * Valores del LF-Tag `dominio` (taxonomía de negocio). Placeholder: reemplázalos
+ * por los dominios reales del cliente.
  */
-export const ANALYST_PRINCIPAL_ARN = '{{ analyst_principal_arn }}'.trim();
+export const LF_TAG_DOMAINS: string[] = csv('{{ lf_tag_domains }}');
+
+/**
+ * Valores del LF-Tag `sensibilidad` (clasificación de datos).
+ *
+ * EL ORDEN ES UN CONTRATO: el primer valor es el MÁS RESTRICTIVO y el último el
+ * más abierto. `GovernanceStack` etiqueta Raw, Clean y Quarantine con el primero,
+ * Curated con el último, y el grant del rol de analista EXCLUYE el primero.
+ * Invertir la lista le daría al analista acceso justo a lo que debe protegerse.
+ */
+export const LF_TAG_SENSITIVITIES: string[] = csv('{{ lf_tag_sensitivities }}');
+
+/** La clasificación más restrictiva. Ver el contrato de orden arriba. */
+export const MOST_RESTRICTIVE_SENSITIVITY = LF_TAG_SENSITIVITIES[0];
+
+/** La clasificación más abierta. */
+export const LEAST_RESTRICTIVE_SENSITIVITY =
+  LF_TAG_SENSITIVITIES[LF_TAG_SENSITIVITIES.length - 1];
 
 /**
  * Convierte días a un `RetentionDays` válido.
@@ -106,12 +117,6 @@ export function logRetention(cfg: DatalakeConfig): logs.RetentionDays {
   const match = allowed.find((v) => v >= days) ?? allowed[allowed.length - 1];
   return match as logs.RetentionDays;
 }
-
-/** Valores del LF-Tag `dominio` (taxonomía de negocio). */
-export const LF_TAG_DOMAINS: string[] = csv('{{ lf_tag_domains }}');
-
-/** Valores del LF-Tag `sensibilidad` (clasificación de datos). */
-export const LF_TAG_SENSITIVITIES: string[] = csv('{{ lf_tag_sensitivities }}');
 
 // ── Resolución de cuentas AWS ────────────────────────────────────────────────
 // El template soporta dos estrategias, elegidas en la generación:
@@ -137,105 +142,64 @@ const DEFAULT_ACCOUNT = '{{ aws_account_id }}';
  */
 const accountOr = (perEnv: string): string => perEnv.trim() || DEFAULT_ACCOUNT;
 
+// ── Configuración por ambiente ───────────────────────────────────────────────
+// Los valores comunes viven en `BASE` y cada ambiente declara SOLO lo que difiere.
+// Antes las 4 entradas repetían los mismos 19 campos y las diferencias reales
+// —que son 6— quedaban escondidas entre el ruido.
+//
+// Todo lo de acá es editable: son tunables operacionales, no se preguntan en la
+// generación justamente para que se ajusten en código y por ambiente.
+
+const BASE = {
+  region: '{{ aws_region }}',
+  rawTransitionDays: {{ raw_retention_days }},
+  archiveRetentionYears: {{ archive_retention_years }},
+  // Horarios en UTC (EventBridge siempre interpreta cron en UTC). El crawler debe
+  // partir DESPUÉS de que el pipeline termine: si tus jobs Glue se acercan al
+  // timeout de 60 min, aleja `crawlerSchedule`.
+  pipelineSchedule: '{{ pipeline_schedule }}',
+  crawlerSchedule: '{{ crawler_schedule }}',
+  alertEmail: '{{ admin_email }}',
+  logRetentionDays: 30,
+  quarantineRetentionDays: 30,
+  quarantineAlarmThreshold: 100,
+  icebergSnapshotRetentionDays: 7,
+  // Endurecimiento por defecto: solo `dev` lo relaja.
+  removalPolicy: RemovalPolicy.RETAIN,
+  autoDeleteObjects: false,
+  terminationProtection: false,
+  glueMaxWorkers: 3,
+  athenaBytesCutoff: 5 * GIB,
+} as const;
+
 export const ENVIRONMENTS: Record<EnvName, DatalakeConfig> = {
   dev: {
+    ...BASE,
     envName: 'dev',
     account: DEFAULT_ACCOUNT,
-    region: '{{ aws_region }}',
+    // Único ambiente donde `cdk destroy` se lleva los datos.
     removalPolicy: RemovalPolicy.DESTROY,
     autoDeleteObjects: true,
-    terminationProtection: false,
-    rawTransitionDays: {{ raw_retention_days }},
-    archiveRetentionYears: {{ archive_retention_years }},
-    // Horarios en UTC (EventBridge siempre interpreta cron en UTC).
-    // El crawler debe partir DESPUÉS de que el pipeline termine: si tus jobs
-    // Glue se acercan al timeout de 60 min, aleja `crawlerSchedule`.
-    ingestSchedule: '{{ ingest_schedule }}',
-    pipelineSchedule: '{{ pipeline_schedule }}',
-    crawlerSchedule: '{{ crawler_schedule }}',
-    glueMaxWorkers: 3,
-    athenaBytesCutoff: 5 * GIB,
-    alertEmail: '{{ admin_email }}',
-    logRetentionDays: {{ log_retention_days }},
-    quarantineRetentionDays: {{ quarantine_retention_days }},
-    quarantineAlarmThreshold: {{ quarantine_alarm_threshold }},
-    icebergSnapshotRetentionDays: {{ iceberg_snapshot_retention_days }},
-    sftp: { enabled: false },
   },
   qa: {
+    ...BASE,
     envName: 'qa',
     account: accountOr('{{ aws_account_id_qa }}'),
-    region: '{{ aws_region }}',
-    removalPolicy: RemovalPolicy.RETAIN,
-    autoDeleteObjects: false,
-    terminationProtection: false,
-    rawTransitionDays: {{ raw_retention_days }},
-    archiveRetentionYears: {{ archive_retention_years }},
-    ingestSchedule: '{{ ingest_schedule }}',
-    pipelineSchedule: '{{ pipeline_schedule }}',
-    crawlerSchedule: '{{ crawler_schedule }}',
-    glueMaxWorkers: 3,
-    athenaBytesCutoff: 5 * GIB,
-    alertEmail: '{{ admin_email }}',
-    logRetentionDays: {{ log_retention_days }},
-    quarantineRetentionDays: {{ quarantine_retention_days }},
-    quarantineAlarmThreshold: {{ quarantine_alarm_threshold }},
-    icebergSnapshotRetentionDays: {{ iceberg_snapshot_retention_days }},
-    sftp: { enabled: false },
   },
-  // `stg` y `qa` son idénticos salvo el nombre y la cuenta: el endurecimiento
-  // real (protección de terminación, más workers, cutoff mayor) ocurre en `prod`.
-  // Si quieres ensayos de performance representativos en stg, súbele
-  // glueMaxWorkers y athenaBytesCutoff a los valores de prod — duplica su costo Glue.
   stg: {
+    ...BASE,
     envName: 'stg',
     account: accountOr('{{ aws_account_id_stg }}'),
-    region: '{{ aws_region }}',
-    removalPolicy: RemovalPolicy.RETAIN,
-    autoDeleteObjects: false,
-    terminationProtection: false,
-    rawTransitionDays: {{ raw_retention_days }},
-    archiveRetentionYears: {{ archive_retention_years }},
-    ingestSchedule: '{{ ingest_schedule }}',
-    pipelineSchedule: '{{ pipeline_schedule }}',
-    crawlerSchedule: '{{ crawler_schedule }}',
-    glueMaxWorkers: 3,
-    athenaBytesCutoff: 5 * GIB,
-    alertEmail: '{{ admin_email }}',
-    logRetentionDays: {{ log_retention_days }},
-    quarantineRetentionDays: {{ quarantine_retention_days }},
-    quarantineAlarmThreshold: {{ quarantine_alarm_threshold }},
-    icebergSnapshotRetentionDays: {{ iceberg_snapshot_retention_days }},
-    sftp: { enabled: false },
   },
   prod: {
+    ...BASE,
     envName: 'prod',
     account: accountOr('{{ aws_account_id_prod }}'),
-    region: '{{ aws_region }}',
-    removalPolicy: RemovalPolicy.RETAIN,
-    autoDeleteObjects: false,
     terminationProtection: true,
-    rawTransitionDays: {{ raw_retention_days }},
-    archiveRetentionYears: {{ archive_retention_years }},
-    ingestSchedule: '{{ ingest_schedule }}',
-    pipelineSchedule: '{{ pipeline_schedule }}',
-    crawlerSchedule: '{{ crawler_schedule }}',
     glueMaxWorkers: 5,
     athenaBytesCutoff: 10 * GIB,
-    alertEmail: '{{ admin_email }}',
-    // Prod nunca baja de un año de logs, sin importar lo respondido en la
-    // generación: por debajo de eso no se sostiene una auditoría.
-    logRetentionDays: Math.max({{ log_retention_days }}, 365),
-    quarantineRetentionDays: {{ quarantine_retention_days }},
-    quarantineAlarmThreshold: {{ quarantine_alarm_threshold }},
-    icebergSnapshotRetentionDays: {{ iceberg_snapshot_retention_days }},
-    sftp: {
-      // Habilitar requiere `url` Y `trustedHostKeys` (obtenlas con
-      // `ssh-keyscan <host>`); el stack falla en synth si falta alguna.
-      enabled: false,
-      // url: 'sftp://sftp.example.com',
-      // trustedHostKeys: ['ssh-rsa AAAA...'],
-    },
+    // Prod nunca baja de un año de logs: por debajo no se sostiene una auditoría.
+    logRetentionDays: 365,
   },
 };
 

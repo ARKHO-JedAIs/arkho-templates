@@ -1,10 +1,16 @@
 # {{ client_name }} — AWS Data Lake Foundation (CDK v2, TypeScript)
 
 Foundational AWS Data Lake as Infrastructure as Code. Serverless architecture:
-4 S3 zones (Raw / Clean / Curated in Apache Iceberg / Archive in Glacier),
-Glue ETL orchestrated by Step Functions, native governance with Lake Formation +
-Glue Data Catalog, KMS encryption end-to-end, CloudTrail auditing for compliance,
-and optional VPC isolation.
+5 S3 zones (Raw / Clean / Curated in Apache Iceberg / Archive in Glacier /
+Quarantine), a generic Glue ETL skeleton orchestrated by Step Functions, enforced
+governance with Lake Formation + Glue Data Catalog, KMS encryption end-to-end,
+multi-region CloudTrail auditing, and optional VPC isolation.
+
+> **La ingesta no viene incluida, a propósito.** Varía demasiado entre proyectos
+> (API de terceros, SFTP, DMS, Kinesis, un job on-premise) para que una
+> implementación concreta sirva de algo: sería código que borras. Lo que sí trae el
+> template es el **rol de escritura** de la Raw Zone y el **contrato de layout** —
+> ver "Cómo entran los datos".
 
 ## Stacks
 
@@ -13,9 +19,8 @@ and optional VPC isolation.
 | `network` | opcional (`enableVpc=true`) | VPC, subnets privadas, NAT Gateway, flow logs, gateway endpoint S3, interface endpoints Glue + Secrets Manager. **Building block: no se le asocia ningún recurso automáticamente** (ver más abajo) |
 | `security` | siempre | 2 KMS CMKs (data / ops), SNS topic de alertas |
 | `storage` | siempre | S3: Raw (lifecycle → Glacier IR a {{ raw_retention_days }}d), Clean, Curated, Archive (Glacier IR + Object Lock), **Quarantine**, Athena results, access logs. Retención configurable (0 = desactivada) |
-| `governance` | siempre | Glue Databases por zona, LF-Tags **asociados a las bases**, registro Lake Formation de las 4 zonas, **rol de analista con grant por LF-Tag** |
-| `ingestion` | opcional (`enableIngestionLambdas=true`) | Lambdas (Node 24, ARM64), Secrets Manager, DLQ + alarmas SNS, schedules EventBridge, SFTP Connector opcional |
-| `processing` | siempre | Glue Jobs Python (auto-scaling, SSE-KMS, bookmarks reales), **gate de calidad + cuarentena**, **mantenimiento Iceberg semanal**, 3 Crawlers, DynamoDB config, Step Functions con reintentos + alarmas SNS |
+| `governance` | siempre | Glue Databases por zona, LF-Tags **asociados a las bases**, registro Lake Formation de las 4 zonas de datos, **rol de analista con grant por LF-Tag** |
+| `processing` | siempre | Glue Jobs Python (auto-scaling, SSE-KMS, bookmarks reales), **gate de calidad + cuarentena**, **mantenimiento Iceberg semanal** (bloque desacoplable), 4 Crawlers, DynamoDB config, Step Functions con reintentos + alarmas SNS |
 | `consumption` | siempre | Athena WorkGroup (config forzada, bytes-scanned cutoff, resultados cifrados) |
 | `observability` | siempre | CloudTrail multi-región con data events + salida a CloudWatch Logs, alarmas sobre el trail, **alarma de "el pipeline no corrió"**, alarmas de Glue por EventBridge, **dashboard** |
 
@@ -104,7 +109,7 @@ parámetros claves ya fueron bakeados en la generación (aplicados a los 4 ambie
 - LF-Tag `dominio_<ambiente>`: **{{ lf_tag_domains }}**
 - LF-Tag `sensibilidad_<ambiente>`: **{{ lf_tag_sensitivities }}**
 - Tag `Owner`: **{{ tag_owner }}** · Tags extra: **{{ extra_tags }}**
-- Ingesta: `{{ ingest_schedule }}` · Pipeline: `{{ pipeline_schedule }}` · Crawlers: `{{ crawler_schedule }}` (todos en UTC)
+- Pipeline: `{{ pipeline_schedule }}` · Crawlers: `{{ crawler_schedule }}` (ambos en UTC)
 
 > Los crons de EventBridge son **siempre UTC**, no la zona local. Y el crawler
 > debe partir después de que el pipeline termine: si tus Glue Jobs se acercan al
@@ -112,8 +117,9 @@ parámetros claves ya fueron bakeados en la generación (aplicados a los 4 ambie
 > escritura puede inferir el esquema de datos parciales.
 
 Nombres de recursos: prefijo `{{ project_slug }}-<env>`.
-Bases de datos Glue: `{{ catalog_prefix }}_<env>_<zona>` (fórmula única en
-`catalogDb()` de `environments.ts`: la usan tanto las bases como los crawlers).
+Bases de datos Glue: `{{ catalog_prefix }}_<env>_<zona>` para `raw`, `clean`,
+`curated` y `quarantine`. La fórmula vive en `catalogDb()` de `environments.ts`: la
+usan tanto las bases como los crawlers, así que no pueden divergir.
 
 ## Etiquetado (tags)
 
@@ -171,6 +177,36 @@ actives en Billing → Cost allocation tags (desde la cuenta pagadora; tarda has
 24 h en aparecer). Sin ese paso, todo el propósito FinOps del etiquetado queda sin
 efecto.
 
+## Cómo entran los datos (la ingesta la traes tú)
+
+El template **no** implementa ingesta. Lo que entrega es el permiso y el contrato:
+
+**El rol.** `{{ project_slug }}-<env>-ingest-writer`, cuyo ARN queda en el output
+`IngestWriterRoleArn` del stack `storage`. Tu proceso lo asume y puede hacer
+`PutObject` en la Raw Zone y usar la CMK — **nada más**: no tiene permiso de borrado,
+porque un productor no debería poder eliminar lo que ya aterrizó.
+
+Por defecto lo asume la cuenta root; acótalo al principal real con
+`-c ingestPrincipalArn=arn:aws:iam::<cuenta>:role/<tu-proceso>`.
+
+**El layout.** El ETL espera:
+
+```
+s3://<raw-bucket>/<fuente>/dt=YYYY-MM-DD/<archivo>
+```
+
+`<fuente>` es lo que registras como `raw_prefix` en la tabla de configuración, y `dt=`
+es la partición. Formatos soportados sin tocar código: JSON/NDJSON, CSV y Parquet.
+
+Cualquier cosa que hable S3 sirve como productor: un job propio, DMS, Kinesis Data
+Firehose, AppFlow, Transfer Family, o un script en un servidor. Si necesitas alcanzar
+una red privada, habilita el stack `network` (ver Red).
+
+> El pipeline corre por cron (`pipelineSchedule`), no por evento. Si quieres
+> dispararlo cuando llega un objeto, habilita EventBridge en el bucket Raw y apunta
+> una regla a la máquina de estados — son dos líneas y queda a tu criterio, porque
+> depende de si tu ingesta deja un archivo o cientos.
+
 ## El pipeline de datos: qué ya funciona y qué te toca escribir
 
 La **mecánica de plataforma está completa y funcionando**. Lo único que falta es la
@@ -181,7 +217,7 @@ lógica de tu negocio, en dos funciones marcadas:
 | Lectura incremental con bookmarks reales (`transformation_ctx`), agrupación de archivos chicos | `transform(df, source)` en `glue/jobs/raw_to_clean.py` |
 | Gate de calidad con `EvaluateDataQuality`, ruteo de rechazos a cuarentena con su causa | `build_model(sources, table)` en `glue/jobs/clean_to_curated.py` |
 | Escritura Parquet+Snappy particionada, idempotente (partición dinámica, no `append`) | Las reglas DQDL por fuente (hay un ruleset base si no defines) |
-| DDL Iceberg con propiedades explícitas y `MERGE INTO` por clave de negocio | Las llamadas reales a GA4 / Meta en `lambda/*/index.js` |
+| DDL Iceberg con propiedades explícitas y `MERGE INTO` por clave de negocio | — |
 | Compactación, expiración de snapshots y limpieza de huérfanos semanal | — |
 
 ### Configuración de fuentes y tablas (DynamoDB)
@@ -192,17 +228,17 @@ items activos **no fallan**: loguean y terminan. Para empezar:
 ```bash
 # Una fuente de la Raw Zone
 aws dynamodb put-item --table-name {{ project_slug }}-<env>-job-config --item '{
-  "jobName": {"S": "raw_to_clean"}, "sk": {"S": "source#ga4"},
-  "enabled": {"BOOL": true}, "raw_prefix": {"S": "ga4/"}, "format": {"S": "json"},
+  "jobName": {"S": "raw_to_clean"}, "sk": {"S": "source#ventas"},
+  "enabled": {"BOOL": true}, "raw_prefix": {"S": "ventas/"}, "format": {"S": "json"},
   "partition_keys": {"L": [{"S": "dt"}]},
-  "required_columns": {"L": [{"S": "event_date"}]}
+  "not_null": {"L": [{"S": "fecha"}]}
 }'
 
 # Una tabla analítica en Curated (merge_keys es obligatorio)
 aws dynamodb put-item --table-name {{ project_slug }}-<env>-job-config --item '{
-  "jobName": {"S": "clean_to_curated"}, "sk": {"S": "table#sesiones"},
-  "enabled": {"BOOL": true}, "source_tables": {"L": [{"S": "ga4"}]},
-  "merge_keys": {"L": [{"S": "session_id"}]}, "partition_by": {"S": "days(dt)"}
+  "jobName": {"S": "clean_to_curated"}, "sk": {"S": "table#ventas_diarias"},
+  "enabled": {"BOOL": true}, "source_tables": {"L": [{"S": "ventas"}]},
+  "merge_keys": {"L": [{"S": "venta_id"}]}, "partition_by": {"S": "days(dt)"}
 }'
 ```
 
@@ -214,13 +250,13 @@ vez de propagarse en silencio o reventar el job — que eran las dos únicas opc
 posibles antes de que existiera la zona.
 
 El **gate de pipeline** vive dentro del job, no en un estado del Step Functions: por
-encima de **{{ quarantine_alarm_threshold }}** filas rechazadas el job falla, la
+encima de el umbral `quarantineAlarmThreshold` filas rechazadas el job falla, la
 alarma SNS se dispara y `clean_to_curated` **no corre**, así que los datos malos no
 llegan a Curated. Está en el job y no en un `Choice` porque `GlueStartJobRun` con
 `RUN_JOB` no devuelve la salida del job: la máquina de estados no puede leer esos
 contadores, el job sí.
 
-Los rechazos se retienen **{{ quarantine_retention_days }} días**.
+La retención de los rechazos se ajusta con `quarantineRetentionDays` en `environments.ts`.
 
 ## Iceberg: propiedades y mantenimiento
 
@@ -235,7 +271,7 @@ particionado es oculto (`days(dt)` por defecto, configurable por tabla).
 > `CALL system.*` fallarían en runtime mientras synth, tests y cdk-nag pasan en verde.
 
 **Mantenimiento semanal** (domingo 03:00 UTC): compactación, `rewrite_manifests`,
-`expire_snapshots` con ventana de **{{ iceberg_snapshot_retention_days }} días** de
+`expire_snapshots` con la ventana de `icebergSnapshotRetentionDays` de
 time-travel, y `remove_orphan_files`. Sin esto una tabla Iceberg se degrada de forma
 garantizada: archivos chicos acumulados y metadata creciendo sin límite.
 
@@ -253,7 +289,7 @@ opcional y requiere configurar en el repo de GitHub:
 
 | Variable de repo | Valor |
 |---|---|
-| `AWS_DEPLOY_ROLE_ARN` | `{{ oidc_role_arn }}` |
+| `AWS_DEPLOY_ROLE_ARN` | el ARN de tu rol OIDC de despliegue |
 | `AWS_REGION` | `{{ aws_region }}` |
 
 Van por `vars` de GitHub y no por token de generación a propósito: son configuración
@@ -262,10 +298,10 @@ de despliegue, y el rol OIDC normalmente no existe todavía cuando se genera el 
 ## Red (VPC) — building block deliberado
 
 Con `enableVpc=true` se despliega la VPC **pero ningún recurso queda asociado a
-ella**: los Glue Jobs, las Lambdas y un eventual DMS siguen corriendo fuera. Es
-intencional — se crea por adelantado porque habilitarla después obliga a recrear
-recursos, y se conecta cuando aparece la necesidad concreta (ingesta desde una
-red cerrada, RDS privado, SFTP interno).
+ella**: los Glue Jobs y un eventual DMS o proceso de ingesta siguen corriendo
+fuera. Es intencional — se crea por adelantado porque habilitarla después obliga a
+recrear recursos, y se conecta cuando aparece la necesidad concreta de alcanzar una
+red privada (un RDS interno, un origen on-premise).
 
 Para conectar recursos, usando los outputs del stack `network`:
 
@@ -280,7 +316,7 @@ interface endpoints. Si no hay caso de uso a la vista, deja `enableVpc=false`.
 
 ## Lake Formation
 
-Las 3 zonas quedan registradas como data locations, así que el acceso de
+Las 4 zonas de datos quedan registradas como data locations, así que el acceso de
 Glue/Athena pasa a ser vendido por Lake Formation. Ya viene resuelto:
 
 - el rol de Glue tiene `lakeformation:GetDataAccess`;
@@ -314,7 +350,7 @@ Para volver atrás: `-c lfStrictMode=false`.
 ### Rol de analista
 
 Se crea `{{ project_slug }}-<env>-analyst`, asumible por
-**{{ analyst_principal_arn }}** (vacío = cuenta root, acótalo). Puede usar el
+el principal de `-c analystPrincipalArn` (vacío = cuenta root, acótalo). Puede usar el
 WorkGroup de Athena, leer el catálogo y sus propios resultados — pero el acceso a los
 DATOS lo da Lake Formation, no IAM: un grant por expresión de LF-Tag que excluye la
 clasificación más sensible. Como es una expresión sobre tags y no una lista de tablas,
@@ -328,18 +364,17 @@ tabla y columna desde SageMaker Studio o con más `CfnTagAssociation`.
 ## Post-generación
 
 1. Confirmar la suscripción SNS enviada a **{{ admin_email }}**.
-2. Cargar valores reales en Secrets Manager:
-   - `{{ project_slug }}-<env>/ga4-api`
-   - `{{ project_slug }}-<env>/meta-ads-api`
-   - `{{ project_slug }}-<env>/sftp-origen` (si aplica)
-3. Habilitar el SFTP Connector en `environments.ts` con `url` **y**
-   `trustedHostKeys` (`ssh-keyscan <host>`). Falta cualquiera de las dos y el
-   synth falla con un mensaje explícito.
-4. **Cargar las fuentes y tablas en DynamoDB** e implementar `transform()` y
+2. **Conectar tu ingesta**: hacer que asuma el rol `IngestWriterRoleArn` y escriba
+   con el layout de "Cómo entran los datos". Acotar el trust del rol con
+   `-c ingestPrincipalArn=...`.
+3. **Cargar las fuentes y tablas en DynamoDB** e implementar `transform()` y
    `build_model()` (ver "El pipeline de datos"). Hasta que haya items activos los
    jobs corren y terminan sin hacer nada, lo cual es intencional.
-5. Acotar el trust del rol de analista si dejaste `analyst_principal_arn` vacío, y
-   refinar los LF-Tags a nivel de tabla/columna.
+4. Reemplazar la taxonomía placeholder de LF-Tags por la del cliente
+   (`lf_tag_domains` / `lf_tag_sensitivities` en `environments.ts`) y refinarla a
+   nivel de tabla y columna. **El orden de sensibilidad es semántico**: el primer
+   valor es el más restrictivo y es el que el rol de analista NO puede ver.
+5. Acotar el trust del rol de analista si dejaste `-c analystPrincipalArn` vacío.
 6. Enganchar el proceso de archivado a la Archive Zone: el rol de Glue ya tiene
    permiso de escritura (solo `PutObject`, **no** borrado), pero **ningún job escribe
    ahí por defecto** — define tú qué se archiva y cuándo.
@@ -354,7 +389,7 @@ tabla y columna desde SageMaker Studio o con más `CfnTagAssociation`.
     desde acá decidiría sobre los logs de otros proyectos. Es una tarea de cuenta:
     ```bash
     for g in /aws-glue/jobs/output /aws-glue/jobs/error /aws-glue/crawlers; do
-      aws logs put-retention-policy --log-group-name $g --retention-in-days {{ log_retention_days }}
+      aws logs put-retention-policy --log-group-name $g --retention-in-days 30
     done
     ```
 
@@ -368,9 +403,10 @@ tabla y columna desde SageMaker Studio o con más `CfnTagAssociation`.
 - **Runtime de Lambda:** está fijado al más reciente que conoce `aws-cdk-lib`.
   Cuando `AwsSolutions-L1` avise que quedó atrás, súbelo y prueba las Lambdas —
   es la regla funcionando, no un falso positivo.
-- **Rotación de secretos:** las credenciales de APIs externas (GA4, Meta, SFTP)
-  no se rotan automáticamente; la renovación es manual y está suprimida en
-  cdk-nag con esa evidencia.
+- **Los scripts Glue no tienen test automatizado.** El pipeline de verificación no
+  corre Python, así que `validate()` y `split_by_validation()` se revisan por
+  inspección. Si los modificas, presta atención a la polaridad: PASA = **cero**
+  checks fallidos, no "cumplió alguno".
 
 ## Prácticas aplicadas
 
@@ -392,13 +428,35 @@ excepciones deliberadas, ambas SSE-S3 y comentadas en el código: el bucket de a
 logs y el del trail — S3 solo admite SSE-S3 como destino de server access logs, y para
 CloudTrail es lo que AWS recomienda para no acoplar la data key a la auditoría.
 
-**DLQ y alarmas de ingesta** existen en el stack `ingestion`, que es opcional: con
-`enable_ingestion_lambdas=false` el proyecto queda con las alarmas de pipeline,
-cuarentena, Glue y trail, pero sin DLQ.
+**Sin capa de ingesta** a propósito: el template no trae Lambdas de proveedores ni
+conectores. Las alarmas que sí trae cubren el pipeline, la cuarentena, los jobs y
+crawlers de Glue, y el contenido del trail.
 
 ## Migración desde una versión anterior del template
 
-Si regeneras un proyecto **ya desplegado**, estos cambios no son retrocompatibles:
+Si regeneras un proyecto **ya desplegado**, estos cambios no son retrocompatibles.
+
+**Primero, la ingesta:** el stack `ingestion` desaparece. Un proyecto desplegado
+pierde las Lambdas, sus secretos, la DLQ y sus alarmas. Los secretos con
+`RemovalPolicy.RETAIN` quedan huérfanos y hay que borrarlos a mano. Si dependías de
+esas Lambdas, guárdalas antes de regenerar: no están en el template nuevo.
+
+**Segundo, parámetros que se movieron:** `quarantine_retention_days`,
+`quarantine_alarm_threshold`, `iceberg_snapshot_retention_days` y
+`log_retention_days` ya no se preguntan — se editan en `environments.ts`.
+`analyst_principal_arn` pasó a `-c analystPrincipalArn`. Si automatizabas `generate`
+con esos flags, deja de funcionar.
+
+**Tercero, los defaults de LF-Tag cambiaron y su orden es semántico.** Si tu lake
+usaba `pii,interno,publico`, mantén el más restrictivo primero.
+
+**Cuarto**, `CatalogZone` gana `quarantine`: una base Glue y un crawler nuevos.
+
+**Quinto**, los crawlers de Curated y Quarantine pierden `RecrawlPolicy`, y todos
+pierden `Grouping`. El primer crawl posterior recorre todo y puede **separar** tablas
+que se habían fusionado por `CombineCompatibleSchemas`.
+
+Y de la versión anterior:
 
 1. **`staging` → `stg`** y se agrega `qa`. Cambian los nombres de stack
    (`proj-staging-*` → `proj-stg-*`) y de las bases Glue

@@ -12,11 +12,11 @@ Contrato de la tabla de configuracion (DynamoDB, --config_table):
     jobName = "raw_to_clean"
     sk      = "source#<nombre>"
     enabled         (bool)   procesar o no esta fuente
-    raw_prefix      (str)    prefijo en la Raw Zone, ej "ga4/"
-    format          (str)    json | csv | parquet          (default json)
-    partition_keys  (list)   columnas de particion          (default ["dt"])
-    dq_ruleset      (str)    DQDL propio de la fuente       (opcional)
-    required_columns(list)   para el ruleset por defecto    (opcional)
+    raw_prefix      (str)    prefijo en la Raw Zone, ej "ventas/"  (default "<nombre>/")
+    format          (str)    json | csv | parquet                  (default json)
+    partition_keys  (list)   columnas de particion                 (default ["dt"])
+    not_null        (list)   columnas que deben existir y estar poblada (opcional)
+    dedup_keys      (list)   clave de negocio para detectar duplicados  (opcional)
 
 Sin items activos el job no falla: loguea y termina.
 """
@@ -27,11 +27,10 @@ from datetime import datetime, timezone
 
 import boto3
 from awsglue.context import GlueContext
-from awsglue.dynamicframe import DynamicFrame
 from awsglue.job import Job
 from awsglue.utils import getResolvedOptions
-from awsgluedq.transforms import EvaluateDataQuality
 from pyspark.context import SparkContext
+from pyspark.sql import Window
 from pyspark.sql import functions as F
 
 logging.basicConfig(
@@ -80,12 +79,82 @@ def load_sources() -> list:
     return [item for item in resp.get("Items", []) if item.get("enabled", False)]
 
 
-def default_ruleset(required_columns: list) -> str:
-    """Ruleset DQDL minimo cuando la fuente no declara uno propio."""
-    rules = ["RowCount > 0"]
-    for column in required_columns or []:
-        rules.append(f'IsComplete "{column}"')
-    return "Rules = [ " + ", ".join(rules) + " ]"
+# Valores que "parecen" nulos y que en un archivo crudo casi nunca se quieren.
+NULL_SENTINELS = ("", "null", "NULL", "N/A", "-")
+
+
+def validate(df, source_name: str, source_cfg: dict) -> list:
+    """<<< VALIDACIONES — EXTENDER AQUI >>>
+
+    Devuelve una lista de (nombre_regla, Column booleana que marca FILA MALA).
+
+    Sin conocer el esquema solo se pueden chequear dos cosas: las columnas que la
+    config declara, y hechos estructurales. Rangos, enums, integridad referencial y
+    reglas de negocio van aca abajo, en Python — no en strings de configuracion.
+
+    Ejemplos de lo que agregarias:
+        checks.append(("monto_negativo", F.col("monto") < 0))
+        checks.append(("moneda_desconocida", ~F.col("moneda").isin("CLP", "USD")))
+    """
+    checks = []
+    for column in source_cfg.get("not_null", []) or []:
+        column = str(column)
+        if column not in df.columns:
+            # La columna declarada no llego: TODA la fuente es sospechosa.
+            checks.append((f"columna_ausente:{column}", F.lit(True)))
+        else:
+            col = F.col(column)
+            checks.append((
+                f"nulo:{column}",
+                col.isNull() | F.trim(col.cast("string")).isin(*NULL_SENTINELS),
+            ))
+    return checks
+
+
+def split_by_validation(df, checks: list):
+    """Separa en (aprobadas, rechazadas_con__quarantine_reason).
+
+    PASA = CERO checks fallidos. La polaridad importa: filtrar por "cumplio alguna
+    regla" dejaria pasar filas que violan otras, y el gate no serviria de nada.
+    """
+    if not checks:
+        return df, None
+
+    empty = F.array().cast("array<string>")
+    # `F.array_compact` seria mas directo pero es Spark 3.4 y Glue 4.0 trae 3.3:
+    # fallaria en runtime con "Undefined function" mientras synth y tests pasan.
+    reasons = F.concat(*[
+        F.when(cond, F.array(F.lit(name))).otherwise(empty) for name, cond in checks
+    ])
+    tagged = df.withColumn("_reasons", reasons)
+    passed = tagged.filter(F.size("_reasons") == 0).drop("_reasons")
+    failed = (
+        tagged.filter(F.size("_reasons") > 0)
+        .withColumn("_quarantine_reason", F.concat_ws(",", F.col("_reasons")))
+        .drop("_reasons")
+    )
+    return passed, failed
+
+
+def split_duplicates(df, dedup_keys: list):
+    """Separa duplicados por clave de negocio. Devuelve (unicos, duplicados).
+
+    Se cuarentenan en vez de descartarse: `dropDuplicates` se queda con una fila
+    arbitraria y no deja rastro de que hubo un choque.
+    """
+    if not dedup_keys:
+        return df, None
+    keys = [F.col(str(k)) for k in dedup_keys]
+    ranked = df.withColumn(
+        "_rn", F.row_number().over(Window.partitionBy(*keys).orderBy(F.lit(1)))
+    )
+    unique = ranked.filter(F.col("_rn") == 1).drop("_rn")
+    dupes = (
+        ranked.filter(F.col("_rn") > 1)
+        .drop("_rn")
+        .withColumn("_quarantine_reason", F.lit("clave_duplicada"))
+    )
+    return unique, dupes
 
 
 def publish_metric(name: str, value: float, source: str) -> None:
@@ -134,15 +203,22 @@ def transform(df, source_name: str):
     return df
 
 
-def write_quarantine(df, source_name: str, reason_col: str) -> int:
-    """Escribe los rechazados con su causa. Devuelve cuantos fueron."""
+def write_quarantine(df, source_name: str) -> int:
+    """Escribe los rechazados con su causa. Devuelve cuantos fueron.
+
+    Espera que `df` ya traiga `_quarantine_reason`. La columna de particion se agrega
+    ACA y no en el llamador: si cada ruta de rechazo tuviera que recordarla, la
+    primera que la olvide hace estallar el `partitionBy`.
+    """
+    if df is None:
+        return 0
     count = df.count()
     if count == 0:
         return 0
     (
-        df.withColumn("_quarantine_run", F.lit(args["JOB_NAME"]))
+        df.withColumn("_quarantine_dt", F.lit(RUN_DT))
+        .withColumn("_quarantine_run", F.lit(args["JOB_NAME"]))
         .withColumn("_quarantine_ts", F.lit(RUN_TS.isoformat()))
-        .withColumnRenamed(reason_col, "_quarantine_reason")
         .write.mode("append")
         .partitionBy("_quarantine_dt")
         .parquet(f"{QUARANTINE}/{source_name}/")
@@ -185,34 +261,15 @@ def process(source: dict) -> dict:
     df = transform(frame.toDF(), name)
 
     # --- Gate de calidad ---
-    ruleset = source.get("dq_ruleset") or default_ruleset(source.get("required_columns", []))
-    evaluated = EvaluateDataQuality().process_rows(
-        frame=DynamicFrame.fromDF(df, glue_context, f"dq_{name}"),
-        ruleset=ruleset,
-        publishing_options={
-            "dataQualityEvaluationContext": f"dq_{name}",
-            "enableDataQualityCloudWatchMetrics": True,
-            "enableDataQualityResultsPublishing": True,
-        },
-        additional_options={"performanceTuning.caching": "CACHE_NOTHING"},
-    )
-    rows = evaluated.toDF()
+    # Las filas que no pasan van a la Quarantine Zone con su causa, en vez de
+    # propagarse en silencio hasta Curated o reventar el job — que eran las dos
+    # unicas opciones antes de que existiera la zona.
+    passed, failed = split_by_validation(df, validate(df, name, source))
+    quarantined = write_quarantine(failed, name)
 
-    # `process_rows` agrega una columna de outcome por fila: las que pasan van a
-    # Clean, las que fallan a Quarantine con la causa. Antes, un registro malformado
-    # solo podia propagarse en silencio o reventar el job.
-    outcome = "DataQualityRulesPass"
-    if outcome in rows.columns:
-        passed = rows.filter(F.size(F.col(outcome)) > 0).drop(outcome, "DataQualityRulesFail")
-        failed = (
-            rows.filter(F.size(F.col(outcome)) == 0)
-            .withColumn("_quarantine_dt", F.lit(RUN_DT))
-            .withColumnRenamed("DataQualityRulesFail", "_dq_failed_rules")
-        )
-        quarantined = write_quarantine(failed, name, "_dq_failed_rules")
-    else:
-        # Sin columna de outcome el ruleset era solo agregado: no hay ruteo por fila.
-        passed, quarantined = rows, 0
+    # Duplicados por clave de negocio, si la fuente declara una.
+    passed, dupes = split_duplicates(passed, source.get("dedup_keys", []))
+    quarantined += write_quarantine(dupes, name)
 
     clean_count = passed.count()
     if clean_count > 0:

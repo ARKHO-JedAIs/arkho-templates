@@ -7,12 +7,13 @@ import * as lakeformation from 'aws-cdk-lib/aws-lakeformation';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import { NagSuppressions } from 'cdk-nag';
 import {
-  ANALYST_PRINCIPAL_ARN,
   CATALOG_ZONES,
   CatalogZone,
   DatalakeConfig,
+  LEAST_RESTRICTIVE_SENSITIVITY,
   LF_TAG_DOMAINS,
   LF_TAG_SENSITIVITIES,
+  MOST_RESTRICTIVE_SENSITIVITY,
   catalogDb,
   prefix,
 } from '../config/environments';
@@ -44,7 +45,7 @@ export interface GovernanceStackProps extends cdk.StackProps {
  * Lake Formation necesita permiso sobre la CMK (ver `SecurityStack`).
  */
 export class GovernanceStack extends cdk.Stack {
-  public readonly databases: Record<'raw' | 'clean' | 'curated', glue.CfnDatabase>;
+  public readonly databases: Record<CatalogZone, glue.CfnDatabase>;
   public readonly analystRole: iam.Role;
 
   constructor(scope: Construct, id: string, props: GovernanceStackProps) {
@@ -64,9 +65,12 @@ export class GovernanceStack extends cdk.Stack {
       });
 
     this.databases = {
-      raw: mkDb('raw', 'Datos originales tal como llegan de las fuentes de ingesta'),
+      raw: mkDb('raw', 'Datos originales tal como aterrizan, sin transformar'),
       clean: mkDb('clean', 'Datos validados y estandarizados'),
-      curated: mkDb('curated', 'Datos en Iceberg/Parquet optimizados para consumo analítico'),
+      curated: mkDb('curated', 'Tablas Iceberg optimizadas para consumo analítico'),
+      // Los rechazos del gate de calidad también se catalogan: si no, revisarlos
+      // significa bajar Parquet de S3 a mano y la cuarentena no sirve de nada.
+      quarantine: mkDb('quarantine', 'Filas rechazadas por el gate de calidad, con su causa'),
     };
 
     // --- Admin de Lake Formation (opcional, vía contexto) ---
@@ -132,13 +136,15 @@ export class GovernanceStack extends cdk.Stack {
     // llevaba tag. Cada base queda etiquetada con su dominio y su sensibilidad por
     // defecto; el cliente refina a nivel de tabla y columna después.
     const domainDefault = LF_TAG_DOMAINS[0];
-    // La zona menos procesada recibe la clasificación MÁS restrictiva: en Raw
-    // todavía no se sabe qué contiene, así que se asume lo peor.
-    const sensitivityStrict = LF_TAG_SENSITIVITIES[0];
+    // El orden de LF_TAG_SENSITIVITIES es un CONTRATO (ver environments.ts): el
+    // primero es el más restrictivo. Las zonas sin procesar reciben ese: en Raw
+    // todavía no se sabe qué contiene, así que se asume lo peor; en Quarantine hay
+    // datos crudos que ni pasaron validación.
     const sensitivityByZone: Record<CatalogZone, string> = {
-      raw: sensitivityStrict,
-      clean: sensitivityStrict,
-      curated: LF_TAG_SENSITIVITIES[LF_TAG_SENSITIVITIES.length - 1],
+      raw: MOST_RESTRICTIVE_SENSITIVITY,
+      clean: MOST_RESTRICTIVE_SENSITIVITY,
+      quarantine: MOST_RESTRICTIVE_SENSITIVITY,
+      curated: LEAST_RESTRICTIVE_SENSITIVITY,
     };
 
     for (const zone of CATALOG_ZONES) {
@@ -168,8 +174,14 @@ export class GovernanceStack extends cdk.Stack {
     // --- Rol de analista ---
     // Sin esto el WorkGroup de Athena no tenía ningún principal que pudiera usarlo.
     // Con `lfStrictMode` activo, este rol solo ve lo que Lake Formation le otorga.
-    const trustPrincipal = ANALYST_PRINCIPAL_ARN
-      ? new iam.ArnPrincipal(ANALYST_PRINCIPAL_ARN)
+    // Por contexto y no por parámetro de generación: es configuración de despliegue,
+    // igual que `lfAdminArn`, y el principal del analista normalmente todavía no
+    // existe cuando se genera el proyecto.
+    const analystPrincipalArn = (
+      this.node.tryGetContext('analystPrincipalArn') as string | undefined
+    )?.trim();
+    const trustPrincipal = analystPrincipalArn
+      ? new iam.ArnPrincipal(analystPrincipalArn)
       : new iam.AccountRootPrincipal();
     this.analystRole = new iam.Role(this, 'AnalystRole', {
       roleName: `${prefix(cfg)}-analyst`,
@@ -219,7 +231,9 @@ export class GovernanceStack extends cdk.Stack {
     // El grant que de verdad da acceso a datos: por LF-Tag, excluyendo la
     // clasificación más sensible. Es una expresión sobre tags, no una lista de
     // tablas, así que una tabla nueva queda cubierta sin tocar IaC.
-    const nonSensitive = LF_TAG_SENSITIVITIES.filter((v) => v !== sensitivityStrict);
+    const nonSensitive = LF_TAG_SENSITIVITIES.filter(
+      (v) => v !== MOST_RESTRICTIVE_SENSITIVITY,
+    );
     if (nonSensitive.length > 0) {
       new lakeformation.CfnPrincipalPermissions(this, 'LfGrantAnalystNonSensitive', {
         principal: { dataLakePrincipalIdentifier: this.analystRole.roleArn },

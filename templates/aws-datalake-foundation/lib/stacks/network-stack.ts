@@ -2,11 +2,11 @@ import * as cdk from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as logs from 'aws-cdk-lib/aws-logs';
+import { DatalakeConfig, logRetention } from '../config/environments';
 
 export interface NetworkStackProps extends cdk.StackProps {
   readonly vpcCidr: string;
-  /** Política de retención del log group de flow logs (sigue al ambiente). */
-  readonly removalPolicy: cdk.RemovalPolicy;
+  readonly config: DatalakeConfig;
 }
 
 /**
@@ -15,17 +15,15 @@ export interface NetworkStackProps extends cdk.StackProps {
  *
  * IMPORTANTE — esto es un BUILDING BLOCK, no una VPC ya conectada. Se despliega
  * por adelantado porque habilitarla después obliga a recrear recursos, pero
- * ningún recurso se le asocia automáticamente: los Glue Jobs, las Lambdas y un
- * eventual DMS siguen corriendo fuera de la VPC hasta que el equipo de
+ * ningún recurso se le asocia automáticamente: los Glue Jobs y un eventual DMS o
+ * proceso de ingesta siguen corriendo fuera de la VPC hasta que el equipo de
  * desarrollo los asocie explícitamente. Eso es intencional — se activa cuando
- * aparece la necesidad concreta (ingesta desde una red cerrada, RDS privado,
- * SFTP interno).
+ * aparece la necesidad concreta de alcanzar una red privada.
  *
  * Para conectar recursos más adelante, usando los outputs de este stack:
  * - Glue Jobs: crear un `glue.CfnConnection` tipo NETWORK con una subnet privada
  *   y su security group, y referenciarlo en `connections` del `CfnJob`.
- * - Lambdas: pasar `vpc` + `vpcSubnets` (SubnetType.PRIVATE_WITH_EGRESS) al
- *   construct `lambda.Function` en `IngestionStack`.
+ * - Lambdas propias: pasar `vpc` + `vpcSubnets` (PRIVATE_WITH_EGRESS) al construct.
  * - DMS: usar `PrivateSubnetIds` para el replication subnet group.
  *
  * Costo mientras esté habilitada: 1 NAT Gateway (~USD 32/mes) + 2 interface
@@ -73,8 +71,8 @@ export class NetworkStack extends cdk.Stack {
     this.vpc.addFlowLog('FlowLog', {
       destination: ec2.FlowLogDestination.toCloudWatchLogs(
         new logs.LogGroup(this, 'VpcFlowLogs', {
-          retention: logs.RetentionDays.ONE_MONTH,
-          removalPolicy: props.removalPolicy,
+          retention: logRetention(props.config),
+          removalPolicy: props.config.removalPolicy,
         }),
       ),
       trafficType: ec2.FlowLogTrafficType.ALL,

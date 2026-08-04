@@ -12,12 +12,17 @@ export interface ConsumptionStackProps extends cdk.StackProps {
 }
 
 /**
- * Capa de consumo Fase 1: workgroup de Athena con configuración forzada,
- * resultados cifrados y corte de bytes escaneados (control de costos).
+ * Capa de consumo: workgroup de Athena con configuración forzada, resultados
+ * cifrados y corte de bytes escaneados (control de costos).
  *
- * QuickSight se habilita manualmente (suscripción por cuenta) apuntando a
- * este workgroup. Redshift Serverless queda para Fase 2 — sin migración,
- * opera sobre el mismo S3 + Glue Data Catalog.
+ * Athena es el único motor que trae el template porque consulta directamente el
+ * mismo S3 + Glue Data Catalog, sin infraestructura que provisionar ni migración.
+ * Si más adelante necesitas BI o un warehouse, ambos operan sobre este catálogo:
+ * QuickSight se suscribe por cuenta y apunta a este workgroup, y Redshift
+ * Serverless o Spectrum leen las mismas tablas.
+ *
+ * El principal que puede usar el workgroup es el rol de analista de
+ * `GovernanceStack`; el acceso a los DATOS lo otorga Lake Formation, no IAM.
  */
 export class ConsumptionStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: ConsumptionStackProps) {
@@ -27,7 +32,7 @@ export class ConsumptionStack extends cdk.Stack {
 
     new athena.CfnWorkGroup(this, 'AnalyticsWorkGroup', {
       name: `${p}-analytics`,
-      description: 'Workgroup analítico {{ client_name }} Data Lake (marketing y operaciones)',
+      description: 'Workgroup analítico {{ client_name }} Data Lake',
       recursiveDeleteOption: cfg.autoDeleteObjects,
       workGroupConfiguration: {
         enforceWorkGroupConfiguration: true,

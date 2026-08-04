@@ -6,7 +6,6 @@ import { applyStandardTags } from '../lib/config/tags';
 import { SecurityStack } from '../lib/stacks/security-stack';
 import { StorageStack } from '../lib/stacks/storage-stack';
 import { GovernanceStack } from '../lib/stacks/governance-stack';
-import { IngestionStack } from '../lib/stacks/ingestion-stack';
 import { ProcessingStack } from '../lib/stacks/processing-stack';
 import { ConsumptionStack } from '../lib/stacks/consumption-stack';
 import { ObservabilityStack } from '../lib/stacks/observability-stack';
@@ -30,7 +29,6 @@ const env: cdk.Environment = {
 const common = { env, terminationProtection: cfg.terminationProtection };
 
 // Flags opcionales leídos desde cdk.json context (baked en la generación)
-const enableIngestionLambdas = app.node.tryGetContext('enableIngestionLambdas') !== 'false';
 const enableVpc = app.node.tryGetContext('enableVpc') === 'true';
 const vpcCidr = (app.node.tryGetContext('vpcCidr') as string | undefined) ?? '10.0.0.0/16';
 
@@ -38,17 +36,13 @@ const vpcCidr = (app.node.tryGetContext('vpcCidr') as string | undefined) ?? '10
 // Se despliega por adelantado como building block: no se le asocia ningún
 // recurso automáticamente (ver el docstring de NetworkStack).
 if (enableVpc) {
-  new NetworkStack(app, `${p}-network`, {
-    ...common,
-    vpcCidr,
-    removalPolicy: cfg.removalPolicy,
-  });
+  new NetworkStack(app, `${p}-network`, { ...common, config: cfg, vpcCidr });
 }
 
 // ── Stack 2: Seguridad — KMS CMKs + SNS alertas ───────────────────────────────
 const security = new SecurityStack(app, `${p}-security`, { ...common, config: cfg });
 
-// ── Stack 3: Storage — 4 zonas S3 + Athena results + access logs ──────────────
+// ── Stack 3: Storage — 5 zonas S3 + Athena results + access logs ──────────────
 // `enableObjectLock` es IRREVERSIBLE en los buckets que lo reciben: solo se puede
 // activar al crearlos y nunca desactivar. Ver StorageStack.
 const enableObjectLock = app.node.tryGetContext('enableObjectLock') !== 'false';
@@ -72,19 +66,13 @@ const governance = new GovernanceStack(app, `${p}-governance`, {
   dataKey: security.dataKey,
 });
 
-// ── Stack 5: Ingesta (opcional) — Lambdas API + SFTP Connector ────────────────
-if (enableIngestionLambdas) {
-  new IngestionStack(app, `${p}-ingestion`, {
-    ...common,
-    config: cfg,
-    rawBucket: storage.rawBucket,
-    dataKey: security.dataKey,
-    opsKey: security.opsKey,
-    alertsTopic: security.alertsTopic,
-  });
-}
+// NO hay stack de ingesta, a propósito. La ingesta varía demasiado entre proyectos
+// (API de terceros, SFTP, DMS, Kinesis, un job on-premise) para venir resuelta, y
+// cualquier implementación concreta sería código que el cliente borra. Lo que sí es
+// fundacional viaja en StorageStack: el rol `-ingest-writer` que tu proceso asume
+// para escribir en la Raw Zone, y el contrato de layout documentado en el README.
 
-// ── Stack 6: Procesamiento — Glue ETL + Step Functions ───────────────────────
+// ── Stack 5: Procesamiento — Glue ETL + Step Functions ───────────────────────
 const processing = new ProcessingStack(app, `${p}-processing`, {
   ...common,
   config: cfg,
@@ -103,7 +91,7 @@ const processing = new ProcessingStack(app, `${p}-processing`, {
 // `deploy --all` puede intentar crear los crawlers antes que sus bases.
 processing.addStackDependency(governance);
 
-// ── Stack 7: Consumo — Athena Workgroup ──────────────────────────────────────
+// ── Stack 6: Consumo — Athena Workgroup ──────────────────────────────────────
 new ConsumptionStack(app, `${p}-consumption`, {
   ...common,
   config: cfg,
@@ -111,7 +99,7 @@ new ConsumptionStack(app, `${p}-consumption`, {
   dataKey: security.dataKey,
 });
 
-// ── Stack 8: Observabilidad — CloudTrail con data events ─────────────────────
+// ── Stack 7: Observabilidad — CloudTrail + alarmas + dashboard ───────────────
 new ObservabilityStack(app, `${p}-observability`, {
   ...common,
   config: cfg,

@@ -57,12 +57,9 @@ export const UNTAGGABLE_TYPES: readonly string[] = [
   // Políticas y recursos accesorios.
   'AWS::IAM::Policy',
   'AWS::S3::BucketPolicy',
-  'AWS::SQS::QueuePolicy',
   'AWS::SNS::Subscription',
   'AWS::SNS::TopicPolicy',
   'AWS::KMS::Alias',
-  'AWS::Lambda::Permission',
-  'AWS::SecretsManager::ResourcePolicy',
   'AWS::Events::EventBusPolicy',
   // Solo en la ruta con VPC habilitada.
   'AWS::EC2::Route',
@@ -72,7 +69,6 @@ export const UNTAGGABLE_TYPES: readonly string[] = [
   // la Lambda que las atiende sí lleva tags, el nodo de invocación no.
   'AWS::CDK::Metadata',
   'Custom::S3AutoDeleteObjects',
-  'Custom::LogRetention',
 ];
 
 /**

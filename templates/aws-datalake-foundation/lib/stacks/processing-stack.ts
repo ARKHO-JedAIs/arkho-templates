@@ -311,15 +311,28 @@ export class ProcessingStack extends cdk.Stack {
       },
     });
 
-    // --- Mantenimiento de Iceberg (semanal) ---
-    // Sin compaction y expiración de snapshots, una tabla Iceberg se degrada: los
-    // archivos pequeños se acumulan y la metadata crece sin límite.
+    // ═══════════════════════════════════════════════════════════════════════════
+    // BLOQUE DESACOPLABLE — Mantenimiento de Iceberg (semanal)
+    //
+    // Todo lo que hay entre esta marca y la de cierre es autocontenido: nada más en
+    // el stack lo referencia. Si no lo quieres, borra el bloque completo (job, rol y
+    // schedule) más `glue/jobs/iceberg_maintenance.py`, y el pipeline sigue igual.
+    //
+    // Lo que perderías: sin compaction ni expiración de snapshots, una tabla Iceberg
+    // se degrada de forma garantizada — los archivos chicos se acumulan y el árbol de
+    // metadata crece sin límite hasta que las queries se vuelven lentas.
     //
     // No se usa `glue.CfnTableOptimizer` (el mecanismo gestionado de AWS) porque
     // exige `tableName` y este template no crea tablas en síntesis: las crean el ETL
     // del cliente y los crawlers. Este job las DESCUBRE en runtime, así que funciona
     // con cero configuración y se adapta a medida que aparecen. Cuando tus tablas
     // sean estables, migrar a CfnTableOptimizer es el upgrade natural (ver README).
+    //
+    // El `Asset` va DENTRO del bloque a propósito: `AssetStaging` valida que el
+    // archivo exista en el CONSTRUCTOR, y los tests construyen este stack a nivel de
+    // `describe` — un script faltante no rompería solo `synth`, rompería todos los
+    // archivos de test.
+    // ═══════════════════════════════════════════════════════════════════════════
     const maintenanceAsset = new s3assets.Asset(this, 'IcebergMaintenanceScript', {
       path: path.join(__dirname, '..', '..', 'glue', 'jobs', 'iceberg_maintenance.py'),
     });
@@ -381,6 +394,7 @@ export class ProcessingStack extends cdk.Stack {
         retryPolicy: { maximumRetryAttempts: 1 },
       },
     });
+    // ═══════════ fin del BLOQUE DESACOPLABLE de mantenimiento ═══════════════════
 
     // --- Crawlers: actualizan el catálogo tras el pipeline ---
     const crawlerCommon = {
@@ -392,22 +406,28 @@ export class ProcessingStack extends cdk.Stack {
         updateBehavior: 'UPDATE_IN_DATABASE',
         deleteBehavior: 'DEPRECATE_IN_DATABASE',
       },
-      // Solo recorre carpetas nuevas: en una zona particionada por fecha, recorrer
-      // todo en cada corrida crece de forma lineal e innecesaria.
-      recrawlPolicy: { recrawlBehavior: 'CRAWL_NEW_FOLDERS_ONLY' },
       configuration: JSON.stringify({
         Version: 1.0,
         // Índices de partición: sin ellos, Athena escanea la lista completa de
         // particiones en cada query.
         CrawlerOutput: { Partitions: { AddOrUpdateBehavior: 'InheritFromTable' } },
-        Grouping: { TableGroupingPolicy: 'CombineCompatibleSchemas' },
+        // NO se usa `Grouping: CombineCompatibleSchemas`: en una zona con una carpeta
+        // por tabla puede fusionar dos tablas distintas en una sola del catálogo, y
+        // eso no se nota hasta que una query devuelve filas que no corresponden.
       }),
     };
 
-    // Raw: la base existía y ningún crawler la recorría, así que el NDJSON que dejan
-    // las Lambdas no era consultable.
+    // `CRAWL_NEW_FOLDERS_ONLY` solo donde es correcto: fuerza `updateBehavior` y
+    // `deleteBehavior` a `LOG`, así que la `schemaChangePolicy` de arriba queda inerte
+    // y los cambios de esquema en carpetas ya recorridas nunca se detectan. En zonas
+    // append-only particionadas por fecha eso es aceptable y ahorra el listado completo;
+    // en Curated y Quarantine, donde una partición se reescribe, no lo es.
+    const appendOnly = { recrawlPolicy: { recrawlBehavior: 'CRAWL_NEW_FOLDERS_ONLY' } };
+
+    // Raw: lo que deje el proceso de ingesta del cliente.
     new glue.CfnCrawler(this, 'rawCrawler', {
       ...crawlerCommon,
+      ...appendOnly,
       name: `${p}-raw-crawler`,
       databaseName: catalogDb(cfg, 'raw'),
       targets: { s3Targets: [{ path: `s3://${rawBucket.bucketName}/` }] },
@@ -418,6 +438,7 @@ export class ProcessingStack extends cdk.Stack {
     // archivos temporales como tablas.
     new glue.CfnCrawler(this, 'cleanCrawler', {
       ...crawlerCommon,
+      ...appendOnly,
       name: `${p}-clean-crawler`,
       databaseName: catalogDb(cfg, 'clean'),
       targets: {
@@ -431,6 +452,9 @@ export class ProcessingStack extends cdk.Stack {
     // Curated: `icebergTargets`, NO `s3Targets`. Un target S3 apuntado a un warehouse
     // Iceberg cataloga los directorios físicos `data/` y `metadata/` como si fueran
     // tablas, en vez de reconocer las tablas Iceberg.
+    //
+    // Sin `recrawlPolicy`: el MERGE reescribe particiones existentes, así que un
+    // crawl incremental dejaría el catálogo desactualizado para siempre.
     new glue.CfnCrawler(this, 'curatedCrawler', {
       ...crawlerCommon,
       name: `${p}-curated-crawler`,
@@ -441,6 +465,15 @@ export class ProcessingStack extends cdk.Stack {
           maximumTraversalDepth: 10,
         }],
       },
+    });
+
+    // Quarantine: hace consultables los rechazos del gate de calidad. Sin esto,
+    // "revisá la cuarentena" significa bajar Parquet de S3 a mano.
+    new glue.CfnCrawler(this, 'quarantineCrawler', {
+      ...crawlerCommon,
+      name: `${p}-quarantine-crawler`,
+      databaseName: catalogDb(cfg, 'quarantine'),
+      targets: { s3Targets: [{ path: `s3://${quarantineBucket.bucketName}/` }] },
     });
 
     // --- Step Functions: pipeline con retry/backoff y alerta en fallo ---
@@ -481,7 +514,7 @@ export class ProcessingStack extends cdk.Stack {
       .next(new sfn.Succeed(this, 'PipelineSucceeded'));
 
     const sfnLogs = new logs.LogGroup(this, 'PipelineLogs', {
-      retention: logs.RetentionDays.ONE_MONTH,
+      retention: logRetention(cfg),
       removalPolicy: cfg.removalPolicy,
       encryptionKey: dataKey,
     });
