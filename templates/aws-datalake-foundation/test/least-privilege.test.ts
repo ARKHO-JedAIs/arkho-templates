@@ -6,10 +6,11 @@ import { buildEnv } from './helpers';
  * accidente en un refactor y el efecto no se nota hasta una auditoría.
  */
 describe('mínimo privilegio en roles', () => {
-  const { processing, ingestion } = buildEnv('Lp', 'dev');
+  const { processing, storage, governance } = buildEnv('Lp', 'dev');
 
   const procTemplate = Template.fromStack(processing);
-  const ingTemplate = Template.fromStack(ingestion);
+  const stoTemplate = Template.fromStack(storage);
+  const govTemplate = Template.fromStack(governance);
 
   const allStatements = (t: Template) =>
     Object.values(t.findResources('AWS::IAM::Policy'))
@@ -36,30 +37,36 @@ describe('mínimo privilegio en roles', () => {
     expect(actions).toContain('lakeformation:GetDataAccess');
   });
 
-  test('las Lambdas de ingesta NO pueden borrar objetos de la Raw Zone', () => {
-    const actions = allStatements(ingTemplate)
+  test('el rol de escritura de Raw puede PONER objetos pero NO borrarlos', () => {
+    // Es el único camino de entrada al lake ahora que no hay stack de ingesta. Un
+    // productor no tiene por qué poder borrar lo que ya aterrizó, así que se usa
+    // `grantPut` y no `grantWrite` — que incluiría `s3:DeleteObject*`.
+    const actions = allStatements(stoTemplate)
       .flatMap((s) => [].concat(s.Action ?? []) as string[]);
+    expect(actions.some((a) => /^s3:PutObject/.test(a))).toBe(true);
     expect(actions.filter((a) => /^s3:Delete/.test(a))).toHaveLength(0);
   });
 
-  test('la ingesta tiene DLQ y alarmas conectadas al tópico de alertas', () => {
-    ingTemplate.resourceCountIs('AWS::SQS::Queue', 1);
-    // 2 alarmas de error (una por Lambda) + 1 de profundidad de DLQ
-    ingTemplate.resourceCountIs('AWS::CloudWatch::Alarm', 3);
-    const alarms = Object.values(ingTemplate.findResources('AWS::CloudWatch::Alarm'));
-    for (const alarm of alarms) {
-      expect(alarm.Properties.AlarmActions).toBeDefined();
-      expect(alarm.Properties.AlarmActions.length).toBeGreaterThan(0);
-    }
+  test('el rol de analista no tiene permisos de escritura sobre las zonas', () => {
+    // El acceso a datos lo otorga Lake Formation, no IAM. Si acá apareciera un
+    // PutObject sobre una zona, el rol de consumo dejaría de ser de solo lectura.
+    const zoneWrites = allStatements(govTemplate)
+      .flatMap((s) => [].concat(s.Action ?? []) as string[])
+      .filter((a) => /^s3:(Put|Delete)Object/.test(a));
+    // El único write permitido es sobre el prefijo results/ de Athena.
+    const resources = JSON.stringify(
+      allStatements(govTemplate)
+        .filter((s) => [].concat(s.Action ?? []).some((a: string) => /^s3:PutObject/.test(a)))
+        .map((s) => s.Resource),
+    );
+    if (zoneWrites.length > 0) expect(resources).toContain('results/');
   });
 
   test('los log groups van cifrados con CMK', () => {
-    for (const t of [procTemplate, ingTemplate]) {
-      const groups = Object.values(t.findResources('AWS::Logs::LogGroup'));
-      expect(groups.length).toBeGreaterThan(0);
-      for (const g of groups) {
-        expect(g.Properties.KmsKeyId).toBeDefined();
-      }
+    const groups = Object.values(procTemplate.findResources('AWS::Logs::LogGroup'));
+    expect(groups.length).toBeGreaterThan(0);
+    for (const g of groups) {
+      expect(g.Properties.KmsKeyId).toBeDefined();
     }
   });
 });

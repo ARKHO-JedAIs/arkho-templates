@@ -93,18 +93,64 @@ describe('Iceberg: configuración y mantenimiento', () => {
   });
 });
 
+describe('sin capa de ingesta', () => {
+  const { storage, processing, governance } = buildEnv('NoIng', 'dev');
+
+  test('ningún stack crea Lambdas propias', () => {
+    // La ingesta era el único origen de Lambdas. Si reaparece una acá, alguien
+    // volvió a meter un productor concreto o un target que necesita intermediario.
+    for (const stack of [storage, processing, governance]) {
+      const fns = Object.entries<any>(
+        Template.fromStack(stack).toJSON().Resources ?? {})
+        .filter(([k, v]) => v.Type === 'AWS::Lambda::Function'
+          && !k.startsWith('CustomS3AutoDeleteObjects'));
+      expect(fns).toEqual([]);
+    }
+  });
+
+  test('existe el rol de escritura de Raw, y es lo único que reemplaza la ingesta', () => {
+    const t = Template.fromStack(storage);
+    // Se excluye el rol del provider de autoDeleteObjects, que CDK crea solo en dev.
+    const ours = Object.entries<any>(t.findResources('AWS::IAM::Role'))
+      .filter(([k]) => !k.startsWith('CustomS3AutoDeleteObjects'));
+    expect(ours).toHaveLength(1);
+    expect(ours[0][1].Properties.RoleName).toMatch(/-ingest-writer$/);
+    // Sin colas ni secretos: eran de la ingesta.
+    t.resourceCountIs('AWS::SQS::Queue', 0);
+    t.resourceCountIs('AWS::SecretsManager::Secret', 0);
+  });
+});
+
 describe('crawlers', () => {
   const { cfg, processing } = buildEnv('Cr', 'dev');
   const crawlers = Object.values<any>(
     Template.fromStack(processing).findResources('AWS::Glue::Crawler'));
 
-  test('hay un crawler por zona catalogada, incluida raw', () => {
-    // La base raw existía y ningún crawler la recorría: el NDJSON de las Lambdas
-    // no era consultable.
+  test('hay un crawler por zona catalogada, incluida quarantine', () => {
+    // Sin el de quarantine, los rechazos se escriben pero no se pueden consultar:
+    // "revisá la cuarentena" significaría bajar Parquet de S3 a mano.
     const dbs = crawlers.map((c) => c.Properties.DatabaseName);
+    expect(crawlers).toHaveLength(CATALOG_ZONES.length);
     for (const zone of CATALOG_ZONES) {
       expect(dbs).toContain(catalogDb(cfg, zone));
     }
+  });
+
+  test('ninguno usa Grouping: puede fusionar dos tablas en una del catálogo', () => {
+    for (const c of crawlers) {
+      expect(c.Properties.Configuration).not.toContain('CombineCompatibleSchemas');
+    }
+  });
+
+  test('RecrawlPolicy solo en las zonas append-only', () => {
+    // Fuerza updateBehavior/deleteBehavior a LOG, así que en una zona donde se
+    // reescriben particiones dejaría el catálogo desactualizado para siempre.
+    const byDb = Object.fromEntries(
+      crawlers.map((c) => [c.Properties.DatabaseName, c.Properties.RecrawlPolicy]));
+    expect(byDb[catalogDb(cfg, 'raw')]).toBeDefined();
+    expect(byDb[catalogDb(cfg, 'clean')]).toBeDefined();
+    expect(byDb[catalogDb(cfg, 'curated')]).toBeUndefined();
+    expect(byDb[catalogDb(cfg, 'quarantine')]).toBeUndefined();
   });
 
   test('el crawler de curated usa IcebergTargets, no S3Targets', () => {

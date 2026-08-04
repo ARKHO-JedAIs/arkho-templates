@@ -93,9 +93,8 @@ describe('config por ambiente', () => {
     expect(() => getConfig('staging')).toThrow(/Ambiente desconocido/);
   });
 
-  test('los LF-Tags y crons quedan poblados tras la generación', () => {
+  test('los crons quedan poblados tras la generación', () => {
     const cfg = getConfig('dev');
-    expect(cfg.ingestSchedule).toMatch(/^cron\(/);
     expect(cfg.pipelineSchedule).toMatch(/^cron\(/);
     expect(cfg.crawlerSchedule).toMatch(/^cron\(/);
   });

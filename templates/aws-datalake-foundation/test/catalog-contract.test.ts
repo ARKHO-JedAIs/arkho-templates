@@ -1,5 +1,5 @@
 import { Template } from 'aws-cdk-lib/assertions';
-import { catalogDb } from '../lib/config/environments';
+import { CATALOG_ZONES, catalogDb } from '../lib/config/environments';
 import { buildEnv } from './helpers';
 
 /**
@@ -22,8 +22,10 @@ describe('contrato catálogo Glue: governance ↔ processing', () => {
     .map((r) => r.Properties.DatabaseName as string);
 
   test('governance crea una base por zona, con los nombres de catalogDb()', () => {
+    // Derivado de CATALOG_ZONES: agregar una zona no debería obligar a editar este
+    // test, pero sí debería fallar si governance deja de crear alguna.
     expect(declaredDbs.sort()).toEqual(
-      [catalogDb(cfg, 'raw'), catalogDb(cfg, 'clean'), catalogDb(cfg, 'curated')].sort(),
+      CATALOG_ZONES.map((z) => catalogDb(cfg, z)).sort(),
     );
   });
 

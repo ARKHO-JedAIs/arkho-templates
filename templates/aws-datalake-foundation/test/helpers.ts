@@ -4,7 +4,7 @@ import { SecurityStack } from '../lib/stacks/security-stack';
 import { StorageStack } from '../lib/stacks/storage-stack';
 import { GovernanceStack } from '../lib/stacks/governance-stack';
 import { ProcessingStack } from '../lib/stacks/processing-stack';
-import { IngestionStack } from '../lib/stacks/ingestion-stack';
+import { NetworkStack } from '../lib/stacks/network-stack';
 import { ConsumptionStack } from '../lib/stacks/consumption-stack';
 import { ObservabilityStack } from '../lib/stacks/observability-stack';
 
@@ -29,7 +29,7 @@ export interface BuiltStacks {
   readonly storage: StorageStack;
   readonly governance: GovernanceStack;
   readonly processing: ProcessingStack;
-  readonly ingestion: IngestionStack;
+  readonly network: NetworkStack;
   readonly consumption: ConsumptionStack;
   readonly observability: ObservabilityStack;
 }
@@ -73,12 +73,11 @@ export function buildStacks(
     opsKey: security.opsKey,
     alertsTopic: security.alertsTopic,
   });
-  const ingestion = new IngestionStack(app, `${prefix}Ingestion`, {
-    ...common,
-    rawBucket: storage.rawBucket,
-    dataKey: security.dataKey,
-    opsKey: security.opsKey,
-    alertsTopic: security.alertsTopic,
+  // NetworkStack se construye siempre en los tests aunque el app lo haga condicional:
+  // sin esto el barrido de tags nunca verificaba sus recursos y las entradas
+  // AWS::EC2::* de UNTAGGABLE_TYPES quedaban sin comprobar.
+  const network = new NetworkStack(app, `${prefix}Network`, {
+    ...common, vpcCidr: '10.0.0.0/16',
   });
   const consumption = new ConsumptionStack(app, `${prefix}Consumption`, {
     ...common,
@@ -100,7 +99,7 @@ export function buildStacks(
 
   return {
     app, cfg, security, storage, governance,
-    processing, ingestion, consumption, observability,
+    processing, consumption, observability, network,
   };
 }
 

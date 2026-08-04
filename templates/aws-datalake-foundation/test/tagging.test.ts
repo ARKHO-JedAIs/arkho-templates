@@ -134,14 +134,18 @@ describe('cobertura de tags en los recursos sintetizados', () => {
   const EXTRAS = { 'cost-center': '1234', team: 'data' };
   const {
     app, cfg, security, storage, governance,
-    processing, ingestion, consumption, observability,
+    processing, consumption, observability, network,
   } = buildEnv('Tag', 'dev');
 
   // Debe correr ANTES del primer Template.fromStack: esa llamada sintetiza y
   // ejecuta los aspectos, incluido el que aplica los tags.
   applyStandardTags(app, cfg, EXTRAS);
 
-  const stacks = { security, storage, governance, processing, ingestion, consumption, observability };
+  // `network` incluido a propósito: antes ningún test lo construía, así que las
+  // entradas AWS::EC2::* de UNTAGGABLE_TYPES nunca se verificaban.
+  const stacks = {
+    security, storage, governance, processing, consumption, observability, network,
+  };
   const expected = { ...baseTags(cfg), ...EXTRAS };
 
   test.each(Object.entries(stacks))(
