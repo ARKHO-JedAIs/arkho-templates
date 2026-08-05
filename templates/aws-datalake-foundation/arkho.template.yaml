@@ -7,14 +7,38 @@ description: >
   Foundational AWS Data Lake on CDK v2 (TypeScript): 5 S3 zones (Raw/Clean/Curated in
   Iceberg/Archive with Object Lock/Quarantine), a generic Glue ETL skeleton with a
   validation gate, Step Functions, enforced Lake Formation governance, KMS end-to-end
-  and multi-region CloudTrail. Ingestion is a doorway, not an implementation: a
-  Raw-zone writer role and a secret for the source database, no producers. 7-8 stacks,
-  four environments (dev/qa/stg/prod) in one AWS account or one each, cdk-nag and tests.
-version: 1.1.0
+  and CloudTrail. Ingestion is a doorway, not an implementation: a Raw-zone writer role
+  and a secret for the source database, no producers. 7-8 stacks, the environments you
+  pick (dev/qa/stg/prod) in one AWS account or one each, cdk-nag and tests.
+version: 2.0.0
 category: datalake
 tags: [aws, cdk, datalake, typescript, iac, glue, lakeformation, iceberg, vpc]
 
 parameters:
+  # Asked FIRST, and declared first on purpose: a `when` expression may only reference
+  # parameters declared EARLIER than itself, and the per-environment account parameters
+  # below gate on `'<env>' in environments`.
+  - name: environments
+    type: multichoice
+    prompt: "Which environments will this project have?"
+    description: >
+      Pick only the ones you need — the generated project gets exactly these, and
+      nothing assumes there are four. The order you click them in does not matter:
+      lib/config/environments.ts sorts them canonically (dev, qa, stg, prod — least to
+      most hardened) and the first one becomes the default target of `npm run
+      synth`/`diff`/`deploy`. Adding one later means editing that file, not
+      regenerating.
+    # The only way to demand at least one: there is no minItems.
+    required: true
+    default: [dev, prod]
+    choices:
+      - value: dev
+        hint: "buckets are destroyed by `cdk destroy`, smallest Glue workers"
+      - value: qa
+      - value: stg
+      - value: prod
+        hint: "termination protection, more Glue workers, 1 year of logs"
+
   - name: project_slug
     type: string
     prompt: "Project slug? (prefix for all resources and the npm package name)"
@@ -33,23 +57,13 @@ parameters:
     pattern: "^[^'\"\\\\`$]+$"
     patternHint: "any text without quotes, backticks, dollar signs or backslashes, e.g. Acme Corp"
 
-  - name: environment
-    type: choice
-    prompt: "Default deployment environment?"
-    default: dev
-    choices:
-      - { value: dev }
-      - { value: qa }
-      - { value: stg }
-      - { value: prod }
-
   - name: aws_region
     type: string
     prompt: "Target AWS region?"
     description: >
-      Asked once and applied to all four environments, but `region` stays a
-      per-environment field in lib/config/environments.ts so you can move one
-      environment to another region later by editing it.
+      Asked once and used to seed every environment, but `region` is spelled out in
+      each environment's own block in lib/config/environments.ts, so moving one
+      environment to another region is a one-line edit there.
     default: us-east-1
     pattern: "^[a-z]{2}-[a-z]+-[0-9]$"
     patternHint: "an AWS region such as us-east-1"
@@ -58,31 +72,40 @@ parameters:
   # only reference parameters declared EARLIER than itself.
   - name: account_strategy
     type: choice
-    prompt: "How are AWS accounts organized across the four environments?"
+    prompt: "How are AWS accounts organized across your environments?"
     default: shared
     choices:
       - value: shared
         label: "One shared account"
-        hint: "dev, qa, stg and prod all deploy into the same AWS account"
+        hint: "every environment you picked deploys into the same AWS account"
       - value: per_environment
         label: "One account per environment"
-        hint: "you will also be asked for the qa, stg and prod account IDs"
+        hint: "you will be asked for one account ID per environment you picked"
 
   - name: aws_account_id
     type: string
-    prompt: "AWS account ID for `dev` (12 digits)?"
+    prompt: "Default AWS account ID (12 digits)?"
     description: >
       With one shared account every environment deploys here. With one account per
-      environment this is dev's account, and the fallback for any environment left
+      environment this is the fallback for any environment whose `account` is left
       blank in lib/config/environments.ts.
     required: true
     pattern: "^[0-9]{12}$"
     patternHint: "exactly 12 numeric digits"
 
-  # Only asked with `per_environment`. `default: ""` is REQUIRED, not cosmetic: a
-  # parameter with no answer and no default renders the LITERAL `{{ token }}` into
-  # the generated TypeScript. The empty string is the designed signal that
-  # environments.ts coalesces against dev's account.
+  # Only asked with `per_environment`, and only for the environments actually picked.
+  # `default: ""` is REQUIRED, not cosmetic: a parameter with no answer and no default
+  # renders the LITERAL `{{ token }}` into the generated TypeScript. The empty string
+  # is the designed signal that environments.ts coalesces against `aws_account_id`.
+  - name: aws_account_id_dev
+    type: string
+    prompt: "AWS account ID for `dev` (12 digits)?"
+    required: true
+    default: ""
+    pattern: "^([0-9]{12})?$"
+    patternHint: "exactly 12 numeric digits"
+    when: "account_strategy == 'per_environment' && 'dev' in environments"
+
   - name: aws_account_id_qa
     type: string
     prompt: "AWS account ID for `qa` (12 digits)?"
@@ -90,7 +113,7 @@ parameters:
     default: ""
     pattern: "^([0-9]{12})?$"
     patternHint: "exactly 12 numeric digits"
-    when: "account_strategy == 'per_environment'"
+    when: "account_strategy == 'per_environment' && 'qa' in environments"
 
   - name: aws_account_id_stg
     type: string
@@ -99,7 +122,7 @@ parameters:
     default: ""
     pattern: "^([0-9]{12})?$"
     patternHint: "exactly 12 numeric digits"
-    when: "account_strategy == 'per_environment'"
+    when: "account_strategy == 'per_environment' && 'stg' in environments"
 
   - name: aws_account_id_prod
     type: string
@@ -108,7 +131,7 @@ parameters:
     default: ""
     pattern: "^([0-9]{12})?$"
     patternHint: "exactly 12 numeric digits"
-    when: "account_strategy == 'per_environment'"
+    when: "account_strategy == 'per_environment' && 'prod' in environments"
 
   - name: catalog_prefix
     type: string
@@ -173,7 +196,8 @@ parameters:
     description: >
       Required if you claim regulatory retention. GOVERNANCE mode, so a principal with
       s3:BypassGovernanceRetention can still correct mistakes. The default retention rule
-      is applied only in environments that do not auto-delete objects (i.e. not dev).
+      is applied only in environments that do not auto-delete objects, since a locked
+      object cannot be emptied by `cdk destroy`.
       IRREVERSIBLE: Object Lock can only be enabled when a bucket is created and can
       never be turned off.
     default: "true"
@@ -255,9 +279,10 @@ nextSteps:
   - "{{ package_manager }} install"
   - "{{ package_manager }} run build"
   - "{{ package_manager }} test"
-  - "Bootstrap: npx cdk bootstrap aws://{{ aws_account_id }}/{{ aws_region }} — repeat it for every distinct `account` in lib/config/environments.ts (up to 4 with one account per environment)"
+  - "Review lib/config/environments.ts: it holds one fully spelled-out block per environment ({{ environments }}) and every operational tunable lives there"
+  - "Bootstrap: npx cdk bootstrap aws://{{ aws_account_id }}/{{ aws_region }} — repeat it once per DISTINCT `account` across your environment blocks"
   - "Confirm the SNS alert subscription sent to {{ admin_email }}"
-  - "AWS_PROFILE=<profile-for-that-account> {{ package_manager }} run deploy:{{ environment }}"
+  - "AWS_PROFILE=<profile-for-that-account> {{ package_manager }} run deploy — deploys the default environment; add `-- -c env=<name>` for any other"
   - "Load the source database credentials into the `{{ project_slug }}-<env>/source-db` secret"
   - "Point your ingestion process at the Raw zone: assume the `{{ project_slug }}-<env>-ingest-writer` role (the producer itself is NOT part of this template — see the README)"
   - "Register your sources and curated tables in the `{{ project_slug }}-<env>-job-config` DynamoDB table, then implement transform() and build_model() in glue/jobs/"

@@ -2,8 +2,10 @@ name: CI
 
 # build, test y cdk-nag en cada PR y en cada push a main.
 #
-# `nag:all` cubre los 4 ambientes: `nag` solo mira el ambiente por defecto, así que
-# una regresión que solo aparece en prod pasaría sin que nadie la vea.
+# `nag:all` cubre TODOS los ambientes del proyecto: `nag` solo mira el ambiente por
+# defecto, así que una regresión que solo aparece en prod pasaría sin que nadie la vea.
+# Ni este workflow ni los scripts enumeran ambientes: scripts/each-env.js los lee de
+# cdk.json, así que esto sirve igual con dos ambientes que con cuatro.
 #
 # `cdk diff` necesita credenciales; si no configuraste el rol OIDC ese job se salta
 # y el resto igual corre. Ver el README, sección "Integración continua".
@@ -43,11 +45,11 @@ jobs:
 
       # No necesita credenciales AWS: no hay lookups de contexto (NetworkStack fija
       # sus AZs justamente por eso), así que esto corre en cualquier runner limpio.
-      - name: cdk-nag en los 4 ambientes
+      - name: cdk-nag en todos los ambientes
         run: npm run nag:all
 
   diff:
-    name: cdk diff (${{ matrix.env }})
+    name: cdk diff
     runs-on: ubuntu-latest
     needs: build
     # Solo con rol OIDC configurado y solo en PRs: en push a main el diff ya no
@@ -56,10 +58,6 @@ jobs:
     permissions:
       contents: read
       id-token: write   # requerido para OIDC
-    strategy:
-      fail-fast: false
-      matrix:
-        env: [dev, qa, stg, prod]
     steps:
       - uses: actions/checkout@v4
 
@@ -75,5 +73,12 @@ jobs:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
 
-      - name: cdk diff
-        run: npx cdk diff --all -c env=${{ matrix.env }}
+      # Un solo job secuencial en vez de una matriz: los ambientes salen de
+      # cdk.json en tiempo de ejecución y una matriz de GitHub Actions tiene que
+      # enumerarlos en el YAML.
+      #
+      # Ojo con una cuenta por ambiente: este job asume UN rol OIDC, así que el
+      # diff de los ambientes en otras cuentas va a fallar por permisos. Si es tu
+      # caso, cambia esto por un job por cuenta con su propio rol.
+      - name: cdk diff en todos los ambientes
+        run: npm run diff:all

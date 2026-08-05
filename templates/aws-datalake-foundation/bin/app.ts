@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import * as cdk from 'aws-cdk-lib';
 import { AwsSolutionsChecks } from 'cdk-nag';
-import { getConfig, prefix } from '../lib/config/environments';
+import { DEFAULT_ENV, getConfig, prefix } from '../lib/config/environments';
 import { applyStandardTags } from '../lib/config/tags';
 import { SecurityStack } from '../lib/stacks/security-stack';
 import { StorageStack } from '../lib/stacks/storage-stack';
@@ -13,9 +13,10 @@ import { ObservabilityStack } from '../lib/stacks/observability-stack';
 import { NetworkStack } from '../lib/stacks/network-stack';
 
 const app = new cdk.App();
-// `env` viene del context en cdk.json (baked a {{ environment }}); se puede
-// sobreescribir en despliegue con `-c env=qa|stg|prod`.
-const cfg = getConfig(app.node.tryGetContext('env'));
+// Sin `-c env=` se despliega `DEFAULT_ENV`: el primero de los ambientes del
+// proyecto en orden canónico (ver lib/config/environments.ts). Se elige cualquier
+// otro con `-c env=<nombre>`, y `getConfig` rechaza los que este proyecto no tiene.
+const cfg = getConfig(app.node.tryGetContext('env') ?? DEFAULT_ENV);
 const p = prefix(cfg);
 
 // Cuenta y región salen del ambiente: con la estrategia de una cuenta por

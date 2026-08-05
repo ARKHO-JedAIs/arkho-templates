@@ -3,8 +3,9 @@ cdk.out
 .cdk.staging
 coverage
 
-# Compilados de TypeScript (el código fuente Lambda en JS sí se versiona)
+# Compilados de TypeScript. Las excepciones son JS escrito a mano, no generado:
+# sin ellas `*.js` se los lleva y el proyecto queda sin su runner de ambientes.
 *.js
 *.d.ts
 !jest.config.js
-!lambda/**/*.js
+!scripts/*.js
