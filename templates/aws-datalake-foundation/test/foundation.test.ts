@@ -1,6 +1,12 @@
 import * as cdk from 'aws-cdk-lib';
 import { Match, Template } from 'aws-cdk-lib/assertions';
-import { CATALOG_ZONES, catalogDb, getConfig } from '../lib/config/environments';
+import {
+  CATALOG_ZONES,
+  DEFAULT_ENV,
+  DatalakeConfig,
+  catalogDb,
+  getConfig,
+} from '../lib/config/environments';
 import { buildEnv, buildStacks } from './helpers';
 
 /**
@@ -12,7 +18,7 @@ import { buildEnv, buildStacks } from './helpers';
  * abrirse, el test la atrapa.
  */
 describe('zona de cuarentena', () => {
-  const { storage, processing } = buildEnv('Q', 'dev');
+  const { storage, processing } = buildEnv('Q', DEFAULT_ENV);
   const stoTemplate = Template.fromStack(storage);
   const procTemplate = Template.fromStack(processing);
 
@@ -49,7 +55,7 @@ describe('zona de cuarentena', () => {
 });
 
 describe('Iceberg: configuración y mantenimiento', () => {
-  const { processing } = buildEnv('Ice', 'dev');
+  const { processing } = buildEnv('Ice', DEFAULT_ENV);
   const template = Template.fromStack(processing);
   const jobs = Object.values<any>(template.findResources('AWS::Glue::Job'));
 
@@ -94,7 +100,7 @@ describe('Iceberg: configuración y mantenimiento', () => {
 });
 
 describe('ingesta: puerta de entrada, no implementación', () => {
-  const { ingestion, storage, processing, governance } = buildEnv('Ing', 'dev');
+  const { ingestion, storage, processing, governance } = buildEnv('Ing', DEFAULT_ENV);
   const t = Template.fromStack(ingestion);
 
   test('el stack es exactamente un rol y un secreto', () => {
@@ -128,11 +134,9 @@ describe('ingesta: puerta de entrada, no implementación', () => {
     expect(actions.filter((a) => /^s3:Delete/.test(a))).toHaveLength(0);
   });
 
-  test('el secreto va cifrado con la ops key y sigue el removalPolicy del ambiente', () => {
+  test('el secreto va cifrado con la ops key', () => {
     const secret = Object.values<any>(t.findResources('AWS::SecretsManager::Secret'))[0];
     expect(secret.Properties.KmsKeyId).toBeDefined();
-    // dev: DESTROY. En qa/stg/prod un `destroy` no se lleva las credenciales.
-    expect(secret.DeletionPolicy).toBe('Delete');
   });
 
   test('el secreto documenta la forma esperada de las credenciales', () => {
@@ -146,16 +150,31 @@ describe('ingesta: puerta de entrada, no implementación', () => {
     expect(secret.Properties.GenerateSecretString.GenerateStringKey).toBe('password');
   });
 
-  test('prod retiene el secreto', () => {
-    const prodSecret = Object.values<any>(
-      Template.fromStack(buildEnv('IngProd', 'prod').ingestion)
-        .findResources('AWS::SecretsManager::Secret'))[0];
-    expect(prodSecret.DeletionPolicy).toBe('Retain');
+  test('el secreto sigue el removalPolicy del ambiente', () => {
+    // Configs a mano y no `getConfig('dev')`/`getConfig('prod')`: qué ambientes
+    // existen se elige en la generación. Lo que se prueba es que la credencial
+    // hereda la política del ambiente en AMBAS ramas, que es el invariante real:
+    // un `destroy` en un ambiente protegido no se lleva las credenciales.
+    const base = getConfig(DEFAULT_ENV);
+
+    const destroyed: DatalakeConfig = {
+      ...base, removalPolicy: cdk.RemovalPolicy.DESTROY, autoDeleteObjects: true,
+    };
+    const retained: DatalakeConfig = {
+      ...base, removalPolicy: cdk.RemovalPolicy.RETAIN, autoDeleteObjects: false,
+    };
+
+    const policyOf = (id: string, cfg: DatalakeConfig) =>
+      Object.values<any>(Template.fromStack(buildStacks(id, cfg).ingestion)
+        .findResources('AWS::SecretsManager::Secret'))[0].DeletionPolicy;
+
+    expect(policyOf('IngDel', destroyed)).toBe('Delete');
+    expect(policyOf('IngRet', retained)).toBe('Retain');
   });
 });
 
 describe('crawlers', () => {
-  const { cfg, processing } = buildEnv('Cr', 'dev');
+  const { cfg, processing } = buildEnv('Cr', DEFAULT_ENV);
   const crawlers = Object.values<any>(
     Template.fromStack(processing).findResources('AWS::Glue::Crawler'));
 
@@ -207,7 +226,7 @@ describe('crawlers', () => {
 });
 
 describe('gobierno aplicado, no solo declarado', () => {
-  const { cfg, governance, processing } = buildEnv('Gv', 'dev');
+  const { cfg, governance, processing } = buildEnv('Gv', DEFAULT_ENV);
   const govTemplate = Template.fromStack(governance);
   const procTemplate = Template.fromStack(processing);
 
@@ -260,7 +279,7 @@ describe('gobierno aplicado, no solo declarado', () => {
 });
 
 describe('observabilidad operacional', () => {
-  const { observability } = buildEnv('Ob', 'dev');
+  const { observability } = buildEnv('Ob', DEFAULT_ENV);
   const template = Template.fromStack(observability);
 
   test('hay alarma de "el pipeline NO corrió" con treatMissingData BREACHING', () => {
@@ -314,7 +333,7 @@ describe('observabilidad operacional', () => {
 
 describe('controles de cumplimiento', () => {
   test('Object Lock habilitado en Archive y en el bucket del trail', () => {
-    const { storage, observability } = buildEnv('Cp', 'prod');
+    const { storage, observability } = buildEnv('Cp', DEFAULT_ENV);
     const sto = Template.fromStack(storage);
     const archive = Object.entries<any>(sto.findResources('AWS::S3::Bucket'))
       .find(([k]) => k.startsWith('ArchiveZoneBucket'))![1];
@@ -330,10 +349,11 @@ describe('controles de cumplimiento', () => {
     // no puede borrar objetos bloqueados y el `cdk destroy` de dev quedaría colgado.
     //
     // Las configs se construyen A MANO y no con getConfig(): la regla también depende
-    // de archiveRetentionYears, que es un valor elegido en la generación. Un test
-    // basado en el valor bakeado pasaría en unos proyectos y fallaría en otros.
-    const base = getConfig('prod');
-    const findArchive = (id: string, cfg: typeof base) => {
+    // de archiveRetentionYears, que es un valor elegido en la generación, y de qué
+    // ambientes existen, que también. Un test basado en el valor bakeado pasaría en
+    // unos proyectos y fallaría en otros.
+    const base = getConfig(DEFAULT_ENV);
+    const findArchive = (id: string, cfg: DatalakeConfig) => {
       const { storage } = buildStacks(id, cfg);
       return Object.entries<any>(Template.fromStack(storage).findResources('AWS::S3::Bucket'))
         .find(([k]) => k.startsWith('ArchiveZoneBucket'))![1];
@@ -369,7 +389,7 @@ describe('controles de cumplimiento', () => {
   });
 
   test('se puede desactivar Object Lock por si el cliente no lo quiere', () => {
-    const { storage } = buildEnv('NoLock', 'prod', { enableObjectLock: false });
+    const { storage } = buildEnv('NoLock', DEFAULT_ENV, { enableObjectLock: false });
     const archive = Object.entries<any>(
       Template.fromStack(storage).findResources('AWS::S3::Bucket'))
       .find(([k]) => k.startsWith('ArchiveZoneBucket'))![1];
@@ -377,7 +397,7 @@ describe('controles de cumplimiento', () => {
   });
 
   test('el trail es multi-región y va a CloudWatch Logs', () => {
-    const { observability } = buildEnv('Tr', 'dev');
+    const { observability } = buildEnv('Tr', DEFAULT_ENV);
     Template.fromStack(observability).hasResourceProperties('AWS::CloudTrail::Trail', {
       IsMultiRegionTrail: true,
       EnableLogFileValidation: true,
@@ -388,7 +408,7 @@ describe('controles de cumplimiento', () => {
   test('el rol de Glue NO puede borrar de la Archive Zone', () => {
     // grantWrite incluiría s3:DeleteObject*, lo que contradice el propósito de una
     // zona de retención normativa.
-    const { processing, storage } = buildEnv('Ar', 'prod');
+    const { processing, storage } = buildEnv('Ar', DEFAULT_ENV);
     const archiveLogicalId = Object.keys(
       Template.fromStack(storage).findResources('AWS::S3::Bucket'))
       .find((k) => k.startsWith('ArchiveZoneBucket'))!;
@@ -406,10 +426,6 @@ describe('controles de cumplimiento', () => {
   });
 });
 
-describe('retención de logs por ambiente', () => {
-  test('prod nunca baja de un año', () => {
-    // Por debajo de eso no se sostiene una auditoría, sin importar lo que se haya
-    // respondido en la generación.
-    expect(getConfig('prod').logRetentionDays).toBeGreaterThanOrEqual(365);
-  });
-});
+// El piso de un año de logs en `prod` vive en test/environments.test.ts, condicionado
+// a que el proyecto tenga ese ambiente: es una afirmación sobre la config, no sobre
+// una plantilla sintetizada.

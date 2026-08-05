@@ -1,5 +1,9 @@
 import { Template } from 'aws-cdk-lib/assertions';
-import { ENVIRONMENTS, EnvName, getConfig } from '../lib/config/environments';
+import {
+  ACTIVE_ENV_NAMES,
+  DEFAULT_ENV,
+  getConfig,
+} from '../lib/config/environments';
 import { buildEnv } from './helpers';
 import {
   BASE_TAG_KEYS,
@@ -102,8 +106,8 @@ describe('sanitizeTagValue', () => {
 
 describe('set base de tags', () => {
   test('usa claves en inglés y el ambiente correcto', () => {
-    for (const name of Object.keys(ENVIRONMENTS) as EnvName[]) {
-      const tags = baseTags(ENVIRONMENTS[name]);
+    for (const name of ACTIVE_ENV_NAMES) {
+      const tags = baseTags(getConfig(name));
       expect(Object.keys(tags).sort()).toEqual([...BASE_TAG_KEYS].sort());
       expect(tags.Environment).toBe(name);
       expect(tags.ManagedBy).toBe('cdk');
@@ -111,7 +115,7 @@ describe('set base de tags', () => {
   });
 
   test('ningún valor del set base queda vacío tras la generación', () => {
-    for (const [key, value] of Object.entries(baseTags(getConfig('dev')))) {
+    for (const [key, value] of Object.entries(baseTags(getConfig(DEFAULT_ENV)))) {
       expect(value.length).toBeGreaterThan(0);
       expect(value).not.toContain('{{');  // token sin resolver
       expect(key).toMatch(/^[A-Z]/);      // claves en inglés, PascalCase
@@ -135,7 +139,7 @@ describe('cobertura de tags en los recursos sintetizados', () => {
   const {
     app, cfg, security, storage, governance,
     processing, ingestion, consumption, observability, network,
-  } = buildEnv('Tag', 'dev');
+  } = buildEnv('Tag', DEFAULT_ENV);
 
   // Debe correr ANTES del primer Template.fromStack: esa llamada sintetiza y
   // ejecuta los aspectos, incluido el que aplica los tags.

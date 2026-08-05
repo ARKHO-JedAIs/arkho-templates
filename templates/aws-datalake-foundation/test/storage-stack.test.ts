@@ -1,8 +1,9 @@
 import { Match, Template } from 'aws-cdk-lib/assertions';
+import { DEFAULT_ENV } from '../lib/config/environments';
 import { buildEnv } from './helpers';
 
 describe('StorageStack', () => {
-  const { cfg, storage } = buildEnv('Test', 'dev');
+  const { cfg, storage } = buildEnv('Test', DEFAULT_ENV);
   const template = Template.fromStack(storage);
 
   test('crea las 5 zonas + Athena results + access logs (7 buckets)', () => {

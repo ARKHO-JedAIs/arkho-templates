@@ -1,4 +1,5 @@
 import { Template } from 'aws-cdk-lib/assertions';
+import { DEFAULT_ENV } from '../lib/config/environments';
 import { buildEnv } from './helpers';
 
 /**
@@ -6,7 +7,7 @@ import { buildEnv } from './helpers';
  * accidente en un refactor y el efecto no se nota hasta una auditoría.
  */
 describe('mínimo privilegio en roles', () => {
-  const { processing, ingestion, governance } = buildEnv('Lp', 'dev');
+  const { processing, ingestion, governance } = buildEnv('Lp', DEFAULT_ENV);
 
   const procTemplate = Template.fromStack(processing);
   const ingTemplate = Template.fromStack(ingestion);

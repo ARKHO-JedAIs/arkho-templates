@@ -1,5 +1,5 @@
 import { Template } from 'aws-cdk-lib/assertions';
-import { CATALOG_ZONES, catalogDb } from '../lib/config/environments';
+import { CATALOG_ZONES, DEFAULT_ENV, catalogDb } from '../lib/config/environments';
 import { buildEnv } from './helpers';
 
 /**
@@ -11,7 +11,7 @@ import { buildEnv } from './helpers';
  * Estos tests fallan si alguien cambia una de las dos puntas.
  */
 describe('contrato catálogo Glue: governance ↔ processing', () => {
-  const { cfg, governance, processing } = buildEnv('Cc', 'dev');
+  const { cfg, governance, processing } = buildEnv('Cc', DEFAULT_ENV);
 
   const govTemplate = Template.fromStack(governance);
   const procTemplate = Template.fromStack(processing);

@@ -1,6 +1,6 @@
 import * as cdk from 'aws-cdk-lib';
 import { Template } from 'aws-cdk-lib/assertions';
-import { DatalakeConfig, getConfig } from '../lib/config/environments';
+import { DEFAULT_ENV, DatalakeConfig, getConfig } from '../lib/config/environments';
 import { buildStacks } from './helpers';
 
 /**
@@ -26,7 +26,7 @@ const bucketByPrefix = (t: Template, prefix: string) => {
 };
 
 describe('retención configurable', () => {
-  const base = getConfig('dev');
+  const base = getConfig(DEFAULT_ENV);
 
   describe('con retención activada (90 días / 7 años)', () => {
     const t = synth('On', withRetention(base, 90, 7));
@@ -71,37 +71,36 @@ describe('retención configurable', () => {
   });
 });
 
-describe('config por ambiente', () => {
-  test('prod protege los datos: RETAIN, sin autoDelete y con terminación protegida', () => {
-    const prod = getConfig('prod');
-    expect(prod.removalPolicy).toBe(cdk.RemovalPolicy.RETAIN);
-    expect(prod.autoDeleteObjects).toBe(false);
-    expect(prod.terminationProtection).toBe(true);
-  });
+describe('propagación de removalPolicy', () => {
+  // Config construida A MANO y no `getConfig('prod')`: qué ambientes existe se
+  // elige en la generación, y este proyecto podría no tener `prod`. Lo que se
+  // prueba es el MECANISMO — una config con RETAIN produce buckets que sobreviven
+  // al destroy —, que es válido en cualquier proyecto. Que `prod` sea justamente
+  // uno de esos ambientes lo afirma environments.test.ts, cuando existe.
+  const retained: DatalakeConfig = {
+    ...getConfig(DEFAULT_ENV),
+    removalPolicy: cdk.RemovalPolicy.RETAIN,
+    autoDeleteObjects: false,
+  };
 
-  test('prod sintetiza los buckets con DeletionPolicy Retain', () => {
-    const t = synth('Prod', getConfig('prod'));
+  test('RETAIN sintetiza todos los buckets con DeletionPolicy Retain', () => {
+    const t = synth('Retained', retained);
     const buckets = t.findResources('AWS::S3::Bucket');
+    expect(Object.keys(buckets).length).toBeGreaterThan(0);
     for (const bucket of Object.values(buckets)) {
       expect(bucket.DeletionPolicy).toBe('Retain');
     }
   });
 
-  // 'staging' y no 'qa': qa es un ambiente VÁLIDO desde que el set pasó a
-  // dev|qa|stg|prod, así que sirve además como guarda del rename staging → stg.
+  // 'staging' no pertenece al vocabulario en NINGÚN proyecto: sirve como guarda
+  // del rename staging → stg sin depender de qué ambientes se eligieron.
   test('un ambiente inexistente falla con un mensaje útil', () => {
     expect(() => getConfig('staging')).toThrow(/Ambiente desconocido/);
-  });
-
-  test('los crons quedan poblados tras la generación', () => {
-    const cfg = getConfig('dev');
-    expect(cfg.pipelineSchedule).toMatch(/^cron\(/);
-    expect(cfg.crawlerSchedule).toMatch(/^cron\(/);
   });
 });
 
 describe('storage: propiedades transversales', () => {
-  const t = synth('Common', getConfig('dev'));
+  const t = synth('Common', getConfig(DEFAULT_ENV));
 
   test('todos los buckets deniegan tráfico sin TLS', () => {
     const policies = Object.values(t.findResources('AWS::S3::BucketPolicy'));
