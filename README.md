@@ -11,13 +11,13 @@ version produced it.
 | Template | Latest | Description |
 |---|---|---|
 | [`react-spa`](templates/react-spa/) | `react-spa@1.1.0` | React SPA (TypeScript, Vite) wired to Cognito auth and a backend API — atomic-design structure, shadcn/Radix UI, React Query, Axios, Zustand, and Zod. |
-| [`aws-datalake-foundation`](templates/aws-datalake-foundation/) | `aws-datalake-foundation@1.0.2` | Foundational AWS Data Lake on CDK v2 (TypeScript) — 5 S3 zones (Raw/Clean/Curated in Iceberg/Archive in Glacier/Quarantine), Glue ETL orchestrated by Step Functions with a validation gate, enforced Lake Formation + Glue Data Catalog governance, KMS encryption, CloudTrail auditing, optional VPC, split into 7–8 stacks. Ingestion is a doorway rather than an implementation: a Raw-zone writer role and a secret for the source database, no producers. You pick which environments the project has (from dev/qa/stg/prod), deployable to one shared AWS account or one account each, with every operational tunable spelled out per environment in code. Governed resource tagging, cdk-nag and tests. |
+| [`aws-datalake-foundation`](templates/aws-datalake-foundation/) | `aws-datalake-foundation@1.1.2` | Foundational AWS Data Lake on CDK v2 (TypeScript) — 5 S3 zones (Raw/Clean/Curated in Iceberg/Archive in Glacier/Quarantine), Glue ETL orchestrated by Step Functions with a validation gate, enforced Lake Formation + Glue Data Catalog governance, KMS encryption, CloudTrail auditing, optional VPC, split into 7–8 stacks. Ingestion is a doorway rather than an implementation: a Raw-zone writer role and a secret for the source database, no producers. You pick which environments the project has (from dev/qa/stg/prod), deployable to one shared AWS account or one account each, with every operational tunable spelled out per environment in code. Governed resource tagging, cdk-nag and tests. |
 
 > Latest versions are the source of truth in git tags: `git tag -l '<name>@*'`.
 > `registry.json` mirrors this table and must be updated in the same commit as a
-> manifest change. Note: `aws-datalake-foundation` currently has `version: 2.0.0`
-> in its manifest, which is **not yet tagged** — the newest published tag is
-> `1.0.2`.
+> manifest change. Note: `aws-datalake-foundation@1.1.2` is declared in the manifest
+> and in this table but is **not yet tagged** — the newest published tag is `1.1.1`.
+> Until it is tagged, `--template-version 1.1.2` will not resolve.
 
 ## Using a template
 
