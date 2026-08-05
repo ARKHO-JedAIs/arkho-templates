@@ -6,13 +6,10 @@ title: AWS Data Lake Foundation (CDK)
 description: >
   Foundational AWS Data Lake on CDK v2 (TypeScript): 5 S3 zones (Raw/Clean/Curated in
   Iceberg/Archive with Object Lock/Quarantine), a generic Glue ETL skeleton with a
-  validation gate, Step Functions orchestration, enforced Lake Formation governance,
-  KMS end-to-end and multi-region CloudTrail. The ingestion stack is a doorway, not an
-  implementation: it ships the Raw-zone writer role and a Secrets Manager secret for the
-  source database, and nothing else — the producer varies too much per project. Split
-  into 7–8 stacks (security, storage, governance, ingestion, processing, consumption,
-  observability, optional network) with per-environment config
-  (dev/qa/stg/prod) in one shared AWS account or one account each, cdk-nag and tests.
+  validation gate, Step Functions, enforced Lake Formation governance, KMS end-to-end
+  and multi-region CloudTrail. Ingestion is a doorway, not an implementation: a
+  Raw-zone writer role and a secret for the source database, no producers. 7-8 stacks,
+  four environments (dev/qa/stg/prod) in one AWS account or one each, cdk-nag and tests.
 version: 2.0.0
 category: datalake
 tags: [aws, cdk, datalake, typescript, iac, glue, lakeformation, iceberg, vpc]
