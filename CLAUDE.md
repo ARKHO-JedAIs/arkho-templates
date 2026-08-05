@@ -21,12 +21,16 @@ renders into a project that won't build. To verify a change to
 `templates/aws-datalake-foundation`:
 
 1. Copy the template to a scratch dir and substitute every token with realistic
-   values. Do this **twice**, with contrasting answers — e.g. `account_strategy`
-   `shared` + retention on + VPC off + no extra tags, and `per_environment` +
-   retention `0` + VPC on + extra tags set. Several past defects only appeared in
-   one branch.
+   values. Do this **three** times, with contrasting answers:
+   - `environments: dev, prod` + `account_strategy: shared` + retention on + VPC off
+   - `environments: dev, qa, stg, prod` + `per_environment` + retention `0` + VPC on
+     + extra tags set
+   - `environments: prod, stg` — **no `dev`, listed out of canonical order.** This is
+     the one that catches code assuming `dev` exists and a broken canonical sort.
+
+   Several past defects only appeared in one branch.
 2. In each render: `npm install && npm run build && npm test`, then
-   `npx cdk synth -c env=<env>` for **all four** environments and `npm run nag:all`.
+   `npx cdk synth` (no `-c env=`, exercising `DEFAULT_ENV`) and `npm run nag:all`.
 3. `npm run nag:all` must exit 0 for every environment. It is a real gate —
    cdk-nag suppressions live next to the code they excuse and every one carries a
    `reason`. If you add a permission, scope it rather than widening a suppression.
@@ -43,6 +47,34 @@ parameter carrying a `when` MUST declare a `default`. `environments.ts` relies o
 this: the per-environment account tokens render as `''` in `shared` mode and are
 coalesced in TypeScript by `accountOr()`. That empty string is by design.
 
+**The `environments` multichoice, and why the design looks like it does.** The set of
+environments a project has is chosen at generation time, which collides with flat
+substitution in three ways that are worth knowing before touching it:
+
+- A `multichoice` renders as `value.join(", ")` — comma **and** space. `csv()` in
+  `environments.ts` absorbs that. An empty selection renders `""`, not the literal
+  token, so `required: true` is the only guard for "at least one" (there is no
+  `minItems`).
+- **The order the answer arrives in is the order the user clicked**, not the declared
+  one. `environments.ts` re-sorts against `CANONICAL_ORDER` because `DEFAULT_ENV`
+  depends on the first element being deterministic. Don't remove that filter.
+- **A parameter's `choices` cannot be derived from another answer.** That is why there
+  is no "default environment" parameter: it could not be narrowed to the chosen set,
+  so it would let a `dev`+`prod` project bake `stg` into `cdk.json` and die on the
+  first `synth`. It is derived in TypeScript instead.
+
+Consequences that look like redundancy but aren't: `environments.ts` carries all four
+environment blocks even when the project uses two (the engine can't emit a variable
+number of entries — the inactive blocks are the catalog you add from), and the env
+list appears in **both** `cdk.json` context and `environments.ts` (`scripts/each-env.js`
+must be plain node, so it reads the JSON; `test/environments.test.ts` asserts the two
+agree). `ENVIRONMENTS` is `Partial<Record<EnvName, …>>` on purpose — go through
+`getConfig()`, which validates.
+
+Nothing under `lib/stacks/` branches on an environment name; all behaviour flows
+through `DatalakeConfig` fields. Keep it that way — it is what makes an arbitrary
+subset work at all.
+
 Note `synth` for stacks with concrete accounts can need AWS credentials if any
 construct does a context lookup. `NetworkStack` pins `availabilityZones`
 specifically so `synth` works offline — don't replace it with `maxAzs`.
@@ -55,11 +87,12 @@ as a manifest change. See `.claude/skills/arkho-template-publish/`.
 
 ## What gets asked vs what lives in code
 
-The questionnaire asks **only what cannot change later without pain**: identity,
-accounts, region, catalog prefix, alert email, tags, and the structural flags
-(Object Lock — irreversible; VPC). Every operational tunable — retentions,
-thresholds, crons, sizing — lives in `lib/config/environments.ts`, editable per
-environment. Deploy-time knobs go in `cdk.json` context (`lfAdminArn`,
+The questionnaire asks **only what cannot change later without pain**: the environment
+set, identity, accounts, region, catalog prefix, alert email, tags, and the structural
+flags (Object Lock — irreversible; VPC). Every operational tunable — retentions,
+thresholds, crons, sizing — lives in `lib/config/environments.ts`, spelled out
+explicitly in each environment's own block (no shared `BASE` to inherit from, on
+purpose: a one-environment change should be a one-line edit). Deploy-time knobs go in `cdk.json` context (`lfAdminArn`,
 `lfStrictMode`, `analystPrincipalArn`, `ingestPrincipalArn`).
 
 Adding a parameter is the expensive option: it lengthens the questionnaire for every

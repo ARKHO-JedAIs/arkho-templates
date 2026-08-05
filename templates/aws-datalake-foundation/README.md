@@ -30,8 +30,7 @@ multi-region CloudTrail auditing, and optional VPC isolation.
 - Node.js 20+, AWS CLI configurado
 - Bootstrap por cada par cuenta/región en uso. Con una cuenta compartida basta uno:
   `npx cdk bootstrap aws://{{ aws_account_id }}/{{ aws_region }}`. Con una cuenta
-  por ambiente, repítelo por cada `account` distinto de `lib/config/environments.ts`
-  (hasta 4).
+  por ambiente, repítelo por cada `account` distinto de `lib/config/environments.ts`.
 - Para `governance`: el principal que despliega debe ser admin de Lake Formation
   (o pasar `-c lfAdminArn=arn:...`)
 
@@ -39,48 +38,84 @@ multi-region CloudTrail auditing, and optional VPC isolation.
 
 ```bash
 {{ package_manager }} install
-{{ package_manager }} run build        # compila TypeScript
-{{ package_manager }} test             # tests de infraestructura (jest + assertions)
-{{ package_manager }} run synth:{{ environment }}   # genera CloudFormation
-{{ package_manager }} run nag          # valida con cdk-nag (AwsSolutions); debe salir en 0
-{{ package_manager }} run diff:{{ environment }}
-{{ package_manager }} run deploy:{{ environment }}
+{{ package_manager }} run build     # compila TypeScript
+{{ package_manager }} test          # tests de infraestructura (jest + assertions)
+{{ package_manager }} run synth      # genera CloudFormation del ambiente por defecto
+{{ package_manager }} run nag        # valida con cdk-nag (AwsSolutions); debe salir en 0
+{{ package_manager }} run nag:all    # lo mismo en TODOS tus ambientes
+{{ package_manager }} run diff
+{{ package_manager }} run deploy
 ```
 
-## Ambientes disponibles
+Ninguno de esos scripts nombra un ambiente. `synth`, `diff`, `deploy` y `nag`
+trabajan sobre el **ambiente por defecto**; para cualquier otro, pasa el contexto:
 
-| Ambiente | RemovalPolicy | autoDelete | Terminación protegida | Workers Glue | Athena cutoff | Aprobación en deploy |
+```bash
+{{ package_manager }} run deploy -- -c env=prod
+{{ package_manager }} run diff -- -c env=stg
+```
+
+Los `:all` (`synth:all`, `diff:all`, `nag:all`) recorren todos los ambientes del
+proyecto vía `scripts/each-env.js`, que lee la lista del context `environments` de
+`cdk.json`. Nada enumera ambientes a mano, así que esto sirve igual con dos que con
+cuatro.
+
+## Ambientes de este proyecto
+
+Se eligieron en la generación: **{{ environments }}**.
+
+El **ambiente por defecto** es el primero de esa lista en orden canónico
+(`dev` → `qa` → `stg` → `prod`, de menos a más endurecido) y está expuesto como
+`DEFAULT_ENV` en `lib/config/environments.ts`. Es el que usan `synth`/`diff`/
+`deploy` sin `-c env=`.
+
+`lib/config/environments.ts` trae un **catálogo** con los cuatro ambientes que el
+template sabe construir, cada uno con sus 17 campos escritos explícitamente, y
+expone solo los de `ACTIVE_ENV_NAMES`. Los bloques de los ambientes que no usas
+quedan ahí como plantilla completa:
+
+| Ambiente | RemovalPolicy | autoDelete | Terminación protegida | Workers Glue | Athena cutoff | Retención de logs |
 |---|---|---|---|---|---|---|
-| `dev` | DESTROY | Sí | No | 3 | 5 GiB | — |
-| `qa` | RETAIN | No | No | 3 | 5 GiB | — |
-| `stg` | RETAIN | No | No | 3 | 5 GiB | broadening |
-| `prod` | RETAIN | No | Sí | 5 | 10 GiB | broadening |
+| `dev` | DESTROY | Sí | No | 3 | 5 GiB | 30 d |
+| `qa` | RETAIN | No | No | 3 | 5 GiB | 30 d |
+| `stg` | RETAIN | No | No | 3 | 5 GiB | 30 d |
+| `prod` | RETAIN | No | Sí | 5 | 10 GiB | 365 d |
 
-Sobreescribir en despliegue: `cdk deploy -c env=prod`
+`deploy` lleva `--require-approval broadening` siempre: te pide confirmación cuando
+un cambio amplía permisos, en cualquier ambiente.
 
-La **cuenta AWS de cada ambiente** vive en el campo `account` de
-`lib/config/environments.ts` — fuente única de verdad de dónde despliega cada uno.
+### Agregar o quitar un ambiente después
+
+No hace falta regenerar el proyecto:
+
+1. Agrega (o saca) el nombre de `ACTIVE_ENV_NAMES` en `lib/config/environments.ts`.
+2. Agrega (o saca) el mismo nombre del context `environments` de `cdk.json` — hay un
+   test que falla si las dos listas divergen.
+3. Completa el `account` de ese ambiente en su bloque del catálogo, si va a otra
+   cuenta.
+4. `npx cdk bootstrap aws://<cuenta>/<región>` para el par nuevo.
+
+Un ambiente fuera de la lista falla en `getConfig` con un mensaje que dice cuáles sí
+existen, en vez de sintetizar algo a medias.
 
 ## Cuentas y credenciales
 
 Este proyecto se generó con la estrategia **`{{ account_strategy }}`**:
 
-- `shared` → los 4 ambientes despliegan en la misma cuenta. Coexisten sin chocar
+- `shared` → todos los ambientes despliegan en la misma cuenta. Coexisten sin chocar
   porque todo nombre físico lleva el prefijo `{{ project_slug }}-<ambiente>` y las
   claves de LF-Tag van sufijadas por ambiente.
-- `per_environment` → cada ambiente tiene su cuenta. `dev` usa la cuenta
-  respondida en la generación; los otros la suya. Un ambiente cuyo ID quedó vacío
-  cae en la de `dev`.
+- `per_environment` → cada ambiente tiene su cuenta, en el campo `account` de su
+  bloque. Un ambiente cuyo ID quedó vacío cae en la cuenta por defecto
+  (`aws_account_id`), que es la fuente única de ese fallback.
 
 Los scripts de npm **no llevan `--profile` a propósito**: el perfil se elige por
 variable de entorno, así el mismo script sirve para cualquier organización de
 perfiles (incluido CI con roles OIDC, donde no hay perfiles).
 
 ```bash
-AWS_PROFILE=<perfil-dev>  {{ package_manager }} run deploy:dev
-AWS_PROFILE=<perfil-qa>   {{ package_manager }} run deploy:qa
-AWS_PROFILE=<perfil-stg>  {{ package_manager }} run deploy:stg
-AWS_PROFILE=<perfil-prod> {{ package_manager }} run deploy:prod
+AWS_PROFILE=<perfil-del-default> {{ package_manager }} run deploy
+AWS_PROFILE=<perfil-de-prod>     {{ package_manager }} run deploy -- -c env=prod
 ```
 
 Como la cuenta va fijada explícitamente en cada stack, el CDK CLI **aborta** si las
@@ -93,11 +128,13 @@ el perfil de dev — no lo desactives dejando las cuentas agnósticas.
 
 ## Configuración
 
-El archivo `lib/config/environments.ts` centraliza la config por ambiente. Los
-parámetros claves ya fueron bakeados en la generación (aplicados a los 4 ambientes):
+**Todo tunable operacional vive en `lib/config/environments.ts`, escrito por
+ambiente.** No hay valores compartidos por herencia: cada bloque declara sus 17
+campos, así que ajustar uno solo en `prod` es editar una línea en su bloque. Estos
+son los que se sembraron con las respuestas de la generación:
 
 - Región: **{{ aws_region }}** (se preguntó una vez, pero `region` es un campo **por
-  ambiente**: puedes mover uno a otra región editando su entrada — recuerda hacer
+  ambiente**: puedes mover uno a otra región editando su bloque — recuerda hacer
   `cdk bootstrap` en el nuevo par cuenta/región)
 - Transición Raw → Glacier IR: **{{ raw_retention_days }} días** (0 = sin transición, los datos quedan en S3 Standard)
 - Retención Archive: **{{ archive_retention_years }} años** (0 = sin expiración, retención indefinida)
@@ -131,7 +168,7 @@ Toda la lógica vive en `lib/config/tags.ts`, el **único** archivo que llama a
 |---|---|---|
 | `Project` | `{{ project_slug }}` | parámetro `project_slug` |
 | `Client` | nombre del cliente | `client_name`, saneado (ver abajo) |
-| `Environment` | `dev` \| `qa` \| `stg` \| `prod` | ambiente en despliegue |
+| `Environment` | el ambiente en despliegue | `cfg.envName` |
 | `ManagedBy` | `cdk` | fijo |
 | `Owner` | `{{ tag_owner }}` | parámetro `tag_owner` |
 
@@ -159,7 +196,8 @@ CloudFormation, así que ni un `tags:` explícito ni un aspecto pueden agregarla
 - Todo `AWS::LakeFormation::*`.
 - Políticas y accesorios: `IAM::Policy`, `S3::BucketPolicy`, `SQS::QueuePolicy`,
   `SNS::Subscription`, `KMS::Alias`, `Lambda::Permission`.
-- El provider de `autoDeleteObjects` (solo en `dev`): CDK lo crea fuera del árbol
+- El provider de `autoDeleteObjects` (solo en ambientes con `removalPolicy: DESTROY`,
+  típicamente `dev`): CDK lo crea fuera del árbol
   de constructs, así que el aspecto de tagging no lo alcanza.
 
 Todos son recursos de metadata o de política, **de costo cero**, así que la
@@ -208,8 +246,8 @@ aws secretsmanager put-secret-value \
   --secret-string '{"engine":"postgres","host":"...","port":"5432","dbname":"...","username":"...","password":"..."}'
 ```
 
-Sigue el `removalPolicy` del ambiente: en qa/stg/prod un `cdk destroy` **no** se lleva
-las credenciales. No se rota automáticamente — Secrets Manager necesitaría una Lambda
+Sigue el `removalPolicy` del ambiente: en los que retienen, un `cdk destroy` **no** se
+lleva las credenciales. No se rota automáticamente — Secrets Manager necesitaría una Lambda
 de rotación específica del motor y con acceso de red al origen, y rotar a ciegas
 rompería la conexión; la renovación es del dueño de esa base.
 
@@ -308,7 +346,7 @@ migrar a `CfnTableOptimizer` es el upgrade natural: lo gestiona AWS y te ahorra 
 ## Integración continua
 
 `.github/workflows/ci.yml` corre en cada PR: `build`, `test` y `nag:all` sin
-credenciales AWS (no hay lookups de contexto). El `cdk diff` de los 4 ambientes es
+credenciales AWS (no hay lookups de contexto). El `cdk diff` de todos tus ambientes es
 opcional y requiere configurar en el repo de GitHub:
 
 | Variable de repo | Valor |
@@ -423,7 +461,7 @@ tabla y columna desde SageMaker Studio o con más `CfnTagAssociation`.
 
 - **`npm run nag` debe salir en 0.** Las supresiones de cdk-nag viven junto al
   código que las justifica y cada una lleva su `reason`. Si agregas permisos,
-  acótalos en vez de ampliar una supresión. `npm run nag:all` corre los 4
+  acótalos en vez de ampliar una supresión. `npm run nag:all` corre todos tus
   ambientes — úsalo antes de un release, porque `nag` solo cubre el ambiente
   por defecto.
 - **Runtime de Lambda:** está fijado al más reciente que conoce `aws-cdk-lib`.
@@ -445,8 +483,8 @@ automático de Iceberg; FGAC de Lake Formation efectivo, no declarativo; Object 
 en las zonas de retención; Step Functions con backoff exponencial; alarmas que cubren
 también la ausencia de ejecuciones; CloudTrail multi-región con validación de
 integridad y alarmas sobre su contenido; etiquetado transversal para asignación de
-costos; cdk-nag (AWS Solutions) como gate real en los 4 ambientes; 109 tests de
-infraestructura.
+costos; cdk-nag (AWS Solutions) como gate real en todos los ambientes del proyecto;
+tests de infraestructura.
 
 **Cifrado con CMK** en S3 (las 5 zonas + resultados de Athena), DynamoDB, SNS, SQS,
 Secrets Manager, Glue (datos, bookmarks y logs) y los log groups del proyecto. Dos
@@ -463,24 +501,44 @@ contenido del trail.
 
 Si regeneras un proyecto **ya desplegado**, estos cambios no son retrocompatibles.
 
-**Primero, la ingesta:** el stack `ingestion` se reduce a un rol y un secreto. Un
+**Primero, los ambientes se eligen.** El parámetro `environment` (el ambiente por
+defecto) **desapareció**: ahora se pregunta `environments`, el conjunto que tendrá el
+proyecto, y el ambiente por defecto se deriva del primero en orden canónico. Con eso:
+
+- Se fue la clave `env` del context de `cdk.json`; apareció `environments`.
+- **Se fueron los 12 scripts por ambiente.** `npm run deploy:prod` pasa a
+  `npm run deploy -- -c env=prod`. Si los tenías en runbooks o en tu propio CI, hay
+  que actualizarlos. Los `:all` ahora pasan por `scripts/each-env.js`.
+- La matriz de 4 ambientes del workflow de CI se reemplaza por un job secuencial que
+  corre `diff:all`. Con una cuenta por ambiente, ese job asume un solo rol OIDC: si
+  necesitas diff en varias cuentas, divídelo en un job por cuenta.
+- `ENVIRONMENTS` pasa de `Record<EnvName, …>` a `Partial<Record<EnvName, …>>`. Código
+  propio que hacía `ENVIRONMENTS.qa.region` deja de compilar: usa `getConfig('qa')`.
+- `aws_account_id` cambió de significado: era la cuenta de `dev`, ahora es la
+  compartida y el fallback. En modo `per_environment`, `dev` tiene su propio
+  `aws_account_id_dev`.
+
+Nada de esto mueve un recurso desplegado: son parámetros, scripts y tipos. Los stacks
+de un ambiente que sigas usando se sintetizan igual.
+
+**Segundo, la ingesta:** el stack `ingestion` se reduce a un rol y un secreto. Un
 proyecto desplegado pierde las Lambdas de GA4 y Meta Ads, el SFTP Connector, la DLQ y
 sus alarmas. Los secretos viejos (`/ga4-api`, `/meta-ads-api`, `/sftp-origen`) tienen
 `RemovalPolicy.RETAIN`, así que quedan huérfanos y hay que borrarlos a mano. Si
 dependías de esas Lambdas, guárdalas antes de regenerar: no están en el template nuevo.
 
-**Segundo, parámetros que se movieron:** `quarantine_retention_days`,
+**Tercero, parámetros que se movieron:** `quarantine_retention_days`,
 `quarantine_alarm_threshold`, `iceberg_snapshot_retention_days` y
 `log_retention_days` ya no se preguntan — se editan en `environments.ts`.
 `analyst_principal_arn` pasó a `-c analystPrincipalArn`. Si automatizabas `generate`
 con esos flags, deja de funcionar.
 
-**Tercero, los defaults de LF-Tag cambiaron y su orden es semántico.** Si tu lake
+**Cuarto, los defaults de LF-Tag cambiaron y su orden es semántico.** Si tu lake
 usaba `pii,interno,publico`, mantén el más restrictivo primero.
 
-**Cuarto**, `CatalogZone` gana `quarantine`: una base Glue y un crawler nuevos.
+**Quinto**, `CatalogZone` gana `quarantine`: una base Glue y un crawler nuevos.
 
-**Quinto**, los crawlers de Curated y Quarantine pierden `RecrawlPolicy`, y todos
+**Sexto**, los crawlers de Curated y Quarantine pierden `RecrawlPolicy`, y todos
 pierden `Grouping`. El primer crawl posterior recorre todo y puede **separar** tablas
 que se habían fusionado por `CombineCompatibleSchemas`.
 

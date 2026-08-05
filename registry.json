@@ -16,7 +16,7 @@
       "version": "2.0.0",
       "category": "datalake",
       "tags": ["aws", "cdk", "datalake", "typescript", "iac", "glue", "lakeformation", "iceberg", "vpc", "multi-account", "finops", "data-quality", "governance", "compliance"],
-      "description": "Foundational AWS Data Lake on CDK v2: 5 S3 zones (Raw/Clean/Curated Iceberg/Archive/Quarantine), a generic Glue ETL skeleton with a validation gate, Step Functions, enforced Lake Formation FGAC with an analyst role, KMS, Object Lock, multi-region CloudTrail with alarms, optional VPC. The ingestion stack is a doorway rather than an implementation — a Raw-zone writer role and a secret for the source database, no vendor-specific producers. Four environments (dev/qa/stg/prod) in one shared AWS account or one account each, governed resource tagging, and CI for the generated project.",
+      "description": "Foundational AWS Data Lake on CDK v2: 5 S3 zones (Raw/Clean/Curated Iceberg/Archive/Quarantine), a generic Glue ETL skeleton with a validation gate, Step Functions, enforced Lake Formation FGAC with an analyst role, KMS, Object Lock, multi-region CloudTrail with alarms, optional VPC. The ingestion stack is a doorway rather than an implementation — a Raw-zone writer role and a secret for the source database, no vendor-specific producers. The environments you pick from dev/qa/stg/prod, in one shared AWS account or one account each, with every operational tunable spelled out per environment in code. Governed resource tagging and CI for the generated project.",
       "path": "templates/aws-datalake-foundation",
       "status": "available"
     }
