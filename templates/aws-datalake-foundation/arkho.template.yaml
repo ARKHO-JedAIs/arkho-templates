@@ -10,7 +10,7 @@ description: >
   and multi-region CloudTrail. Ingestion is a doorway, not an implementation: a
   Raw-zone writer role and a secret for the source database, no producers. 7-8 stacks,
   four environments (dev/qa/stg/prod) in one AWS account or one each, cdk-nag and tests.
-version: 2.0.0
+version: 1.1.0
 category: datalake
 tags: [aws, cdk, datalake, typescript, iac, glue, lakeformation, iceberg, vpc]
 
