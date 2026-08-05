@@ -28,7 +28,9 @@ renders into a project that won't build. To verify a change to
    - `environments: prod, stg` — **no `dev`, listed out of canonical order.** This is
      the one that catches code assuming `dev` exists and a broken canonical sort.
 
-   Several past defects only appeared in one branch.
+   Several past defects only appeared in one branch. Also delete the `config/*.env`
+   of the environments not picked: that is what `templating.include[].when` does, and
+   without it every render discovers four environments and the whole point is lost.
 2. In each render: `npm install && npm run build && npm test`, then
    `npx cdk synth` (no `-c env=`, exercising `DEFAULT_ENV`) and `npm run nag:all`.
 3. `npm run nag:all` must exit 0 for every environment. It is a real gate —
@@ -63,13 +65,35 @@ substitution in three ways that are worth knowing before touching it:
   so it would let a `dev`+`prod` project bake `stg` into `cdk.json` and die on the
   first `synth`. It is derived in TypeScript instead.
 
-Consequences that look like redundancy but aren't: `environments.ts` carries all four
-environment blocks even when the project uses two (the engine can't emit a variable
-number of entries — the inactive blocks are the catalog you add from), and the env
-list appears in **both** `cdk.json` context and `environments.ts` (`scripts/each-env.js`
-must be plain node, so it reads the JSON; `test/environments.test.ts` asserts the two
-agree). `ENVIRONMENTS` is `Partial<Record<EnvName, …>>` on purpose — go through
-`getConfig()`, which validates.
+**One config file per environment, and file-level granularity is the point.** Every
+operational tunable lives in `config/<env>.env`, not in TypeScript. This is the one
+place where `templating.include[].when` is exactly the right tool: it decides **per
+file** whether it is copied at all (`copy.ts` rules 3), so a `dev`+`prod` project
+receives only `config/dev.env` and `config/prod.env` — there is no catalog of unused
+entries to carry, and no list to keep in sync.
+
+Two consequences worth knowing before editing this:
+
+- **An environment exists because its file exists.** `environments.ts` discovers them
+  with `readdirSync` on `config/`, so `scripts/each-env.js` can discover the same set
+  the same way and cannot drift from the app. Nothing enumerates environments —
+  that's why `cdk.json` has no env list and why there is no agreement test anymore.
+  A name outside `CANONICAL_ORDER` **throws** rather than being ignored, so a
+  `prod.env.bak` can't quietly become an environment.
+- **The files are committed, and that is deliberate** even though `.env` conventionally
+  means secrets. They carry retentions and crons, not credentials, and a `git clone`
+  must be able to `synth` — CI runs `nag:all` with no setup step. Hence the loud header
+  in each file, `config/` rather than the repo root, and `.env`/`.env.local` in
+  `.gitignore` so there is an obvious place for things that must not be committed.
+
+The parser is hand-rolled instead of `dotenv` for one reason: `dotenv` silently ignores
+lines it doesn't understand. These values decide whether `cdk destroy` takes the data
+with it, so a malformed line, a duplicate key or an **unrecognised** key must fail the
+synth. `parseEnvText` and `buildConfig` are exported pure functions — test validation
+with injected strings, never by writing junk into `config/`.
+
+`ENVIRONMENTS` is `Partial<Record<EnvName, …>>` on purpose — go through `getConfig()`.
+Note that validation now happens at **load** time, not inside `getConfig`.
 
 Nothing under `lib/stacks/` branches on an environment name; all behaviour flows
 through `DatalakeConfig` fields. Keep it that way — it is what makes an arbitrary
@@ -90,10 +114,13 @@ as a manifest change. See `.claude/skills/arkho-template-publish/`.
 The questionnaire asks **only what cannot change later without pain**: the environment
 set, identity, accounts, region, catalog prefix, alert email, tags, and the structural
 flags (Object Lock — irreversible; VPC). Every operational tunable — retentions,
-thresholds, crons, sizing — lives in `lib/config/environments.ts`, spelled out
-explicitly in each environment's own block (no shared `BASE` to inherit from, on
-purpose: a one-environment change should be a one-line edit). Deploy-time knobs go in `cdk.json` context (`lfAdminArn`,
+thresholds, crons, sizing — lives in `config/<env>.env`, one file per environment with
+all 16 keys spelled out (nothing inherited from a shared block, on purpose: a
+one-environment change should be a one-line edit in that environment's file). Deploy-time knobs go in `cdk.json` context (`lfAdminArn`,
 `lfStrictMode`, `analystPrincipalArn`, `ingestPrincipalArn`).
+
+A tunable belongs in `config/<env>.env`; only add a `DatalakeConfig` field (and its
+key in `EXPECTED_KEYS`, plus its reader) when stacks actually need to branch on it.
 
 Adding a parameter is the expensive option: it lengthens the questionnaire for every
 future client and bakes a value that can never be changed without regenerating.

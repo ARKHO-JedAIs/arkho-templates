@@ -30,7 +30,7 @@ multi-region CloudTrail auditing, and optional VPC isolation.
 - Node.js 20+, AWS CLI configurado
 - Bootstrap por cada par cuenta/región en uso. Con una cuenta compartida basta uno:
   `npx cdk bootstrap aws://{{ aws_account_id }}/{{ aws_region }}`. Con una cuenta
-  por ambiente, repítelo por cada `account` distinto de `lib/config/environments.ts`.
+  por ambiente, repítelo por cada `ACCOUNT` distinto de tus `config/*.env`.
 - Para `governance`: el principal que despliega debe ser admin de Lake Formation
   (o pasar `-c lfAdminArn=arn:...`)
 
@@ -56,47 +56,79 @@ trabajan sobre el **ambiente por defecto**; para cualquier otro, pasa el context
 ```
 
 Los `:all` (`synth:all`, `diff:all`, `nag:all`) recorren todos los ambientes del
-proyecto vía `scripts/each-env.js`, que lee la lista del context `environments` de
-`cdk.json`. Nada enumera ambientes a mano, así que esto sirve igual con dos que con
-cuatro.
+proyecto vía `scripts/each-env.js`. Nada enumera ambientes a mano, así que esto
+sirve igual con dos que con cuatro.
 
 ## Ambientes de este proyecto
 
 Se eligieron en la generación: **{{ environments }}**.
 
-El **ambiente por defecto** es el primero de esa lista en orden canónico
-(`dev` → `qa` → `stg` → `prod`, de menos a más endurecido) y está expuesto como
-`DEFAULT_ENV` en `lib/config/environments.ts`. Es el que usan `synth`/`diff`/
-`deploy` sin `-c env=`.
+**Un ambiente es un archivo.** Cada uno tiene su `config/<ambiente>.env` con todos
+sus tunables operacionales, y `lib/config/environments.ts` descubre los ambientes
+leyendo qué archivos existen en `config/`. No hay ninguna lista que mantener
+sincronizada en otro lado.
 
-`lib/config/environments.ts` trae un **catálogo** con los cuatro ambientes que el
-template sabe construir, cada uno con sus 17 campos escritos explícitamente, y
-expone solo los de `ACTIVE_ENV_NAMES`. Los bloques de los ambientes que no usas
-quedan ahí como plantilla completa:
+```
+config/
+├── dev.env     ← existe ⇒ el ambiente dev existe
+└── prod.env
+```
 
-| Ambiente | RemovalPolicy | autoDelete | Terminación protegida | Workers Glue | Athena cutoff | Retención de logs |
+El **ambiente por defecto** es el primero en orden canónico (`dev` → `qa` → `stg` →
+`prod`, de menos a más endurecido), expuesto como `DEFAULT_ENV`. Es el que usan
+`synth`/`diff`/`deploy` sin `-c env=`.
+
+Los perfiles con los que se generan los archivos:
+
+| Ambiente | REMOVAL_POLICY | AUTO_DELETE | TERMINATION_PROTECTION | GLUE_MAX_WORKERS | ATHENA_BYTES_CUTOFF_GIB | LOG_RETENTION_DAYS |
 |---|---|---|---|---|---|---|
-| `dev` | DESTROY | Sí | No | 3 | 5 GiB | 30 d |
-| `qa` | RETAIN | No | No | 3 | 5 GiB | 30 d |
-| `stg` | RETAIN | No | No | 3 | 5 GiB | 30 d |
-| `prod` | RETAIN | No | Sí | 5 | 10 GiB | 365 d |
+| `dev` | DESTROY | true | false | 3 | 5 | 30 |
+| `qa` | RETAIN | false | false | 3 | 5 | 30 |
+| `stg` | RETAIN | false | false | 3 | 5 | 30 |
+| `prod` | RETAIN | false | true | 5 | 10 | 365 |
+
+De acá en adelante son código: ninguno se vuelve a preguntar, y cambiar la retención
+solo en `prod` es editar una línea de `config/prod.env`.
 
 `deploy` lleva `--require-approval broadening` siempre: te pide confirmación cuando
 un cambio amplía permisos, en cualquier ambiente.
+
+### Estos archivos se versionan
+
+`config/*.env` **va al repositorio**. No son un `.env` de secretos: son retenciones,
+horarios y umbrales que el equipo necesita revisar en un PR, y sin ellos un `git
+clone` no puede ni sintetizar. Las credenciales van a Secrets Manager (el secreto
+`{{ project_slug }}-<ambiente>/source-db`) o a un `.env.local`, que sí está
+gitignoreado junto con `.env` y `.env.*.local`.
+
+### Se validan en cada synth
+
+Todas las claves son obligatorias y tipadas. Un entero con decimales, un booleano
+que no sea `true`/`false`, un cron sin envoltura `cron()`, una cuenta que no tenga 12
+dígitos, una clave repetida o **una clave desconocida** cortan el `synth` nombrando
+archivo, clave, valor leído y qué se esperaba.
+
+Lo de la clave desconocida es deliberado y no paranoia: el caso real es un rename a
+medias o un typo que deja la clave vieja en su lugar, y con eso el valor que acabas
+de editar no tendría efecto mientras el archivo dice otra cosa.
+
+También se rechaza `AUTO_DELETE_OBJECTS=true` junto a `REMOVAL_POLICY=RETAIN`: CDK no
+acepta esa combinación, y atraparla acá señala el archivo en vez de un construct.
 
 ### Agregar o quitar un ambiente después
 
 No hace falta regenerar el proyecto:
 
-1. Agrega (o saca) el nombre de `ACTIVE_ENV_NAMES` en `lib/config/environments.ts`.
-2. Agrega (o saca) el mismo nombre del context `environments` de `cdk.json` — hay un
-   test que falla si las dos listas divergen.
-3. Completa el `account` de ese ambiente en su bloque del catálogo, si va a otra
-   cuenta.
-4. `npx cdk bootstrap aws://<cuenta>/<región>` para el par nuevo.
+1. `cp config/prod.env config/qa.env` y ajusta lo que cambie — como mínimo `ACCOUNT`
+   si va a otra cuenta (déjalo vacío para usar la del proyecto).
+2. `npx cdk bootstrap aws://<cuenta>/<región>` si es un par nuevo.
 
-Un ambiente fuera de la lista falla en `getConfig` con un mensaje que dice cuáles sí
-existen, en vez de sintetizar algo a medias.
+Eso es todo: el ambiente ya existe para `synth`, `deploy`, `nag:all`, los tests y el
+CI. Para quitarlo, borra su archivo.
+
+Los nombres válidos son `dev`, `qa`, `stg` y `prod`. Un `config/uat.env` **falla** en
+vez de ignorarse en silencio, para que un `prod.env.bak` no termine desplegando
+infraestructura.
 
 ## Cuentas y credenciales
 
@@ -105,9 +137,10 @@ Este proyecto se generó con la estrategia **`{{ account_strategy }}`**:
 - `shared` → todos los ambientes despliegan en la misma cuenta. Coexisten sin chocar
   porque todo nombre físico lleva el prefijo `{{ project_slug }}-<ambiente>` y las
   claves de LF-Tag van sufijadas por ambiente.
-- `per_environment` → cada ambiente tiene su cuenta, en el campo `account` de su
-  bloque. Un ambiente cuyo ID quedó vacío cae en la cuenta por defecto
-  (`aws_account_id`), que es la fuente única de ese fallback.
+- `per_environment` → cada ambiente tiene su cuenta, en la clave `ACCOUNT` de su
+  archivo de config. Un `ACCOUNT=` vacío cae en la cuenta por defecto del proyecto
+  (`DEFAULT_ACCOUNT` en `lib/config/environments.ts`) — es el único valor que no vive
+  en los `.env`, precisamente porque es el fallback de todos.
 
 Los scripts de npm **no llevan `--profile` a propósito**: el perfil se elige por
 variable de entorno, así el mismo script sirve para cualquier organización de
@@ -128,20 +161,22 @@ el perfil de dev — no lo desactives dejando las cuentas agnósticas.
 
 ## Configuración
 
-**Todo tunable operacional vive en `lib/config/environments.ts`, escrito por
-ambiente.** No hay valores compartidos por herencia: cada bloque declara sus 17
-campos, así que ajustar uno solo en `prod` es editar una línea en su bloque. Estos
-son los que se sembraron con las respuestas de la generación:
+**Todo tunable operacional vive en `config/<ambiente>.env`.** No hay valores
+compartidos por herencia: cada archivo declara sus 16 claves, así que ajustar uno
+solo en `prod` es editar una línea de `config/prod.env`. `lib/config/environments.ts`
+solo los lee y valida.
 
-- Región: **{{ aws_region }}** (se preguntó una vez, pero `region` es un campo **por
-  ambiente**: puedes mover uno a otra región editando su bloque — recuerda hacer
+Estos son los que se sembraron con las respuestas de la generación:
+
+- Región: **{{ aws_region }}** (se preguntó una vez, pero `REGION` es una clave **por
+  ambiente**: puedes mover uno a otra región editando su archivo — recuerda hacer
   `cdk bootstrap` en el nuevo par cuenta/región)
 - Transición Raw → Glacier IR: **{{ raw_retention_days }} días** (0 = sin transición, los datos quedan en S3 Standard)
 - Retención Archive: **{{ archive_retention_years }} años** (0 = sin expiración, retención indefinida)
 - Email de alertas: **{{ admin_email }}** (confirmar suscripción SNS post-deploy)
 
-> Los valores de retención son editables por ambiente en `environments.ts`
-> (`rawTransitionDays` / `archiveRetentionYears`); ponlos en `0` para desactivar
+> Los valores de retención son editables por ambiente en `config/<ambiente>.env`
+> (`RAW_TRANSITION_DAYS` / `ARCHIVE_RETENTION_YEARS`); ponlos en `0` para desactivar
 > la transición a Glacier o la expiración, respectivamente.
 
 - LF-Tag `dominio_<ambiente>`: **{{ lf_tag_domains }}**
@@ -318,7 +353,7 @@ llegan a Curated. Está en el job y no en un `Choice` porque `GlueStartJobRun` c
 `RUN_JOB` no devuelve la salida del job: la máquina de estados no puede leer esos
 contadores, el job sí.
 
-La retención de los rechazos se ajusta con `quarantineRetentionDays` en `environments.ts`.
+La retención de los rechazos se ajusta con `QUARANTINE_RETENTION_DAYS` en `config/<ambiente>.env`.
 
 ## Iceberg: propiedades y mantenimiento
 
@@ -501,25 +536,34 @@ contenido del trail.
 
 Si regeneras un proyecto **ya desplegado**, estos cambios no son retrocompatibles.
 
-**Primero, los ambientes se eligen.** El parámetro `environment` (el ambiente por
-defecto) **desapareció**: ahora se pregunta `environments`, el conjunto que tendrá el
-proyecto, y el ambiente por defecto se deriva del primero en orden canónico. Con eso:
+**Primero, los ambientes se eligen y su config se mudó a archivos.** El parámetro
+`environment` (el ambiente por defecto) **desapareció**: ahora se pregunta
+`environments`, el conjunto que tendrá el proyecto, y el default se deriva del primero
+en orden canónico. Y **todos los tunables salieron de `lib/config/environments.ts` a
+`config/<ambiente>.env`**; ese archivo pasó a ser el cargador que los lee y valida.
+Con eso:
 
-- Se fue la clave `env` del context de `cdk.json`; apareció `environments`.
 - **Se fueron los 12 scripts por ambiente.** `npm run deploy:prod` pasa a
   `npm run deploy -- -c env=prod`. Si los tenías en runbooks o en tu propio CI, hay
   que actualizarlos. Los `:all` ahora pasan por `scripts/each-env.js`.
+- Se fue la clave `env` del context de `cdk.json`, y no hay reemplazo: los ambientes
+  se descubren leyendo `config/*.env`.
 - La matriz de 4 ambientes del workflow de CI se reemplaza por un job secuencial que
   corre `diff:all`. Con una cuenta por ambiente, ese job asume un solo rol OIDC: si
   necesitas diff en varias cuentas, divídelo en un job por cuenta.
 - `ENVIRONMENTS` pasa de `Record<EnvName, …>` a `Partial<Record<EnvName, …>>`. Código
   propio que hacía `ENVIRONMENTS.qa.region` deja de compilar: usa `getConfig('qa')`.
+- Si habías editado valores en `environments.ts` (retenciones, crons, umbrales,
+  workers), **hay que trasladarlos** a los `config/*.env` del proyecto regenerado. Es
+  la única parte que no es mecánica: la equivalencia es clave por clave
+  (`rawTransitionDays` → `RAW_TRANSITION_DAYS`, etc.), salvo
+  `athenaBytesCutoff`, que ahora se declara en GiB (`ATHENA_BYTES_CUTOFF_GIB`) en vez
+  de bytes.
 - `aws_account_id` cambió de significado: era la cuenta de `dev`, ahora es la
-  compartida y el fallback. En modo `per_environment`, `dev` tiene su propio
-  `aws_account_id_dev`.
+  compartida y el fallback de cualquier `ACCOUNT=` vacío.
 
-Nada de esto mueve un recurso desplegado: son parámetros, scripts y tipos. Los stacks
-de un ambiente que sigas usando se sintetizan igual.
+Nada de esto mueve un recurso desplegado: son parámetros, scripts, tipos y de dónde
+se leen los valores. Con los mismos valores, la plantilla sintetizada es la misma.
 
 **Segundo, la ingesta:** el stack `ingestion` se reduce a un rol y un secreto. Un
 proyecto desplegado pierde las Lambdas de GA4 y Meta Ads, el SFTP Connector, la DLQ y
@@ -529,7 +573,7 @@ dependías de esas Lambdas, guárdalas antes de regenerar: no están en el templ
 
 **Tercero, parámetros que se movieron:** `quarantine_retention_days`,
 `quarantine_alarm_threshold`, `iceberg_snapshot_retention_days` y
-`log_retention_days` ya no se preguntan — se editan en `environments.ts`.
+`log_retention_days` ya no se preguntan — se editan en `config/<ambiente>.env`.
 `analyst_principal_arn` pasó a `-c analystPrincipalArn`. Si automatizabas `generate`
 con esos flags, deja de funcionar.
 
