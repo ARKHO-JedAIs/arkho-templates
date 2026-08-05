@@ -3,6 +3,13 @@ cdk.out
 .cdk.staging
 coverage
 
+# Secretos locales. La config por ambiente vive en config/<ambiente>.env y SÍ se
+# versiona (no lleva credenciales); estos patrones son para lo que no debe salir
+# de tu máquina. `config/*.env` no coincide con ninguno.
+.env
+.env.local
+.env.*.local
+
 # Compilados de TypeScript. Las excepciones son JS escrito a mano, no generado:
 # sin ellas `*.js` se los lleva y el proyecto queda sin su runner de ambientes.
 *.js

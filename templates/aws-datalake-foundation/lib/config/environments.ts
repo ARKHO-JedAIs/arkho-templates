@@ -1,3 +1,5 @@
+import * as fs from 'fs';
+import * as path from 'path';
 import { RemovalPolicy } from 'aws-cdk-lib';
 import * as logs from 'aws-cdk-lib/aws-logs';
 
@@ -120,31 +122,62 @@ export function logRetention(cfg: DatalakeConfig): logs.RetentionDays {
 }
 
 // ── Ambientes activos ────────────────────────────────────────────────────────
-// Los ambientes de ESTE proyecto se eligieron en la generación. El catálogo más
-// abajo define los cuatro que el template sabe construir; acá se filtra a los que
-// realmente existen.
+// Los ambientes de este proyecto SON los archivos de config que existen: cada
+// `config/<nombre>.env` es un ambiente. Agregar `qa` es copiar un archivo;
+// quitarlo es borrarlo. No hay ninguna lista que mantener en sincronía.
+
+// Relativo a __dirname y no a process.cwd(): la CDK CLI, jest y el runner de
+// ambientes se invocan desde directorios distintos.
+const CONFIG_DIR = path.join(__dirname, '..', '..', 'config');
 
 /**
  * Orden canónico: de MENOS a MÁS endurecido.
  *
- * ES UN CONTRATO, no cosmética. `ACTIVE_ENV_NAMES` se ordena contra esta lista
- * porque el orden en que la respuesta llega desde el generador es el orden en que
- * el usuario marcó las opciones, no uno estable — y `DEFAULT_ENV` depende de que
- * el primero sea determinista.
+ * ES UN CONTRATO, no cosmética: `DEFAULT_ENV` es el primero. Es también el
+ * vocabulario cerrado de nombres que el template conoce, así que un `uat.env` se
+ * rechaza en vez de convertirse en un ambiente a medias — y de paso un
+ * `dev.env.bak` o un `prod.env~` del editor tampoco se cuelan.
  */
 const CANONICAL_ORDER: readonly EnvName[] = ['dev', 'qa', 'stg', 'prod'];
 
-const selected = csv('{{ environments }}') as EnvName[];
+/** Descubre los ambientes leyendo `config/*.env`, en orden canónico. */
+function discoverEnvNames(): EnvName[] {
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(CONFIG_DIR);
+  } catch {
+    throw new Error(
+      `No se encontró el directorio de configuración '${CONFIG_DIR}'. Cada ambiente ` +
+        'es un archivo config/<nombre>.env; sin ellos no hay nada que sintetizar.',
+    );
+  }
 
-/**
- * Los ambientes que tiene este proyecto, en orden canónico.
- *
- * Para agregar uno después: añádelo acá, completa su `account` en el catálogo y
- * haz `cdk bootstrap` de ese par cuenta/región. Para quitarlo, sácalo de la lista
- * — el bloque del catálogo puede quedarse, no se instancia nada.
- */
-export const ACTIVE_ENV_NAMES: EnvName[] =
-  CANONICAL_ORDER.filter((name) => selected.includes(name));
+  const found = entries
+    .filter((name) => name.endsWith('.env'))
+    .map((name) => name.slice(0, -'.env'.length));
+
+  const unknown = found.filter((name) => !CANONICAL_ORDER.includes(name as EnvName));
+  if (unknown.length > 0) {
+    throw new Error(
+      `Nombre de ambiente no reconocido en config/: ${unknown.join(', ')}. Los ` +
+        `válidos son ${CANONICAL_ORDER.join(', ')}. Renombra el archivo o bórralo: ` +
+        'no se ignora en silencio para que un respaldo no termine desplegando ' +
+        'infraestructura.',
+    );
+  }
+
+  const names = CANONICAL_ORDER.filter((name) => found.includes(name));
+  if (names.length === 0) {
+    throw new Error(
+      `No hay ningún archivo config/<ambiente>.env en '${CONFIG_DIR}'. Crea al ` +
+        `menos uno (${CANONICAL_ORDER.join(', ')}).`,
+    );
+  }
+  return names;
+}
+
+/** Los ambientes que tiene este proyecto, en orden canónico. */
+export const ACTIVE_ENV_NAMES: EnvName[] = discoverEnvNames();
 
 /**
  * Destino por defecto de `synth`/`diff`/`deploy` cuando no se pasa `-c env=`.
@@ -155,137 +188,204 @@ export const DEFAULT_ENV: EnvName = ACTIVE_ENV_NAMES[0];
 /** El más endurecido de los activos. */
 export const HARDENED_ENV: EnvName = ACTIVE_ENV_NAMES[ACTIVE_ENV_NAMES.length - 1];
 
-// ── Resolución de cuentas AWS ────────────────────────────────────────────────
-// El template soporta dos estrategias, elegidas en la generación:
-//
-//   shared          → todos los ambientes despliegan en UNA cuenta
-//   per_environment → cada ambiente tiene la suya
-//
-// El mismo archivo generado sirve para ambas: cada ambiente pasa por `accountOr`
-// y cae en la cuenta por defecto cuando su token quedó vacío.
+// ── Lectura y validación de los archivos de config ───────────────────────────
+// Parser propio y no `dotenv`: el formato que se necesita es un subconjunto
+// estricto (sin multilínea, sin interpolación) y, sobre todo, `dotenv` ignora en
+// silencio las líneas que no entiende. Acá una línea malformada tiene que cortar
+// el synth — son los valores que deciden si `cdk destroy` se lleva los datos.
+
+/** Claves esperadas en un archivo de ambiente. Falta una o sobra una: error. */
+const EXPECTED_KEYS = [
+  'ACCOUNT', 'REGION', 'REMOVAL_POLICY', 'AUTO_DELETE_OBJECTS',
+  'TERMINATION_PROTECTION', 'RAW_TRANSITION_DAYS', 'ARCHIVE_RETENTION_YEARS',
+  'PIPELINE_SCHEDULE', 'CRAWLER_SCHEDULE', 'GLUE_MAX_WORKERS',
+  'ATHENA_BYTES_CUTOFF_GIB', 'ALERT_EMAIL', 'LOG_RETENTION_DAYS',
+  'QUARANTINE_RETENTION_DAYS', 'QUARANTINE_ALARM_THRESHOLD',
+  'ICEBERG_SNAPSHOT_RETENTION_DAYS',
+] as const;
 
 /**
- * Cuenta respondida en la generación (`aws_account_id`). Con la estrategia
- * compartida es la de todos los ambientes; con una cuenta por ambiente es el
- * fallback de cualquiera que quede en blanco.
+ * Parsea el contenido de un archivo de ambiente. Pura y exportada a propósito:
+ * los tests ejercitan la validación con strings inyectados, sin escribir archivos
+ * de basura en config/ ni depender de los valores que eligió la generación.
+ */
+export function parseEnvText(envName: string, raw: string): Record<string, string> {
+  const values: Record<string, string> = {};
+
+  raw.split(/\r?\n/).forEach((line, i) => {
+    const text = line.trim();
+    if (text === '' || text.startsWith('#')) return;
+    const eq = text.indexOf('=');
+    if (eq <= 0) {
+      throw new Error(
+        `config/${envName}.env:${i + 1}: se esperaba CLAVE=valor y se leyó "${text}".`,
+      );
+    }
+    const key = text.slice(0, eq).trim();
+    // Se parte en el PRIMER '=': un valor puede contener '=' sin escaparlo.
+    const value = text.slice(eq + 1).trim().replace(/^(["'])(.*)\1$/, '$2');
+    if (Object.prototype.hasOwnProperty.call(values, key)) {
+      throw new Error(`config/${envName}.env:${i + 1}: la clave ${key} está repetida.`);
+    }
+    values[key] = value;
+  });
+
+  const missing = EXPECTED_KEYS.filter((k) => values[k] === undefined);
+  if (missing.length > 0) {
+    throw new Error(
+      `config/${envName}.env: faltan claves obligatorias: ${missing.join(', ')}.`,
+    );
+  }
+  // Una clave de sobra suele ser un rename a medias o un typo que dejó la vieja en
+  // su lugar; ignorarla haría que el valor recién editado no tuviera efecto.
+  const extra = Object.keys(values).filter(
+    (k) => !(EXPECTED_KEYS as readonly string[]).includes(k),
+  );
+  if (extra.length > 0) {
+    throw new Error(
+      `config/${envName}.env: claves no reconocidas: ${extra.join(', ')}. Las ` +
+        `válidas son ${EXPECTED_KEYS.join(', ')}.`,
+    );
+  }
+  return values;
+}
+
+/**
+ * Cuenta respondida en la generación. Es el único valor que NO vive en los
+ * archivos de ambiente, precisamente porque es el fallback de todos: con la
+ * estrategia de cuenta compartida cada `ACCOUNT=` queda vacío y todos caen acá.
  */
 const DEFAULT_ACCOUNT = '{{ aws_account_id }}';
 
-/**
- * Los IDs por ambiente solo se preguntan con la estrategia "una cuenta por
- * ambiente", y solo para los ambientes elegidos. En cualquier otro caso el
- * generador los deja VACÍOS y el ambiente cae en `DEFAULT_ACCOUNT`: el string
- * vacío es una señal de diseño, no un token sin resolver. Para separar un
- * ambiente después, escribe su ID de 12 dígitos aquí.
- */
-const accountOr = (perEnv: string): string => perEnv.trim() || DEFAULT_ACCOUNT;
-
-// ── Catálogo de ambientes ────────────────────────────────────────────────────
-// Los cuatro ambientes que el template sabe construir, cada uno con TODOS sus
-// campos escritos explícitamente. Nada se hereda de un objeto compartido: cambiar
-// la retención de logs solo en `prod`, o mover `stg` de región, es editar una
-// línea dentro de su bloque.
-//
-// Los valores se sembraron con las respuestas de la generación, pero de acá en
-// adelante son código: ninguno se vuelve a preguntar. Ajústalos por ambiente.
-//
-// Los cuatro bloques están siempre presentes aunque el proyecto use menos: son el
-// catálogo del que `ACTIVE_ENV_NAMES` selecciona, y sirven de plantilla completa
-// cuando agregas un ambiente más adelante.
-
-const CATALOG: Record<EnvName, DatalakeConfig> = {
-  dev: {
-    envName: 'dev',
-    account: accountOr('{{ aws_account_id_dev }}'),
-    region: '{{ aws_region }}',
-    // El ambiente donde `cdk destroy` se lleva los datos. Si esto te incomoda,
-    // cámbialo a RETAIN + autoDeleteObjects: false y quedará como los demás.
-    removalPolicy: RemovalPolicy.DESTROY,
-    autoDeleteObjects: true,
-    terminationProtection: false,
-    rawTransitionDays: {{ raw_retention_days }},
-    archiveRetentionYears: {{ archive_retention_years }},
-    // Horarios en UTC (EventBridge siempre interpreta cron en UTC). El crawler
-    // debe partir DESPUÉS de que el pipeline termine: si tus jobs Glue se acercan
-    // al timeout de 60 min, aleja `crawlerSchedule`.
-    pipelineSchedule: '{{ pipeline_schedule }}',
-    crawlerSchedule: '{{ crawler_schedule }}',
-    glueMaxWorkers: 3,
-    athenaBytesCutoff: 5 * GIB,
-    alertEmail: '{{ admin_email }}',
-    logRetentionDays: 30,
-    quarantineRetentionDays: 30,
-    quarantineAlarmThreshold: 100,
-    icebergSnapshotRetentionDays: 7,
-  },
-  qa: {
-    envName: 'qa',
-    account: accountOr('{{ aws_account_id_qa }}'),
-    region: '{{ aws_region }}',
-    removalPolicy: RemovalPolicy.RETAIN,
-    autoDeleteObjects: false,
-    terminationProtection: false,
-    rawTransitionDays: {{ raw_retention_days }},
-    archiveRetentionYears: {{ archive_retention_years }},
-    pipelineSchedule: '{{ pipeline_schedule }}',
-    crawlerSchedule: '{{ crawler_schedule }}',
-    glueMaxWorkers: 3,
-    athenaBytesCutoff: 5 * GIB,
-    alertEmail: '{{ admin_email }}',
-    logRetentionDays: 30,
-    quarantineRetentionDays: 30,
-    quarantineAlarmThreshold: 100,
-    icebergSnapshotRetentionDays: 7,
-  },
-  stg: {
-    envName: 'stg',
-    account: accountOr('{{ aws_account_id_stg }}'),
-    region: '{{ aws_region }}',
-    removalPolicy: RemovalPolicy.RETAIN,
-    autoDeleteObjects: false,
-    terminationProtection: false,
-    rawTransitionDays: {{ raw_retention_days }},
-    archiveRetentionYears: {{ archive_retention_years }},
-    pipelineSchedule: '{{ pipeline_schedule }}',
-    crawlerSchedule: '{{ crawler_schedule }}',
-    glueMaxWorkers: 3,
-    athenaBytesCutoff: 5 * GIB,
-    alertEmail: '{{ admin_email }}',
-    logRetentionDays: 30,
-    quarantineRetentionDays: 30,
-    quarantineAlarmThreshold: 100,
-    icebergSnapshotRetentionDays: 7,
-  },
-  prod: {
-    envName: 'prod',
-    account: accountOr('{{ aws_account_id_prod }}'),
-    region: '{{ aws_region }}',
-    removalPolicy: RemovalPolicy.RETAIN,
-    autoDeleteObjects: false,
-    terminationProtection: true,
-    rawTransitionDays: {{ raw_retention_days }},
-    archiveRetentionYears: {{ archive_retention_years }},
-    pipelineSchedule: '{{ pipeline_schedule }}',
-    crawlerSchedule: '{{ crawler_schedule }}',
-    glueMaxWorkers: 5,
-    athenaBytesCutoff: 10 * GIB,
-    alertEmail: '{{ admin_email }}',
-    // Prod nunca baja de un año de logs: por debajo no se sostiene una auditoría.
-    logRetentionDays: 365,
-    quarantineRetentionDays: 30,
-    quarantineAlarmThreshold: 100,
-    icebergSnapshotRetentionDays: 7,
-  },
-};
-
-/**
- * Los ambientes de este proyecto. `Partial` es honesto: si el proyecto se generó
- * con `dev` y `prod`, `ENVIRONMENTS.qa` no existe. Usa `getConfig()`, que valida.
- */
-export const ENVIRONMENTS: Partial<Record<EnvName, DatalakeConfig>> =
-  Object.fromEntries(ACTIVE_ENV_NAMES.map((name) => [name, CATALOG[name]]));
-
 const ACCOUNT_RE = /^[0-9]{12}$/;
+
+// Lectores tipados. Cada mensaje nombra archivo, clave, valor leído y qué se
+// esperaba: son errores que va a leer alguien editando un archivo de texto.
+
+function readInt(
+  envName: string, values: Record<string, string>, key: string,
+  min: number, max: number,
+): number {
+  const raw = values[key];
+  if (!/^-?[0-9]+$/.test(raw)) {
+    throw new Error(`config/${envName}.env: ${key}="${raw}" no es un entero.`);
+  }
+  const n = Number(raw);
+  if (n < min || n > max) {
+    throw new Error(
+      `config/${envName}.env: ${key}=${n} está fuera de rango (${min}..${max}).`,
+    );
+  }
+  return n;
+}
+
+function readBool(
+  envName: string, values: Record<string, string>, key: string,
+): boolean {
+  const raw = values[key];
+  if (raw !== 'true' && raw !== 'false') {
+    throw new Error(
+      `config/${envName}.env: ${key}="${raw}" debe ser exactamente true o false.`,
+    );
+  }
+  return raw === 'true';
+}
+
+function readCron(
+  envName: string, values: Record<string, string>, key: string,
+): string {
+  const raw = values[key];
+  if (!/^cron\(.+\)$/.test(raw)) {
+    throw new Error(
+      `config/${envName}.env: ${key}="${raw}" debe ser una expresión cron de ` +
+        'EventBridge en UTC, p. ej. cron(0 7 * * ? *).',
+    );
+  }
+  return raw;
+}
+
+function readMatch(
+  envName: string, values: Record<string, string>, key: string,
+  re: RegExp, hint: string,
+): string {
+  const raw = values[key];
+  if (!re.test(raw)) {
+    throw new Error(`config/${envName}.env: ${key}="${raw}" ${hint}.`);
+  }
+  return raw;
+}
+
+/**
+ * Construye y VALIDA la config de un ambiente a partir de sus claves ya
+ * parseadas. Pura y exportada por la misma razón que parseEnvText.
+ */
+export function buildConfig(envName: EnvName, v: Record<string, string>): DatalakeConfig {
+
+  const removalPolicy = v.REMOVAL_POLICY;
+  if (removalPolicy !== 'RETAIN' && removalPolicy !== 'DESTROY') {
+    throw new Error(
+      `config/${envName}.env: REMOVAL_POLICY="${removalPolicy}" debe ser RETAIN o DESTROY.`,
+    );
+  }
+  const autoDeleteObjects = readBool(envName, v, 'AUTO_DELETE_OBJECTS');
+  // CDK rechaza autoDeleteObjects junto a RETAIN, y ese error aparecería recién al
+  // instanciar el bucket. Se atrapa acá, con el nombre del archivo que lo causó.
+  if (autoDeleteObjects && removalPolicy === 'RETAIN') {
+    throw new Error(
+      `config/${envName}.env: AUTO_DELETE_OBJECTS=true exige REMOVAL_POLICY=DESTROY ` +
+        '(CDK rechaza la combinación con RETAIN).',
+    );
+  }
+
+  // `ACCOUNT` vacío es la señal de diseño de la estrategia de cuenta compartida.
+  const account = v.ACCOUNT.trim() || DEFAULT_ACCOUNT;
+  if (!ACCOUNT_RE.test(account)) {
+    throw new Error(
+      `config/${envName}.env: ACCOUNT="${v.ACCOUNT}" no es un ID de cuenta AWS de ` +
+        '12 dígitos. Déjalo vacío para usar la cuenta por defecto del proyecto.',
+    );
+  }
+
+  return {
+    envName,
+    account,
+    region: readMatch(envName, v, 'REGION', /^[a-z]{2}-[a-z]+-[0-9]$/,
+      'no es una región AWS válida, p. ej. us-east-1'),
+    removalPolicy:
+      removalPolicy === 'DESTROY' ? RemovalPolicy.DESTROY : RemovalPolicy.RETAIN,
+    autoDeleteObjects,
+    terminationProtection: readBool(envName, v, 'TERMINATION_PROTECTION'),
+    rawTransitionDays: readInt(envName, v, 'RAW_TRANSITION_DAYS', 0, 3650),
+    archiveRetentionYears: readInt(envName, v, 'ARCHIVE_RETENTION_YEARS', 0, 99),
+    pipelineSchedule: readCron(envName, v, 'PIPELINE_SCHEDULE'),
+    crawlerSchedule: readCron(envName, v, 'CRAWLER_SCHEDULE'),
+    glueMaxWorkers: readInt(envName, v, 'GLUE_MAX_WORKERS', 2, 100),
+    athenaBytesCutoff: readInt(envName, v, 'ATHENA_BYTES_CUTOFF_GIB', 1, 1024) * GIB,
+    alertEmail: readMatch(envName, v, 'ALERT_EMAIL', /^[^@\s]+@[^@\s]+\.[^@\s]+$/,
+      'no es una dirección de correo válida'),
+    logRetentionDays: readInt(envName, v, 'LOG_RETENTION_DAYS', 1, 3653),
+    quarantineRetentionDays: readInt(envName, v, 'QUARANTINE_RETENTION_DAYS', 1, 3650),
+    quarantineAlarmThreshold:
+      readInt(envName, v, 'QUARANTINE_ALARM_THRESHOLD', 1, 1000000),
+    icebergSnapshotRetentionDays:
+      readInt(envName, v, 'ICEBERG_SNAPSHOT_RETENTION_DAYS', 1, 3650),
+  };
+}
+
+/**
+ * Los ambientes de este proyecto, ya validados. Se cargan al importar el módulo:
+ * un archivo malformado corta antes de que se construya cualquier stack.
+ *
+ * `Partial` es honesto: si el proyecto no tiene `config/qa.env`, `ENVIRONMENTS.qa`
+ * no existe. Usa `getConfig()`.
+ */
+const loadConfig = (envName: EnvName): DatalakeConfig =>
+  buildConfig(envName, parseEnvText(
+    envName, fs.readFileSync(path.join(CONFIG_DIR, `${envName}.env`), 'utf8'),
+  ));
+
+export const ENVIRONMENTS: Partial<Record<EnvName, DatalakeConfig>> =
+  Object.fromEntries(ACTIVE_ENV_NAMES.map((name) => [name, loadConfig(name)]));
 
 /**
  * Único embudo para obtener la config de un ambiente. Valida acá (y no en
@@ -293,12 +393,6 @@ const ACCOUNT_RE = /^[0-9]{12}$/;
  * que `npm test` ejercita las guardas gratis.
  */
 export function getConfig(envName: string): DatalakeConfig {
-  if (ACTIVE_ENV_NAMES.length === 0) {
-    throw new Error(
-      'Este proyecto no tiene ningún ambiente activo. Agrega al menos uno a ' +
-        'CANONICAL_ORDER/ACTIVE_ENV_NAMES en lib/config/environments.ts.',
-    );
-  }
   // `hasOwnProperty`: ENVIRONMENTS hereda de Object.prototype, así que un índice
   // directo resolvía miembros heredados (getConfig('toString') devolvía una
   // función en vez de lanzar).
@@ -309,16 +403,7 @@ export function getConfig(envName: string): DatalakeConfig {
     throw new Error(
       `Ambiente desconocido '${envName}'. Este proyecto tiene: ` +
         `${ACTIVE_ENV_NAMES.join(', ')}. Usa -c env=${ACTIVE_ENV_NAMES.join('|')}, ` +
-        'o agrega el ambiente a ACTIVE_ENV_NAMES en lib/config/environments.ts.',
-    );
-  }
-  // Falla antes de cualquier llamada a AWS: con la estrategia de una cuenta por
-  // ambiente, un ID sin completar produciría stacks sin cuenta y el error real
-  // aparecería recién en el deploy.
-  if (!ACCOUNT_RE.test(cfg.account)) {
-    throw new Error(
-      `Cuenta AWS inválida para el ambiente '${cfg.envName}': '${cfg.account}'. ` +
-        'Debe ser un ID de 12 dígitos; complétala en lib/config/environments.ts.',
+        `o crea config/${envName}.env copiando el de otro ambiente.`,
     );
   }
   return cfg;

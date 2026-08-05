@@ -6,14 +6,13 @@
  *   node scripts/each-env.js synth --quiet -c nag=true
  *   node scripts/each-env.js diff
  *
- * Existe porque la lista de ambientes es distinta en cada proyecto generado: un
- * `nag:all` con los cuatro nombres escritos a mano fallaría en cualquier proyecto
- * que tenga menos, y `nag:all` es el gate de CI.
+ * Existe porque la lista de ambientes es distinta en cada proyecto: un `nag:all`
+ * con los cuatro nombres escritos a mano fallaría en cualquier proyecto que tenga
+ * menos, y `nag:all` es el gate de CI.
  *
- * La lista sale del context `environments` de cdk.json, no de un import de
- * lib/config/environments.ts, para que este script siga siendo node puro sin
- * registrar ts-node. Las dos copias no pueden divergir: test/environments.test.ts
- * afirma que coinciden.
+ * Los ambientes se descubren igual que en lib/config/environments.ts: son los
+ * archivos `config/<nombre>.env` que existen. No hay lista que mantener en
+ * sincronía, así que este script no puede quedar desalineado con la app.
  */
 'use strict';
 
@@ -21,34 +20,36 @@ const { spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const CDK_JSON = path.join(__dirname, '..', 'cdk.json');
+const CONFIG_DIR = path.join(__dirname, '..', 'config');
 
-// Espejo de CANONICAL_ORDER en lib/config/environments.ts, para que la salida de
-// este script vaya en el mismo orden que ACTIVE_ENV_NAMES. Solo afecta el orden de
-// iteración —el conjunto recorrido es el mismo—, así que si se desincroniza no
-// rompe nada; los nombres que no estén acá van al final, en el orden de cdk.json.
+// Espejo de CANONICAL_ORDER en lib/config/environments.ts. Acá solo decide el
+// ORDEN de iteración —el conjunto sale del disco—, así que si se desincroniza no
+// rompe nada: los nombres que no estén van al final, alfabéticamente.
 const CANONICAL_ORDER = ['dev', 'qa', 'stg', 'prod'];
 
-const canonicalRank = (name) => {
-  const i = CANONICAL_ORDER.indexOf(name);
-  return i === -1 ? CANONICAL_ORDER.length : i;
-};
-
 const readEnvNames = () => {
-  const raw = JSON.parse(fs.readFileSync(CDK_JSON, 'utf8'));
-  const value = raw?.context?.environments;
-  if (typeof value !== 'string') {
+  let entries;
+  try {
+    entries = fs.readdirSync(CONFIG_DIR);
+  } catch {
     throw new Error(
-      `Falta el context "environments" en ${CDK_JSON}. Debe ser una lista separada ` +
-        'por comas, p. ej. "dev, prod", igual que ACTIVE_ENV_NAMES en ' +
-        'lib/config/environments.ts.',
+      `No se encontró el directorio de configuración "${CONFIG_DIR}". Cada ambiente ` +
+        'es un archivo config/<nombre>.env.',
     );
   }
-  const names = value.split(',').map((s) => s.trim()).filter(Boolean);
+  const names = entries
+    .filter((name) => name.endsWith('.env'))
+    .map((name) => name.slice(0, -'.env'.length))
+    .sort((a, b) => {
+      const ra = CANONICAL_ORDER.indexOf(a);
+      const rb = CANONICAL_ORDER.indexOf(b);
+      if (ra === rb) return a.localeCompare(b);
+      return (ra === -1 ? CANONICAL_ORDER.length : ra) - (rb === -1 ? CANONICAL_ORDER.length : rb);
+    });
   if (names.length === 0) {
-    throw new Error(`El context "environments" de ${CDK_JSON} está vacío.`);
+    throw new Error(`No hay ningún archivo config/<ambiente>.env en "${CONFIG_DIR}".`);
   }
-  return names.sort((a, b) => canonicalRank(a) - canonicalRank(b));
+  return names;
 };
 
 const args = process.argv.slice(2);
@@ -75,13 +76,13 @@ for (const name of names) {
   // entrada externa, así que no hay nada que escapar.
   const result = spawnSync(command, { stdio: 'inherit', shell: true });
   if (result.error) {
-    console.error(`\nNo se pudo ejecutar '${command}': ${result.error.message}`);
+    console.error(`\nNo se pudo ejecutar "${command}": ${result.error.message}`);
     process.exit(1);
   }
   // Aborta en el primer fallo: seguir con los demás ambientes solo entierra el
   // error real bajo más salida.
   if (result.status !== 0) {
-    console.error(`\nFalló en el ambiente '${name}' (exit ${result.status}).`);
+    console.error(`\nFalló en el ambiente "${name}" (exit ${result.status}).`);
     process.exit(result.status ?? 1);
   }
 }

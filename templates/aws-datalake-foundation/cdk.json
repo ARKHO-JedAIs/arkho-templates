@@ -5,7 +5,6 @@
     "exclude": ["README.md", "cdk*.json", "**/*.d.ts", "**/*.js", "node_modules", "test"]
   },
   "context": {
-    "environments": "{{ environments }}",
     "enableVpc": "{{ enable_vpc }}",
     "vpcCidr": "{{ vpc_cidr }}",
     "enableObjectLock": "{{ enable_object_lock }}",

@@ -22,12 +22,12 @@ parameters:
     type: multichoice
     prompt: "Which environments will this project have?"
     description: >
-      Pick only the ones you need — the generated project gets exactly these, and
-      nothing assumes there are four. The order you click them in does not matter:
-      lib/config/environments.ts sorts them canonically (dev, qa, stg, prod — least to
-      most hardened) and the first one becomes the default target of `npm run
-      synth`/`diff`/`deploy`. Adding one later means editing that file, not
-      regenerating.
+      Pick only the ones you need: each one becomes a `config/<name>.env` file holding
+      every operational tunable for that environment, and the project gets ONLY the
+      files for the environments picked. The order you click them in does not matter —
+      they are sorted canonically (dev, qa, stg, prod, least to most hardened) and the
+      first one becomes the default target of `npm run synth`/`diff`/`deploy`. Adding
+      one later means copying a config file, not regenerating.
     # The only way to demand at least one: there is no minItems.
     required: true
     default: [dev, prod]
@@ -273,14 +273,29 @@ templating:
   # GitHub Actions workflow only uses `${{ context.field }}` expressions — the CLI's
   # token regex is /\{\{\s*([\w_]+)\s*\}\}/ (word characters only), so anything with
   # a dot never matches.
+  #
+  # One config file per environment, and the project gets ONLY the ones picked.
+  # This is the one place where file-level granularity is exactly what's needed:
+  # `include[].when` decides per file whether it is copied at all, so there is no
+  # catalog of unused entries to carry — `lib/config/environments.ts` discovers the
+  # environments by reading the files that arrived.
+  include:
+    - path: config/dev.env
+      when: "'dev' in environments"
+    - path: config/qa.env
+      when: "'qa' in environments"
+    - path: config/stg.env
+      when: "'stg' in environments"
+    - path: config/prod.env
+      when: "'prod' in environments"
 
 nextSteps:
   - "cd {{ project_slug }}"
   - "{{ package_manager }} install"
   - "{{ package_manager }} run build"
   - "{{ package_manager }} test"
-  - "Review lib/config/environments.ts: it holds one fully spelled-out block per environment ({{ environments }}) and every operational tunable lives there"
-  - "Bootstrap: npx cdk bootstrap aws://{{ aws_account_id }}/{{ aws_region }} — repeat it once per DISTINCT `account` across your environment blocks"
+  - "Review config/: one .env file per environment you picked ({{ environments }}). Every operational tunable — retentions, crons, thresholds, sizing — lives there and is validated on every synth. These files ARE committed; they carry no credentials"
+  - "Bootstrap: npx cdk bootstrap aws://{{ aws_account_id }}/{{ aws_region }} — repeat it once per DISTINCT `ACCOUNT` across your config/*.env files"
   - "Confirm the SNS alert subscription sent to {{ admin_email }}"
   - "AWS_PROFILE=<profile-for-that-account> {{ package_manager }} run deploy — deploys the default environment; add `-- -c env=<name>` for any other"
   - "Load the source database credentials into the `{{ project_slug }}-<env>/source-db` secret"
