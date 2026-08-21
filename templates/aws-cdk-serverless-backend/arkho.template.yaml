@@ -1,0 +1,50 @@
+# yaml-language-server: $schema=https://unpkg.com/@jedais/arkho-cli/schema/arkho.template.schema.json
+
+schemaVersion: 1
+name: aws-cdk-serverless-backend
+title: AWS CDK Serverless Backend
+description: >
+  Serverless backend on AWS CDK v2 (TypeScript): Cognito User Pool with optional
+  Microsoft Entra ID (OIDC) federation, a single-table DynamoDB table, a private
+  SSE-S3 bucket, Python 3.12 Lambdas on a shared layer, a JWT Lambda authorizer,
+  and a library of reusable service constructs (REST API, Glue, WAF, GuardDuty,
+  CloudTrail, Budgets, Access Analyzer, GitHub OIDC). Resource names follow the
+  projectName-envName-resourceName convention; jest tests and a secretlint
+  pre-commit hook included.
+version: 1.0.0
+category: backend
+tags: [aws, cdk, serverless, typescript, iac, cognito, lambda, dynamodb, s3, python]
+
+# The project identity is the only parameter. Everything else (ENV_NAME, AWS
+# account, region, Entra ID SSO, resource names) ships as a documented
+# placeholder in .env.example and is filled in by hand after generation. No .env
+# is versioned or generated: a real .env must never reach the repo or a tag.
+parameters:
+  - name: project_name
+    type: string
+    prompt: "Project name? (npm package name and prefix of every AWS resource)"
+    required: true
+    # Feeds PROJECT_NAME, so it must stay valid inside an S3 bucket name and a
+    # Cognito domain prefix: lowercase, no underscores, short enough to leave
+    # room for the -<envName>-<resourceName> suffix.
+    pattern: "^[a-z][a-z0-9-]{1,30}$"
+    patternHint: "lowercase letters, numbers and hyphens; must start with a letter (2-31 chars), e.g. acme-backend"
+
+templating:
+  engine: token
+  # No excludes needed: no source file carries a literal `{{ }}` sequence
+  # (TypeScript interpolates with ${...} and the Python sources use single
+  # braces), so flat token substitution is safe across the whole tree.
+
+nextSteps:
+  # .env.example is the only versioned env file (placeholders only, PROJECT_NAME
+  # pre-filled). Every value in it is documented inline; ENV_NAME defaults to dev
+  # and the AWS target is left as a placeholder until the dev sets it.
+  - "cd {{ project_name }}"
+  - "cp .env.example .env   # then fill AWS_ACCOUNT_ID and AWS_REGION (ENV_NAME=dev, PROJECT_NAME={{ project_name }} come pre-filled)"
+  - "npm install"
+  - "npm run prepare   # installs the husky/secretlint pre-commit hook"
+  - "npx cdk bootstrap aws://<AWS_ACCOUNT_ID>/<AWS_REGION>   # once per account/region"
+  - "npx cdk synth --quiet"
+  - "npm test"
+  - "npx cdk deploy"

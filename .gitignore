@@ -1,2 +1,7 @@
 MANIFESTS.md
 .atl
+
+# macOS Finder metadata. Repo-wide on purpose: without this rule a .DS_Store is
+# only ignored where a template happens to ship its own rule, so it can be
+# staged at the repo root, in templates/, or inside a template that lacks one.
+.DS_Store

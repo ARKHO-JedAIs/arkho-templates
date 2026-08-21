@@ -17,6 +17,14 @@
       "description": "Foundational AWS Data Lake on CDK v2: 4 S3 zones (Raw/Clean/Curated Iceberg/Archive), Glue ETL + Step Functions, Lake Formation FGAC, KMS, CloudTrail, and optional VPC + ingestion Lambdas.",
       "path": "templates/aws-datalake-foundation",
       "status": "available"
+    },
+    {
+      "name": "aws-cdk-serverless-backend",
+      "type": "project:backend",
+      "categories": ["aws", "cdk", "serverless", "typescript", "iac", "cognito", "lambda", "dynamodb", "s3", "python"],
+      "description": "Serverless backend on CDK v2: Cognito (optional Entra ID OIDC), single-table DynamoDB, private S3, Python 3.12 Lambdas + shared layer, JWT authorizer, and a library of reusable service constructs.",
+      "path": "templates/aws-cdk-serverless-backend",
+      "status": "available"
     }
   ]
 }
