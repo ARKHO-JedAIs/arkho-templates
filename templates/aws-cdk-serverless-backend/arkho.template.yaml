@@ -11,7 +11,7 @@ description: >
   GuardDuty, CloudTrail, Budgets, Access Analyzer, GitHub OIDC). Resource
   names follow the projectName-envName-resourceName convention; jest tests and a
   secretlint pre-commit hook included.
-version: 1.1.0
+version: 1.1.1
 category: backend
 tags: [aws, cdk, serverless, typescript, iac, cognito, lambda, apigateway, dynamodb, s3, python]
 

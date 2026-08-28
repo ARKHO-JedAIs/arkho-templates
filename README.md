@@ -12,7 +12,7 @@ version produced it.
 |---|---|---|
 | [`react-spa`](templates/react-spa/) | `react-spa@1.1.0` | React SPA (TypeScript, Vite) wired to Cognito auth and a backend API — atomic-design structure, shadcn/Radix UI, React Query, Axios, Zustand, and Zod. |
 | [`aws-datalake-foundation`](templates/aws-datalake-foundation/) | `aws-datalake-foundation@1.2.0` | Foundational AWS Data Lake on CDK v2 (TypeScript) — 3 S3 zones (Raw/Clean/Curated in Iceberg), Glue ETL orchestrated by Step Functions, Lake Formation + Glue Data Catalog governance, KMS encryption, CloudTrail auditing, split into 7 stacks with per-env config, cdk-nag and tests. |
-| [`aws-cdk-serverless-backend`](templates/aws-cdk-serverless-backend/) | `aws-cdk-serverless-backend@1.0.0` | Serverless backend on CDK v2 (TypeScript) — Cognito User Pool with optional Microsoft Entra ID (OIDC) federation, single-table DynamoDB, private SSE-S3 bucket, Python 3.12 Lambdas on a shared layer, JWT Lambda authorizer, plus a library of reusable service constructs (REST API, Glue, WAF, GuardDuty, CloudTrail, Budgets, Access Analyzer, GitHub OIDC). |
+| [`aws-cdk-serverless-backend`](templates/aws-cdk-serverless-backend/) | `aws-cdk-serverless-backend@1.1.1` | Serverless backend on CDK v2 (TypeScript) — Cognito User Pool with optional Microsoft Entra ID (OIDC) federation, single-table DynamoDB, private SSE-S3 bucket, Python 3.12 Lambdas on a shared layer, JWT Lambda authorizer, plus a library of reusable service constructs (REST API, Glue, WAF, GuardDuty, CloudTrail, Budgets, Access Analyzer, GitHub OIDC). |
 
 > Latest versions are the source of truth in git tags: `git tag -l '<name>@*'`.
 

@@ -268,7 +268,7 @@ export class LambdaConstruct extends Construct {
    */
   private createExecutionRole(functionName: string, additionalPolicies: PolicyStatement[]): Role {
     const role = new Role(this, 'ExecutionRole', {
-      roleName: `${functionName}-execution-role`,
+      roleName: `${functionName}-role`,
       assumedBy: new ServicePrincipal('lambda.amazonaws.com'),
       managedPolicies: [
         ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole')
