@@ -63,6 +63,95 @@ describe('MainStack', () => {
     }
   });
 
+  it('exposes a REST API deployed to the environment stage', () => {
+    const template = getTemplate();
+    template.hasResourceProperties('AWS::ApiGateway::RestApi', {
+      Name: `${PREFIX}-api`,
+    });
+    template.hasResourceProperties('AWS::ApiGateway::Stage', {
+      StageName: TEST_PARAMS.envName,
+    });
+  });
+
+  it('serves GET /hello-world without authorization', () => {
+    const template = getTemplate();
+    const [helloWorldResourceId] = Object.keys(
+      template.findResources('AWS::ApiGateway::Resource', {
+        Properties: { PathPart: 'hello-world' },
+      })
+    );
+    expect(helloWorldResourceId).toBeDefined();
+
+    template.hasResourceProperties('AWS::ApiGateway::Method', {
+      HttpMethod: 'GET',
+      ResourceId: { Ref: helloWorldResourceId },
+      AuthorizationType: 'NONE',
+      Integration: Match.objectLike({ Type: 'AWS_PROXY' }),
+    });
+  });
+
+  it('lets API Gateway invoke the hello-world Lambda', () => {
+    getTemplate().hasResourceProperties('AWS::Lambda::Permission', {
+      Action: 'lambda:InvokeFunction',
+      Principal: 'apigateway.amazonaws.com',
+      FunctionName: {
+        'Fn::GetAtt': [Match.stringLikeRegexp('HelloWorldLambda'), 'Arn'],
+      },
+    });
+  });
+
+  it('guards GET /presigned-url with the Lambda authorizer', () => {
+    const template = getTemplate();
+    template.hasResourceProperties('AWS::ApiGateway::Authorizer', {
+      Name: `${PREFIX}-lambda-authorizer`,
+      Type: 'TOKEN',
+      IdentitySource: 'method.request.header.Authorization',
+    });
+
+    const [presignedUrlResourceId] = Object.keys(
+      template.findResources('AWS::ApiGateway::Resource', {
+        Properties: { PathPart: 'presigned-url' },
+      })
+    );
+    expect(presignedUrlResourceId).toBeDefined();
+
+    template.hasResourceProperties('AWS::ApiGateway::Method', {
+      HttpMethod: 'GET',
+      ResourceId: { Ref: presignedUrlResourceId },
+      AuthorizationType: 'CUSTOM',
+      AuthorizerId: Match.anyValue(),
+    });
+  });
+
+  it('falls back to the not-found Lambda on unmatched routes', () => {
+    const template = getTemplate();
+    const [proxyResourceId] = Object.keys(
+      template.findResources('AWS::ApiGateway::Resource', {
+        Properties: { PathPart: '{proxy+}' },
+      })
+    );
+    expect(proxyResourceId).toBeDefined();
+
+    template.hasResourceProperties('AWS::ApiGateway::Method', {
+      HttpMethod: 'ANY',
+      ResourceId: { Ref: proxyResourceId },
+      AuthorizationType: 'NONE',
+    });
+  });
+
+  it('leaves every CORS preflight method unauthenticated', () => {
+    const preflight = Object.values(
+      getTemplate().findResources('AWS::ApiGateway::Method', {
+        Properties: { HttpMethod: 'OPTIONS' },
+      })
+    );
+    expect(preflight.length).toBeGreaterThan(0);
+    for (const method of preflight) {
+      expect(method.Properties?.AuthorizationType).toBe('NONE');
+      expect(method.Properties?.AuthorizerId).toBeUndefined();
+    }
+  });
+
   it('wires pre-signup and post-confirmation as Cognito triggers', () => {
     const template = getTemplate();
     template.hasResourceProperties('AWS::Cognito::UserPool', Match.objectLike({

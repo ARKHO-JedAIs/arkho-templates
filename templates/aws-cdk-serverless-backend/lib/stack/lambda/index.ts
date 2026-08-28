@@ -39,12 +39,16 @@ export class LambdaFactory extends Construct {
     const commonLayer = layerFactory.pythonCommonLayer.layer;
     const logging = { logRetention: RetentionDays.ONE_MONTH, removalPolicy: logRemovalPolicy };
 
+    // Reference example behind the public `GET /hello-world` route wired in
+    // ApiFactory. It depends on no other resource, so the API answers right
+    // after the first deploy. Remove it once the API serves real routes.
     this.helloWorldLambda = new LambdaConstruct(this, 'HelloWorldLambda', {
       functionName: `${projectName}-${envName}-hello-world`,
-      description: 'Hello-world Lambda function',
+      description: 'Example endpoint returning a static Hello, world! payload',
       code: Code.fromAsset('src/lambda/core/hello-world'),
       handler: 'index.handler',
       runtime: PYTHON_RUNTIME,
+      layers: [commonLayer],
       logging,
     });
 
@@ -98,6 +102,9 @@ export class LambdaFactory extends Construct {
 
     // PyJWT and cryptography are provided by public Klayers layers, resolved in
     // the deployment region (Klayers uses account 770693421928 in every region).
+    // The p312 suffix must track PYTHON_RUNTIME: a layer built for another minor
+    // version fails at import time. Layer version numbers are pinned because
+    // Klayers republishes on package updates.
     const region = Stack.of(this).region;
     const pyJwtLayer = LayerVersion.fromLayerVersionArn(this, 'PyJWTLayer', `arn:aws:lambda:${region}:770693421928:layer:Klayers-p312-PyJWT:1`);
     const cryptographyLayer = LayerVersion.fromLayerVersionArn(this, 'CryptographyLayer', `arn:aws:lambda:${region}:770693421928:layer:Klayers-p312-cryptography:18`);

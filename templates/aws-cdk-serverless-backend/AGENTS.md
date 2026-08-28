@@ -70,12 +70,23 @@ this file - do not fork content into the bootstraps.
    `post-confirmation-signup` are wired as triggers; the `authorizer` receives
    `USER_POOL_ID` / `APP_CLIENT_ID` after the pool exists, via `SetupFactory`
    (`lib/stack/setup`), which holds post-creation cross-factory wiring.
+6. **API Gateway** (`ApiFactory`) - a regional REST API deployed to a stage
+   named after `envName`. Every route is a Lambda proxy integration and is
+   protected by the `authorizer` function (Cognito JWT validation) unless it
+   opts out with `requireAuth: false`. Today: public `GET /hello-world`,
+   protected `GET /presigned-url`, and a `{proxy+}` catch-all answered by
+   `not-found` so unmatched paths return the standardized 404 body.
+
+**Add every new route in `ApiFactory` (`lib/stack/api`)**, so the URL surface
+stays in one place; `RestApiConstruct` stays generic. Two ordering constraints
+live in that construct: the authorizer is built **before** the `RestApi`,
+because `defaultMethodOptions` captures `this.authorizer` by value, and at least
+one method must reference the authorizer, or synth fails with "must be attached
+to a RestApi".
 
 The Lambda set follows the source under `src/lambda`: when a function's source
-folder is added or removed, adjust `LambdaFactory` to match. `not-found`,
-`presigned-url-template`, and `authorizer` are API Gateway oriented; no API
-Gateway is created yet, so they exist as standalone functions until an API is
-wired. `presigned-url-template` writes to the project `templates` bucket
+folder is added or removed, adjust `LambdaFactory` **and** `ApiFactory` to
+match. `presigned-url-template` writes to the project `templates` bucket
 (`S3Factory`), whose name is passed directly into the Lambda environment; the
 presigned-URL TTL is a constant in `LambdaFactory`.
 
@@ -97,6 +108,7 @@ without a reason.
     /s3                 # Active: templates bucket
     /lambda             # Active: one function per src/lambda folder
     /layer              # Active: python-common layer
+    /api                # Active: REST API routes, authorizer, 404 fallback
     /setup              # Active: post-creation wiring (authorizer <- Cognito ids)
     /shared/util        # Environment config + helpers
 /src
@@ -111,13 +123,16 @@ without a reason.
 - `lib/construct/*` are generic and parameterized; they do not depend on the
   factories. Available constructs include: cognito, dynamo, s3, lambda, layer,
   rest-api, glue, plus governance (cloudtrail, guardduty, waf, budget,
-  access-analyzer, github-oidc).
+  access-analyzer, github-oidc). Only glue and the governance ones are still
+  unwired.
 - `lib/stack/<service>` factories compose constructs into project wiring. Only
   active services have a factory wired into `MainStack`.
 
 ## Tech Stack
 
 - **Infrastructure**: AWS CDK (TypeScript), `aws-cdk-lib` v2.
+- **API**: API Gateway REST (regional), Lambda proxy integrations behind a
+  token authorizer.
 - **Auth**: Cognito User Pools, optional Entra ID OIDC federation.
 - **Storage**: DynamoDB (on-demand).
 - **Runtime**: Python 3.12 Lambda functions.

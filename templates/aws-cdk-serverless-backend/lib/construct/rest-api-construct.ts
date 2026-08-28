@@ -211,6 +211,11 @@ export class RestApiConstruct extends Construct {
    */
   private readonly params: ParamsConfig;
 
+  /**
+   * Request validators, created once and reused by every route
+   */
+  private requestValidators?: Record<string, RequestValidator>;
+
   constructor(scope: Construct, id: string, props: RestApiConstructProps) {
     super(scope, id);
 
@@ -243,6 +248,34 @@ export class RestApiConstruct extends Construct {
         retention: logRetention,
         removalPolicy: isProd ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
       });
+    }
+
+    // Built before the RestApi on purpose: `defaultMethodOptions` below reads
+    // `this.authorizer`, so an authorizer created afterwards would leave every
+    // default-protected method with an authorization type and no authorizer id.
+    // Methods that pass `authorizationType: NONE` with no authorizer of their
+    // own (the CORS preflight, the public routes) still opt out.
+    if (authorizerType === 'lambda' && authorizerFunction) {
+      this.lambdaAuthorizerRef = new TokenAuthorizer(this, 'LambdaAuthorizer', {
+        handler: authorizerFunction,
+        authorizerName: `${projectName}-${envName}-lambda-authorizer`,
+        identitySource: 'method.request.header.Authorization',
+        resultsCacheTtl: Duration.minutes(5),
+      });
+      this.authorizer = this.lambdaAuthorizerRef;
+    } else if (authorizerType === 'cognito' && cognitoConstruct) {
+      // Create Cognito authorizer using the provided Cognito construct
+      // Note: Cognito User Pool Authorizer validates BOTH Access Tokens and ID Tokens
+      // It checks the token signature, expiration, and issuer automatically
+      this.cognitoAuthorizer = new CognitoUserPoolsAuthorizer(this, 'CognitoAuthorizer', {
+        cognitoUserPools: [cognitoConstruct.userPool],
+        identitySource: 'method.request.header.Authorization',
+        authorizerName: `${projectName}-${envName}-cognito-authorizer`,
+        resultsCacheTtl: Duration.minutes(5),
+      });
+      this.authorizer = this.cognitoAuthorizer;
+    } else {
+      throw new Error('Either cognitoConstruct or authorizerFunction must be provided based on authorizerType');
     }
 
     // Create REST API
@@ -306,31 +339,6 @@ export class RestApiConstruct extends Construct {
     // Get the deployment stage
     this.stage = this.restApi.deploymentStage;
 
-    // Setup authorizer based on type (after RestApi is created)
-    if (authorizerType === 'lambda' && authorizerFunction) {
-      // Create Lambda authorizer with the RestApi
-      this.lambdaAuthorizerRef = new TokenAuthorizer(this, 'LambdaAuthorizer', {
-        handler: authorizerFunction,
-        authorizerName: `${projectName}-${envName}-lambda-authorizer`,
-        identitySource: 'method.request.header.Authorization',
-        resultsCacheTtl: Duration.minutes(5),
-      });
-      this.authorizer = this.lambdaAuthorizerRef;
-    } else if (authorizerType === 'cognito' && cognitoConstruct) {
-      // Create Cognito authorizer using the provided Cognito construct
-      // Note: Cognito User Pool Authorizer validates BOTH Access Tokens and ID Tokens
-      // It checks the token signature, expiration, and issuer automatically
-      this.cognitoAuthorizer = new CognitoUserPoolsAuthorizer(this, 'CognitoAuthorizer', {
-        cognitoUserPools: [cognitoConstruct.userPool],
-        identitySource: 'method.request.header.Authorization',
-        authorizerName: `${projectName}-${envName}-cognito-authorizer`,
-        resultsCacheTtl: Duration.minutes(5),
-      });
-      this.authorizer = this.cognitoAuthorizer;
-    } else {
-      throw new Error('Either cognitoConstruct or authorizerFunction must be provided based on authorizerType');
-    }
-
     // Create request validators
     const validators = this.createRequestValidators();
 
@@ -373,10 +381,18 @@ export class RestApiConstruct extends Construct {
   }
 
   /**
-   * Creates request validators
+   * Creates the request validators on first use.
+   *
+   * Memoized because `addRoute` also needs them: a second `new RequestValidator`
+   * under the same construct id fails synth with "There is already a Construct
+   * with name 'BodyValidator'".
    */
   private createRequestValidators(): Record<string, RequestValidator> {
-    return {
+    if (this.requestValidators) {
+      return this.requestValidators;
+    }
+
+    this.requestValidators = {
       'body': new RequestValidator(this, 'BodyValidator', {
         restApi: this.restApi,
         validateRequestBody: true,
@@ -393,6 +409,8 @@ export class RestApiConstruct extends Construct {
         validateRequestParameters: true,
       }),
     };
+
+    return this.requestValidators;
   }
 
   /**

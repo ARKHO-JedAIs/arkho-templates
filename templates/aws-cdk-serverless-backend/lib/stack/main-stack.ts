@@ -6,6 +6,7 @@ import { S3Factory } from './s3';
 import { LayerFactory } from './layer';
 import { LambdaFactory } from './lambda';
 import { CognitoFactory } from './cognito';
+import { ApiFactory } from './api';
 import { SetupFactory } from './setup';
 
 interface MainStackProps extends cdk.StackProps {
@@ -19,10 +20,10 @@ interface MainStackProps extends cdk.StackProps {
  *
  * Active resources: a DynamoDB usage-stats table, the templates S3 bucket, the
  * python-common layer, the Lambda functions whose source lives under
- * src/lambda, and Cognito
- * (with optional Entra ID SSO). The pre-signup and post-confirmation functions
- * are wired as Cognito triggers; the authorizer receives the Cognito ids after
- * the user pool is created.
+ * src/lambda, Cognito (with optional Entra ID SSO), and the REST API that
+ * exposes them. The pre-signup and post-confirmation functions are wired as
+ * Cognito triggers; the authorizer receives the Cognito ids after the user
+ * pool is created.
  *
  * The remaining service constructs under lib/construct stay as generic,
  * reusable building blocks and are wired in as the backend grows.
@@ -54,6 +55,8 @@ export class MainStack extends cdk.Stack {
         postConfirmation: lambdaFactory.postConfirmationSignupLambda.function,
       },
     });
+
+    new ApiFactory(this, 'ApiFactory', { params, lambdaFactory });
 
     // Post-creation wiring: the authorizer needs the Cognito ids, which only
     // exist after the user pool is created.

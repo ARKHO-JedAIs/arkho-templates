@@ -15,6 +15,7 @@ storage, and supporting services the rest of the system talks to.
 | Lambda layer | `LayerFactory` | `python-common` layer (logging, standardized responses, CORS helpers) |
 | Lambda | `LambdaFactory` | One function per folder under `src/lambda`: hello-world, pre-signup, post-confirmation-signup, not-found, presigned-url-template, authorizer |
 | Cognito | `CognitoFactory` | User Pool + app client for the CLI, with optional Microsoft Entra ID (OIDC) federation |
+| API Gateway | `ApiFactory` | Regional REST API exposing the Lambdas: public `GET /hello-world`, `GET /presigned-url` behind the Lambda authorizer, and a `{proxy+}` catch-all served by `not-found` |
 | Setup | `SetupFactory` | Post-creation wiring: injects `USER_POOL_ID` / `APP_CLIENT_ID` into the authorizer once the pool exists |
 
 Authentication and storage notes:
@@ -24,16 +25,19 @@ Authentication and storage notes:
   When enabled it creates an OIDC identity provider plus a Hosted UI domain. The
   domain prefix is derived in code from the resource-name convention
   (`${projectName}-${envName}`); it is **not** a manual environment variable.
-- `not-found`, `presigned-url-template`, and `authorizer` are API Gateway
-  oriented. No API Gateway is created yet, so they exist as standalone functions
-  until an API is wired. `presigned-url-template` reads/writes the `templates`
-  bucket (`S3Factory`), whose name is passed into the Lambda environment as
-  `TEMPLATES_BUCKET_NAME`. The presigned-URL TTL is a constant in `LambdaFactory`.
+- The REST API is deployed to a stage named after `ENV_NAME` and every route is
+  a Lambda proxy integration. Routes are protected by the `authorizer` function
+  (Cognito JWT validation) by default; `GET /hello-world` opts out with
+  `requireAuth: false` so `curl <api-url>hello-world` verifies the deploy before
+  any token exists. Add new routes in `ApiFactory` (`lib/stack/api`) so the URL
+  surface stays in one place.
+- `presigned-url-template` reads/writes the `templates` bucket (`S3Factory`),
+  whose name is passed into the Lambda environment as `TEMPLATES_BUCKET_NAME`.
+  The presigned-URL TTL is a constant in `LambdaFactory`.
 
-Everything else under `lib/construct` (rest-api, glue, plus governance:
-cloudtrail, guardduty, waf, budget, access-analyzer, github-oidc) stays as
-generic, reusable building blocks and is wired in only when a service is
-actually needed.
+Everything else under `lib/construct` (glue, plus governance: cloudtrail,
+guardduty, waf, budget, access-analyzer, github-oidc) stays as generic, reusable
+building blocks and is wired in only when a service is actually needed.
 
 ## Prerequisites
 
@@ -42,7 +46,8 @@ actually needed.
 - [AWS CLI](https://aws.amazon.com/cli/) configured with credentials
 - [AWS CDK v2](https://docs.aws.amazon.com/cdk/v2/guide/getting_started.html)
 - Python 3.12 (runtime of the Lambda functions; optional for local development)
-- An AWS account with permissions to create IAM roles, Lambda, DynamoDB, S3, and Cognito
+- An AWS account with permissions to create IAM roles, Lambda, API Gateway,
+  DynamoDB, S3, and Cognito
 
 ## Installation
 
@@ -113,6 +118,16 @@ After a successful deploy, the stack outputs:
 - **Cognito User Pool ID** and **App Client ID** (frontend / CLI auth config)
 - **`usage-stats` DynamoDB table name**
 - **`templates` S3 bucket name**
+- **REST API id, URL, and ARN**
+
+Smoke-test the API with the public route:
+
+```bash
+curl "$(aws cloudformation describe-stacks \
+  --stack-name <StackName> \
+  --query "Stacks[0].Outputs[?ends_with(OutputKey,'RestApiUrl')].OutputValue" \
+  --output text)hello-world"
+```
 
 ## Project structure
 
@@ -128,6 +143,7 @@ After a successful deploy, the stack outputs:
     /s3                 # templates bucket
     /lambda             # one function per src/lambda folder
     /layer              # python-common layer
+    /api                # REST API: routes, authorizer, 404 fallback
     /setup              # post-creation wiring (authorizer <- Cognito ids)
     /shared/util        # environment config + helpers
 /src
@@ -157,7 +173,8 @@ npx cdk destroy          # tear down the stack
   protection enabled in production.
 - S3 `templates` bucket is private, SSE-S3 encrypted, and SSL-only.
 - Least-privilege IAM scoped per Lambda function.
-- Cognito JWT validation in the Lambda authorizer.
+- Cognito JWT validation in the Lambda authorizer; every REST API route is
+  protected by it unless it explicitly opts out with `requireAuth: false`.
 - No secrets in source: `.env` is gitignored and `.env.example` ships
   placeholders only. A secretlint pre-commit hook blocks committed credentials.
   The Entra ID client secret comes from the environment at synth time; move it to

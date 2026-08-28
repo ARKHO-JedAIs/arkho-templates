@@ -21,8 +21,8 @@
     {
       "name": "aws-cdk-serverless-backend",
       "type": "project:backend",
-      "categories": ["aws", "cdk", "serverless", "typescript", "iac", "cognito", "lambda", "dynamodb", "s3", "python"],
-      "description": "Serverless backend on CDK v2: Cognito (optional Entra ID OIDC), single-table DynamoDB, private S3, Python 3.12 Lambdas + shared layer, JWT authorizer, and a library of reusable service constructs.",
+      "categories": ["aws", "cdk", "serverless", "typescript", "iac", "cognito", "lambda", "apigateway", "dynamodb", "s3", "python"],
+      "description": "Serverless backend on CDK v2: Cognito (optional Entra ID OIDC), single-table DynamoDB, private S3, Python 3.12 Lambdas + shared layer, and an API Gateway REST API behind a JWT authorizer, plus a library of reusable service constructs.",
       "path": "templates/aws-cdk-serverless-backend",
       "status": "available"
     }
