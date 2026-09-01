@@ -25,6 +25,14 @@
       "description": "Serverless backend on CDK v2: Cognito (optional Entra ID OIDC), single-table DynamoDB, private S3, Python 3.12 Lambdas + shared layer, JWT authorizer, and a library of reusable service constructs.",
       "path": "templates/aws-cdk-serverless-backend",
       "status": "available"
+    },
+    {
+      "name": "frontend-base",
+      "type": "project:frontend",
+      "categories": ["web", "react", "spa", "typescript", "vite", "auth-cognito", "shadcn", "chat"],
+      "description": "Ready-to-run React SPA (TypeScript, Vite): sidebar shell, sign-in with forced password change, optional role-gated routing, shadcn/Radix components and a two-hue design-token system. Cognito is optional - a mock auth provider lets it run before a user pool exists. Optional user-management CRUD and an optional streaming chat assistant with voice and image attachments.",
+      "path": "templates/frontend-base",
+      "status": "available"
     }
   ]
 }
