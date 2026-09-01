@@ -1,0 +1,203 @@
+# yaml-language-server: $schema=https://unpkg.com/@jedais/arkho-cli/schema/arkho.template.schema.json
+
+schemaVersion: 1
+name: frontend-base
+title: Frontend Base
+description: >
+  Ready-to-run React SPA (TypeScript, Vite): sidebar shell, sign-in with forced
+  password change, role-gated routing, 39 shadcn/Radix components and a themed
+  design-token system. Cognito is optional - a mock auth provider lets the app
+  run before a user pool exists. Optional user-management CRUD and an optional
+  streaming chat assistant with voice and image attachments.
+version: 0.1.0
+category: frontend
+tags: [react, spa, typescript, vite, cognito, shadcn, tailwind, chat]
+
+parameters:
+  - name: project_name
+    type: string
+    prompt: "Project name? (npm package name and title shown in the app)"
+    required: true
+    pattern: "^[a-z][a-z0-9-]{1,40}$"
+    patternHint: "lowercase letters, numbers and hyphens; must start with a letter (2-41 chars), e.g. acme-console"
+
+  - name: package_manager
+    type: choice
+    prompt: "Which package manager will the project use?"
+    default: npm
+    choices: [{ value: npm }, { value: pnpm }, { value: yarn }]
+
+  # ---------------------------------------------------------------------------
+  # Authentication
+  # ---------------------------------------------------------------------------
+  - name: auth_provider
+    type: choice
+    prompt: "Authentication?"
+    default: mock
+    choices:
+      - value: mock
+        label: "Mock (no AWS)"
+        hint: "runs immediately; switch to cognito later by editing .env"
+      - value: cognito
+        label: "Cognito user pool"
+        hint: "needs an existing user pool and app client"
+
+  # The two ids below are NOT marked `required`, deliberately.
+  #
+  # They need an empty default: when auth_provider is `mock` they are conditioned
+  # out, and a conditioned-out parameter with no default is omitted entirely,
+  # which leaves the literal `{{ token }}` sitting in the generated .env
+  # (materialize.ts substitutes only what was answered).
+  #
+  # But `required: true` together with `default: ""` is a contradiction - it says
+  # "mandatory" and "blank is a valid value" at once - and the engine resolves it
+  # in favour of the default (resolve.ts, non-interactive path). Rather than rely
+  # on which side wins, the requirement is enforced where it can actually be
+  # checked: `initializeAuth()` refuses to start and renders a screen naming the
+  # missing variable. The prompt text says so.
+  - name: cognito_user_pool_id
+    type: string
+    prompt: "Cognito user pool id? (leave empty to fill into .env later)"
+    when: "auth_provider == 'cognito'"
+    default: ""
+    pattern: "^[a-z]{2}-[a-z]+-[0-9]_[A-Za-z0-9]+$"
+    patternHint: "a Cognito user pool id such as us-east-1_abc123"
+
+  - name: cognito_user_pool_client_id
+    type: string
+    prompt: "Cognito app client id? (public client, no secret; may be left empty)"
+    when: "auth_provider == 'cognito'"
+    default: ""
+    pattern: "^[a-z0-9]+$"
+    patternHint: "the public Cognito app client id (lowercase letters and digits)"
+
+  # Asked before the group name, because the group name only means something if
+  # there are roles at all. A single-profile project would otherwise be made to
+  # answer a question whose answer it never uses.
+  - name: use_roles
+    type: boolean
+    prompt: "Will this project have more than one user profile? (no = every signed-in user sees everything)"
+    default: true
+
+  - name: admin_group
+    type: string
+    prompt: "Which group grants access to admin-only screens?"
+    when: "use_roles"
+    default: admin
+    pattern: "^[A-Za-z0-9_-]{1,64}$"
+    patternHint: "a Cognito group name, e.g. admin"
+
+  # ---------------------------------------------------------------------------
+  # Backend API
+  # ---------------------------------------------------------------------------
+  # Optional on purpose: the shell has to run before any backend exists. An
+  # empty default (rather than no default) keeps the token from leaking into
+  # .env as a literal `{{ api_base_url }}` when the answer is skipped.
+  - name: api_base_url
+    type: string
+    prompt: "Backend API base URL? (leave empty if you don't have one yet)"
+    required: false
+    default: ""
+
+  - name: include_users_admin
+    type: boolean
+    prompt: "Include the user-management screen? (CRUD against your users API)"
+    default: true
+
+  # ---------------------------------------------------------------------------
+  # Chat assistant
+  # ---------------------------------------------------------------------------
+  - name: include_chat
+    type: boolean
+    prompt: "Include the chat assistant section?"
+    default: false
+
+  # Capabilities are a multichoice rather than separate booleans so the prompt
+  # reads as one question. They land in .env as runtime flags, NOT as deleted
+  # files: voice and images share ChatInput.tsx, and the token engine cannot
+  # branch inside a file. The upside is that a team can enable one later,
+  # once the matching backend endpoint exists, without regenerating.
+  - name: chat_capabilities
+    type: multichoice
+    prompt: "Chat capabilities? (space to select, at least one)"
+    when: "include_chat"
+    # Explicit rather than inherited: clack's multiselect defaults `required` to
+    # true anyway, but leaving it unstated hides the rule in a dependency. Note
+    # the asymmetry it does NOT cover - a --yes run with no --chat-capabilities
+    # flag falls through to the default below (a default beats `required` on the
+    # non-interactive path), which yields a text-only chat. That is a valid
+    # build: chatConfig treats an empty list as "no extras".
+    required: true
+    # Empty, NOT [voice, images]. A conditioned-out parameter still receives its
+    # default (resolve.ts), so a non-empty default here leaks into a no-chat run:
+    # `'voice' in chat_capabilities` would be true, and the generator would go on
+    # to ask for a Cognito identity pool in a project that has no chat at all.
+    default: []
+    choices:
+      - value: voice
+        label: "Voice input"
+        hint: "push-to-talk dictation; asks for a Cognito identity pool next"
+      - value: images
+        label: "Image attachments"
+        hint: "presigned S3 upload; asks for the upload endpoint next"
+
+  - name: agent_chat_api_url
+    type: string
+    prompt: "Agent chat API base URL? (the client POSTs to {url}/chat)"
+    when: "include_chat"
+    required: false
+    default: ""
+
+  - name: cognito_identity_pool_id
+    type: string
+    prompt: "Cognito identity pool id? (signs the Transcribe calls for voice input)"
+    when: "include_chat && 'voice' in chat_capabilities"
+    required: false
+    default: ""
+
+  - name: chat_images_upload_url
+    type: string
+    prompt: "Presigned-upload endpoint URL for chat images?"
+    when: "include_chat && 'images' in chat_capabilities"
+    required: false
+    default: ""
+
+templating:
+  engine: token
+  # No `exclude` needed: the engine only substitutes `{{ name }}` where `name` is
+  # a declared parameter, and no shipped file carries braces in that shape. If you
+  # add one that does (a JSX object literal like `value={{ id }}`), list it here.
+
+  skip:
+    # copyTemplate walks the template directory verbatim - it has no built-in
+    # notion of build artifacts, so anything left lying here would be copied into
+    # every generated project.
+    #
+    # NOTE: do NOT install node_modules in this directory. A `node_modules/**`
+    # glob looks like it would cover it but does not: `**` skips dotfiles, so
+    # entries like `node_modules/<pkg>/.eslintrc` slip through and fail
+    # `template validate` with a bogus undeclared-token error. Preview the
+    # template from a generated copy instead (see the authoring notes).
+    - "dist/**"
+    - ".env.local"   # only if someone creates one while previewing locally
+
+  include:
+    # Ordered specific-first: copyTemplate evaluates the FIRST matching rule and
+    # stops, so a broad `src/features/chat/**` placed above these would swallow
+    # them and their own conditions would never run.
+    - path: "src/features/chat/**"
+      when: "include_chat"
+    # The AudioWorklet the voice input loads from public/. Only useVoiceInput
+    # references it, so without this it would ship to every no-chat project.
+    - path: "public/pcm-worklet.js"
+      when: "include_chat"
+    - path: "src/features/admin/**"
+      when: "include_users_admin"
+
+nextSteps:
+  - "cd {{ project_name }}"
+  - "{{ package_manager }} install"
+  - "{{ package_manager }} run dev   # http://localhost:5173"
+  - "# .env is already filled in with your answers; .env.example is the committed placeholder"
+  - "# To brand it: open the project in Claude Code and ask to personalise the brand"
+  - "#   (the arkho-branding skill runs the whole checklist as a short interview)"
