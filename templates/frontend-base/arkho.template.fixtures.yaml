@@ -1,0 +1,28 @@
+# Deterministic answers for `arkho-cli template validate --full`.
+# Author-facing tooling only - never copied into a generated project.
+#
+# This set deliberately exercises the WIDEST shape: Cognito auth, both optional
+# sections on, and both chat capabilities. A dry-run that passes here has copied
+# and token-substituted every file the template can emit. Narrower combinations
+# (mock auth, no chat) only ever remove files, so they cannot introduce a token
+# this run would miss.
+schemaVersion: 1
+
+answers:
+  project_name: sample-console
+  package_manager: npm
+
+  auth_provider: cognito
+  cognito_user_pool_id: us-east-1_abc123
+  cognito_user_pool_client_id: 1h57kf5cpq17m0eml12eu1s0j3
+  admin_group: admin
+
+  api_base_url: https://api.example.com
+
+  include_users_admin: true
+
+  include_chat: true
+  chat_capabilities: [voice, images]
+  agent_chat_api_url: https://agent.example.com
+  cognito_identity_pool_id: us-east-1:11111111-2222-3333-4444-555555555555
+  chat_images_upload_url: https://agent.example.com/chat/images/upload

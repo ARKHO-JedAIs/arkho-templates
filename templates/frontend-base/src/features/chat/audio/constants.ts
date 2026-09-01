@@ -1,0 +1,1 @@
+export const TRANSCRIBE_SAMPLE_RATE = 16000;
