@@ -1,0 +1,32 @@
+# Default
+*.js
+!jest.config.js
+*.d.ts
+node_modules
+build
+coverage
+
+# CDK asset staging directory
+.cdk.staging
+cdk.out
+cdk.context.json
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Others
+.DS_Store
+.claude/settings.local.json
+scripts
+export.zip
+export_full.zip
+export_example.zip
+.venv
+pptx/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/

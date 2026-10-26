@@ -1,0 +1,264 @@
+# yaml-language-server: $schema=https://unpkg.com/@jedais/arkho-cli/schema/arkho.template.schema.json
+
+schemaVersion: 1
+name: whatsapp-fullstack
+title: WhatsApp Fullstack
+description: >
+  WhatsApp inbox on AWS: a CDK serverless backend (aws-cdk-serverless-backend
+  base) that receives and sends WhatsApp messages through AWS End User Messaging
+  Social - SNS ws-handler, DynamoDB conversations, approved templates, human
+  takeover and an AppSync realtime channel - plus a React frontend
+  (frontend-base) with a live WhatsApp section. Generate both, or only one.
+version: 0.1.0
+category: other
+tags: [whatsapp, aws, cdk, serverless, react, appsync, cognito, end-user-messaging]
+
+parameters:
+  - name: project_name
+    type: string
+    prompt: "Project name? (prefix of every AWS resource and npm package name)"
+    required: true
+    # Feeds PROJECT_NAME of the backend, so it must stay valid inside an S3
+    # bucket name and a Cognito domain prefix.
+    pattern: "^[a-z][a-z0-9-]{1,30}$"
+    patternHint: "lowercase letters, numbers and hyphens; must start with a letter (2-31 chars), e.g. acme-whatsapp"
+
+  - name: components
+    type: choice
+    prompt: "What do you want to generate?"
+    default: fullstack
+    choices:
+      - value: fullstack
+        label: "Backend + frontend"
+        hint: "backend/ and frontend/, ready to wire together"
+      - value: backend
+        label: "Backend only"
+        hint: "CDK stack with the WhatsApp module"
+      - value: frontend
+        label: "Frontend only"
+        hint: "WhatsApp section for an existing backend with this API"
+
+  # ---------------------------------------------------------------------------
+  # Backend: WhatsApp
+  # ---------------------------------------------------------------------------
+  - name: whatsapp_ready
+    type: boolean
+    prompt: "Is a WhatsApp number already linked in AWS End User Messaging Social? (no = README explains how to link one)"
+    when: "components != 'frontend'"
+    default: false
+
+  # Empty defaults on purpose: the stack deploys without them and the ids can be
+  # set later in src/parameter/whatsapp-configuration.json.
+  - name: whatsapp_phone_number_id
+    type: string
+    prompt: "Phone number id? (End User Messaging Social > Phone numbers, the ARN)"
+    when: "components != 'frontend' && whatsapp_ready"
+    default: ""
+    pattern: "^(arn:aws:social-messaging:[a-z0-9-]+:[0-9]{12}:phone-number-id/[a-f0-9]+)?$"
+    patternHint: "the phone number ARN, e.g. arn:aws:social-messaging:us-east-1:123456789012:phone-number-id/abc123..."
+
+  - name: whatsapp_business_account_id
+    type: string
+    prompt: "WhatsApp Business Account id? (End User Messaging Social > Business accounts)"
+    when: "components != 'frontend' && whatsapp_ready"
+    default: ""
+    pattern: "^(waba-[a-f0-9]+)?$"
+    patternHint: "the WABA id as AWS shows it, e.g. waba-0a46e718017b4acd927aa5833b4fb13e"
+
+  - name: default_phone_prefix
+    type: string
+    prompt: "Default country prefix for numbers typed without one? (56 Chile, 51 Peru, 52 Mexico...)"
+    when: "components != 'frontend'"
+    default: "56"
+    pattern: "^[0-9]{1,3}$"
+    patternHint: "1 to 3 digits, no +, e.g. 56"
+
+  # Substituted inside a JSON string, so quotes and backslashes are rejected.
+  - name: auto_reply_message
+    type: string
+    prompt: "Automatic reply to every message? (leave empty for none; a person answers from the web)"
+    when: "components != 'frontend'"
+    default: ""
+    pattern: "^[^\"\\\\]{0,500}$"
+    patternHint: "up to 500 characters, without double quotes or backslashes"
+
+  # ---------------------------------------------------------------------------
+  # Frontend
+  # ---------------------------------------------------------------------------
+  - name: package_manager
+    type: choice
+    prompt: "Which package manager will the frontend use?"
+    when: "components != 'backend'"
+    default: npm
+    choices: [{ value: npm }, { value: pnpm }, { value: yarn }]
+
+  # Lands in frontend/.env as VITE_BRAND_COLOR and is applied at startup over
+  # the --brand-accent tokens (src/lib/theme/brandColor.ts): the token engine
+  # cannot convert a hex to the HSL triples colors.css uses.
+  - name: brand_color
+    type: string
+    prompt: "Brand colour as a hex? (buttons, accents and the sign-in screen)"
+    when: "components != 'backend'"
+    default: "#3B82F6"
+    pattern: "^#[0-9A-Fa-f]{6}$"
+    patternHint: "a 6-digit hex with #, e.g. #E30613 (red) or #0057A8 (blue)"
+
+  # Selects one file under frontend/src/features/auth/layouts (see include) and
+  # is written into that folder's index.ts.
+  - name: login_layout
+    type: choice
+    prompt: "Sign-in screen layout?"
+    when: "components != 'backend'"
+    default: basic
+    choices:
+      - value: basic
+        label: "Basic"
+        hint: "a centred card on a soft wash of the brand colour"
+      - value: brand-panel
+        label: "Brand panel"
+        hint: "brand-colour gradient panel with highlights, form card beside it"
+      - value: insights
+        label: "Insights"
+        hint: "dark decorated panel (lines, chart) with feature pills, bare form beside it"
+      - value: orbit
+        label: "Orbit"
+        hint: "big greeting with the form, animated orbits around the app initial beside it"
+
+  - name: auth_provider
+    type: choice
+    prompt: "Frontend authentication?"
+    when: "components != 'backend'"
+    default: mock
+    choices:
+      - value: mock
+        label: "Mock (no AWS)"
+        hint: "runs locally with demo WhatsApp data; switch to cognito in .env after deploying"
+      - value: cognito
+        label: "Cognito user pool"
+        hint: "the user pool of the deployed backend"
+
+  - name: cognito_user_pool_id
+    type: string
+    prompt: "Cognito user pool id? (backend output UserPoolId; may be left empty)"
+    when: "components != 'backend' && auth_provider == 'cognito'"
+    default: ""
+    pattern: "^([a-z]{2}-[a-z]+-[0-9]_[A-Za-z0-9]+)?$"
+    patternHint: "a Cognito user pool id such as us-east-1_abc123"
+
+  - name: cognito_user_pool_client_id
+    type: string
+    prompt: "Cognito app client id? (backend output, public client; may be left empty)"
+    when: "components != 'backend' && auth_provider == 'cognito'"
+    default: ""
+    pattern: "^[a-z0-9]*$"
+    patternHint: "the public Cognito app client id (lowercase letters and digits)"
+
+  # One answer for both sides: the frontend shows the code step (mock code
+  # 000000 under mock auth) and the backend turns on Cognito email MFA.
+  - name: login_otp
+    type: boolean
+    prompt: "Ask for a verification code after the password? (emailed one-time code; mock code 000000)"
+    default: false
+
+  - name: ses_from_email
+    type: string
+    prompt: "Sender address for the codes? (a verified SES identity; may be left empty until deploy)"
+    when: "components != 'frontend' && login_otp"
+    default: ""
+    pattern: "^([^@\\s]+@[^@\\s]+\\.[^@\\s]+)?$"
+    patternHint: "an email address, e.g. no-reply@example.com"
+
+  - name: api_base_url
+    type: string
+    prompt: "Backend API base URL? (backend output RestApiUrl; leave empty until it is deployed)"
+    when: "components != 'backend'"
+    default: ""
+
+  - name: appsync_url
+    type: string
+    prompt: "AppSync GraphQL URL for live updates? (backend output WhatsAppEventsGraphqlUrl; may be left empty)"
+    when: "components != 'backend'"
+    default: ""
+
+  - name: use_roles
+    type: boolean
+    prompt: "Will the frontend have more than one user profile? (no = every signed-in user sees everything)"
+    when: "components != 'backend'"
+    default: true
+
+  - name: admin_group
+    type: string
+    prompt: "Which Cognito group grants access to admin-only screens?"
+    when: "components != 'backend' && use_roles"
+    default: admin
+    pattern: "^[A-Za-z0-9_-]{1,64}$"
+    patternHint: "a Cognito group name, e.g. admin"
+
+  - name: include_users_admin
+    type: boolean
+    prompt: "Include the user-management screen? (needs a /admin/users API, not part of this backend)"
+    when: "components != 'backend'"
+    default: false
+
+templating:
+  engine: token
+
+  # Copied without substitution: it carries WhatsApp template variables in
+  # double braces, which the token engine would otherwise blank out.
+  exclude:
+    - "frontend/src/features/whatsapp/services/mockWhatsApp.ts"
+
+  skip:
+    - "frontend/dist/**"
+    - "frontend/.env.local"
+
+  include:
+    # Ordered specific-first: copyTemplate stops at the FIRST matching rule, so
+    # this one must sit above the broad frontend/** rules or it never runs. It
+    # repeats the components condition because, once it matches, the frontend
+    # rules below are not evaluated for these files.
+    - path: "frontend/src/features/admin/**"
+      when: "include_users_admin && components != 'backend'"
+
+    # One sign-in layout per project; layouts/index.ts re-exports the chosen one.
+    - path: "frontend/src/features/auth/layouts/basic.tsx"
+      when: "login_layout == 'basic' && components != 'backend'"
+    - path: "frontend/src/features/auth/layouts/brand-panel.tsx"
+      when: "login_layout == 'brand-panel' && components != 'backend'"
+    - path: "frontend/src/features/auth/layouts/insights.tsx"
+      when: "login_layout == 'insights' && components != 'backend'"
+    - path: "frontend/src/features/auth/layouts/orbit.tsx"
+      when: "login_layout == 'orbit' && components != 'backend'"
+
+    # `**` does not match dotfiles (.gitignore, .husky/...), so each tree needs
+    # the dot patterns too, or a backend-only project would still get them.
+    - path: "backend/**"
+      when: "components != 'frontend'"
+    - path: "backend/.*"
+      when: "components != 'frontend'"
+    - path: "backend/**/.*"
+      when: "components != 'frontend'"
+    - path: "backend/.*/**"
+      when: "components != 'frontend'"
+    - path: "backend/**/.*/**"
+      when: "components != 'frontend'"
+
+    - path: "frontend/**"
+      when: "components != 'backend'"
+    - path: "frontend/.*"
+      when: "components != 'backend'"
+    - path: "frontend/**/.*"
+      when: "components != 'backend'"
+    - path: "frontend/.*/**"
+      when: "components != 'backend'"
+    - path: "frontend/**/.*/**"
+      when: "components != 'backend'"
+
+nextSteps:
+  # Not `cd {{ project_name }}`: the folder is named after the CLI's own project-name
+  # answer, which may differ from this parameter when the first one failed its pattern.
+  - "cd into the generated project folder   # README.md has the full guide, including linking a WhatsApp number"
+  - "# Backend (if generated): cd backend && cp .env.example .env   # fill AWS_ACCOUNT_ID and AWS_REGION"
+  - "#   npm install && npm test && npx cdk synth --quiet   # all local, no deploy"
+  - "# Frontend (if generated): cd frontend && {{ package_manager }} install && {{ package_manager }} run dev"
+  - "#   with auth_provider=mock the WhatsApp section runs on demo data: http://localhost:5173/whatsapp"

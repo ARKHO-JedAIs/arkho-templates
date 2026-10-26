@@ -1,0 +1,163 @@
+/* eslint-disable no-undef */
+/** @type {import('tailwindcss').Config} */
+
+module.exports = {
+  content: ['./index.html', './src/**/*.{ts,tsx,js,jsx}'],
+  theme: {
+    extend: {
+      colors: {
+        border: 'hsl(var(--border))',
+        input: 'hsl(var(--input))',
+        ring: 'hsl(var(--ring))',
+        background: 'hsl(var(--background))',
+        'background-secondary': 'hsl(var(--background-secondary))',
+        foreground: 'hsl(var(--foreground))',
+        primary: {
+          DEFAULT: 'hsl(var(--primary))',
+          foreground: 'hsl(var(--primary-foreground))',
+        },
+        secondary: {
+          DEFAULT: 'hsl(var(--secondary))',
+          foreground: 'hsl(var(--secondary-foreground))',
+        },
+        destructive: {
+          DEFAULT: 'hsl(var(--destructive))',
+          foreground: 'hsl(var(--destructive-foreground))',
+        },
+        error: {
+          DEFAULT: 'hsl(var(--error))',
+          foreground: 'hsl(var(--error-foreground))',
+        },
+        muted: {
+          DEFAULT: 'hsl(var(--muted))',
+          foreground: 'hsl(var(--muted-foreground))',
+        },
+        accent: {
+          DEFAULT: 'hsl(var(--accent))',
+          foreground: 'hsl(var(--accent-foreground))',
+        },
+        popover: {
+          DEFAULT: 'hsl(var(--popover))',
+          foreground: 'hsl(var(--popover-foreground))',
+        },
+        card: {
+          DEFAULT: 'hsl(var(--card))',
+          foreground: 'hsl(var(--card-foreground))',
+        },
+        success: {
+          DEFAULT: 'hsl(var(--success))',
+          foreground: 'hsl(var(--success-foreground))',
+        },
+        warning: {
+          DEFAULT: 'hsl(var(--warning))',
+          foreground: 'hsl(var(--warning-foreground))',
+        },
+        'btn-default': {
+          DEFAULT: 'hsl(var(--btn-default-bg))',
+          text: 'hsl(var(--btn-default-text))',
+          hover: 'hsl(var(--btn-default-hover))',
+          active: 'hsl(var(--btn-default-active))',
+          disabled: 'hsl(var(--btn-default-disabled))',
+          'disabled-text': 'hsl(var(--btn-default-disabled-text))',
+        },
+        'btn-secondary': {
+          DEFAULT: 'hsl(var(--btn-secondary-bg))',
+          text: 'hsl(var(--btn-secondary-text))',
+          hover: 'hsl(var(--btn-secondary-hover))',
+          active: 'hsl(var(--btn-secondary-active))',
+          disabled: 'hsl(var(--btn-secondary-disabled))',
+          'disabled-text': 'hsl(var(--btn-secondary-disabled-text))',
+        },
+        'btn-ghost': {
+          DEFAULT: 'transparent',
+          text: 'hsl(var(--btn-ghost-text))',
+          'hover-bg': 'hsl(var(--btn-ghost-hover-bg))',
+          'active-bg': 'hsl(var(--btn-ghost-active-bg))',
+          disabled: 'hsl(var(--btn-ghost-disabled))',
+          'disabled-text': 'hsl(var(--btn-ghost-disabled-text))',
+        },
+        sidebar: {
+          DEFAULT: 'hsl(var(--sidebar-background))',
+          background: 'hsl(var(--background))',
+          foreground: 'hsl(var(--sidebar-foreground))',
+          primary: 'hsl(var(--sidebar-primary))',
+          'primary-foreground': 'hsl(var(--sidebar-primary-foreground))',
+          accent: 'hsl(var(--sidebar-accent))',
+          'accent-foreground': 'hsl(var(--sidebar-accent-foreground))',
+          border: 'hsl(var(--sidebar-border))',
+          ring: 'hsl(var(--sidebar-ring))',
+        },
+        'sidebar-menu': {
+          bg: 'hsl(var(--sidebar-menu-bg))',
+          text: 'hsl(var(--sidebar-menu-text))',
+          icon: 'hsl(var(--sidebar-menu-icon))',
+          'hover-bg': 'hsl(var(--sidebar-menu-hover-bg))',
+          'hover-text': 'hsl(var(--sidebar-menu-hover-text))',
+          'active-bg': 'hsl(var(--sidebar-menu-active-bg))',
+          'active-text': 'hsl(var(--sidebar-menu-active-text))',
+        },
+        'sidebar-submenu': {
+          bg: 'hsl(var(--sidebar-submenu-bg))',
+          text: 'hsl(var(--sidebar-submenu-text))',
+          'hover-bg': 'hsl(var(--sidebar-submenu-hover-bg))',
+          'hover-text': 'hsl(var(--sidebar-submenu-hover-text))',
+          'active-bg': 'hsl(var(--sidebar-submenu-active-bg))',
+          'active-text': 'hsl(var(--sidebar-submenu-active-text))',
+        },
+      },
+      fontFamily: {
+        sans: [
+          'Public Sans Variable',
+          '-apple-system',
+          'BlinkMacSystemFont',
+          'Segoe UI',
+          'Roboto',
+          'Helvetica Neue',
+          'Arial',
+          'sans-serif',
+          'Apple Color Emoji',
+          'Segoe UI Emoji',
+          'Segoe UI Symbol',
+        ],
+        'public-sans': [
+          'Public Sans Variable',
+          '-apple-system',
+          'BlinkMacSystemFont',
+          'Segoe UI',
+          'Roboto',
+          'Helvetica Neue',
+          'Arial',
+          'sans-serif',
+          'Apple Color Emoji',
+          'Segoe UI Emoji',
+          'Segoe UI Symbol',
+        ],
+      },
+      boxShadow: {
+        normal: '0 2px 5px 0 rgb(0,0,0,0.16), 0 2px 10px 0 rgb(0,0,0,0.12)',
+        soft: '0 2px 4px 0 rgb(0,0,0,0.08), 0 2px 6px 0 rgb(0,0,0,0.06)',
+        bottom: '0px 4px 8px -10px rgb(0,0,0,0.16), 0px 4px 8px -3px rgb(0,0,0,0.12)',
+        xs: 'var(--shadow-xs)',
+        sm: 'var(--shadow-sm)',
+        md: 'var(--shadow-md)',
+        lg: 'var(--shadow-lg)',
+        card: '0 1px 3px 0 rgb(0 0 0 / 0.08), 0 1px 2px -1px rgb(0 0 0 / 0.08)',
+        'card-hover': '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)',
+      },
+      screens: {
+        sm: '640px',
+        md: '850px',
+        mobile: '950px',
+        lg: '1024px',
+        xl: '1280px',
+      },
+      borderRadius: {
+        lg: 'var(--radius)',
+        md: 'calc(var(--radius) - 2px)',
+        sm: 'calc(var(--radius) - 4px)',
+      },
+    },
+  },
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  plugins: [require('tailwindcss-animate')],
+};

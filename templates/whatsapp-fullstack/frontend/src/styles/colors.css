@@ -1,0 +1,222 @@
+@layer base {
+  :root {
+    /* ============================================================
+       Design tokens.
+
+       Two hues drive everything below: --brand-navy (surfaces, sidebar,
+       secondary actions) and --brand-accent (primary CTA). Change those two
+       and the whole palette follows - the semantic tokens further down
+       (--primary, --border, --muted, ...) are all derived, never hardcoded.
+       Values are SPACE-separated `H S% L%` triples, not comma-separated. That is
+       not cosmetic: Tailwind renders an opacity modifier as `hsl(var(--x) / .8)`,
+       and the slash-alpha syntax is invalid CSS when mixed with commas. With
+       commas, every `/opacity` utility in the app silently resolves to
+       transparent - which is what left the sign-in panel's gradient unpainted.
+       ============================================================ */
+
+    /* ===== BRAND COLORS ===== */
+
+    /* Slate - surfaces, sidebar, secondary actions */
+    --brand-navy: 215 25% 27%; /* slate-700 */
+    --brand-navy-light: 206 20% 50%; /* derived light tint - soft backgrounds */
+    --brand-navy-hover: 215 25% 22%; /* hover */
+    --brand-navy-active: 209 21% 22%; /* derived dark shade - active/pressed */
+
+    /* Accent - primary CTA */
+    --brand-accent: 217 91% 60%; /* blue-500 */
+    --brand-accent-light: 214 95% 93%; /* derived light tint - soft backgrounds */
+    --brand-accent-hover: 221 83% 53%; /* hover */
+    --brand-accent-active: 224 76% 48%; /* derived dark shade - active/pressed */
+
+    /* Neutrals */
+    --brand-sky: 0 0% 100%; /* cards and backgrounds */
+
+    /* Dark neutral - aliases of the neutral scale below, not a new brand hue.
+       They must stay defined: --secondary, --btn-secondary-* and --chart-2 all
+       reference them, and an undefined var resolves to an invalid colour that
+       simply does not paint (a transparent badge with white text on a white
+       card, with no hover). */
+    --brand-dark: var(--brand-gray-900); /* #202428 */
+    --brand-dark-light: var(--brand-gray-700); /* derived light tint - soft backgrounds */
+    --brand-dark-hover: var(--brand-gray-950); /* hover - one step darker */
+    --brand-dark-active: 210 11% 5%; /* Active/Pressed */
+
+    /* ===== NEUTRAL SCALE ===== */
+    --brand-gray-950: 210 11% 8%; /* primary text */
+    --brand-gray-900: 210 11% 14%; /* #202428 (carbon-black) - Texto principal */
+    --brand-gray-800: 210 9% 25%; /* ~#3A3E43 - Texto secundario fuerte */
+    --brand-gray-700: 210 7% 38%; /* ~#5A5F65 - Texto secundario */
+    --brand-gray-600: 210 5% 50%; /* ~#7A7F84 - Texto terciario */
+    --brand-gray-500: 210 5% 62%; /* ~#9BA0A5 - Placeholders */
+    --brand-gray-400: 210 5% 75%; /* ~#BCBFC3 - Iconos deshabilitados */
+    --brand-gray-300: 202 8% 84%; /* ~#D4D9DC - Bordes */
+    --brand-gray-200: 200 10% 90%; /* ~#E4E8EA - Bordes suaves */
+    --brand-gray-100: 200 14% 95%; /* ~#F1F4F5 - Fondos secundarios */
+    --brand-gray-50: 200 20% 97%; /* ~#F7F9FA - Fondos sutiles */
+
+    /* ===== BASE ===== */
+    --color-white: 0 0% 100%;
+    --color-black: var(--brand-gray-950);
+
+    /* Semantic neutrals */
+    --color-neutral-dark: var(--brand-gray-900);
+    --color-neutral-medium: var(--brand-gray-700);
+    --color-neutral-light: var(--brand-gray-500);
+    --color-neutral-bg: var(--brand-gray-100);
+    --color-neutral-bg-light: var(--brand-gray-50);
+    --color-border: var(--brand-gray-300);
+    --color-border-subtle: var(--brand-gray-200);
+
+    /* ===== LAYOUT ===== */
+    --background: var(--color-white);
+    --background-secondary: var(--brand-gray-50);
+    --background-elevated: var(--color-white);
+    --foreground: var(--brand-gray-900);
+    --foreground-secondary: var(--brand-gray-700);
+    --radius: 0.625rem;
+
+    /* Tarjetas y popovers */
+    --card: var(--color-white);
+    --card-foreground: var(--brand-gray-900);
+    --popover: var(--color-white);
+    --popover-foreground: var(--brand-gray-900);
+
+    /* ===== SEMANTIC ROLES =====
+       --primary is the ACCENT hue (calls to action), --secondary the slate one
+       (surfaces, chrome). Wiring --primary to the slate is what made the two
+       brand hues cosmetic and left --brand-accent with zero references. */
+    --primary: var(--brand-accent);
+    --primary-light: var(--brand-accent-light);
+    --primary-foreground: var(--color-white);
+
+    --secondary: var(--brand-navy);
+    --secondary-light: var(--brand-navy-light);
+    --secondary-foreground: var(--color-white);
+
+    --accent: var(--brand-gray-100);
+    --accent-foreground: var(--brand-gray-900);
+
+    /* ===== BUTTONS ===== */
+    /* Default - primary call to action */
+    --btn-default-bg: var(--brand-accent);
+    --btn-default-text: var(--color-white);
+    --btn-default-hover: var(--brand-accent-hover);
+    --btn-default-active: var(--brand-accent-active);
+    --btn-default-disabled: var(--brand-gray-300);
+    --btn-default-disabled-text: var(--brand-gray-500);
+
+    /* Secondary action */
+    --btn-secondary-bg: var(--brand-navy);
+    --btn-secondary-text: var(--color-white);
+    --btn-secondary-hover: var(--brand-navy-hover);
+    --btn-secondary-active: var(--brand-navy-active);
+    --btn-secondary-disabled: var(--brand-gray-300);
+    --btn-secondary-disabled-text: var(--brand-gray-500);
+
+    /* Ghost */
+    --btn-ghost-bg: transparent;
+    --btn-ghost-text: var(--brand-gray-800);
+    --btn-ghost-hover-bg: var(--brand-gray-100);
+    --btn-ghost-active-bg: var(--brand-gray-200);
+    /* Declared by tailwind.config.js; without these the disabled ghost button
+       resolves to an invalid colour and simply does not paint. */
+    --btn-ghost-disabled: transparent;
+    --btn-ghost-disabled-text: var(--brand-gray-500);
+
+    /* Outline */
+    --btn-outline-border: var(--brand-gray-300);
+    --btn-outline-text: var(--brand-gray-800);
+    --btn-outline-hover-bg: var(--brand-gray-50);
+    --btn-outline-hover-border: var(--brand-gray-400);
+
+    /* ===== SEMANTIC STATES ===== */
+    --muted: var(--brand-gray-100);
+    --muted-foreground: var(--brand-gray-600);
+
+    /* Success - Verde accesible */
+    --success: 152 69% 40%;
+    --success-light: 152 69% 95%;
+    --success-foreground: var(--color-white);
+
+    /* Error - Rojo accesible */
+    --error: 4 74% 49%;
+    --error-light: 4 74% 95%;
+    --error-foreground: var(--color-white);
+    --destructive: var(--error);
+    --destructive-foreground: var(--color-white);
+
+    /* Warning - accessible amber */
+    --warning: 38 92% 50%;
+    --warning-light: 38 92% 95%;
+    --warning-foreground: var(--brand-gray-900);
+
+    /* Info - Azul informativo */
+    --info: 210 92% 45%;
+    --info-light: 210 92% 95%;
+    --info-foreground: var(--color-white);
+
+    /* ===== INPUTS & FORMS ===== */
+    --border: var(--color-border);
+    --border-focus: var(--brand-navy);
+    --input: var(--color-border);
+    --input-background: var(--color-white);
+    --input-placeholder: var(--brand-gray-500);
+    --ring: var(--brand-navy);
+    --ring-offset: var(--color-white);
+
+    /* ===== HEADER ===== */
+    --header-background: var(--color-white);
+    --header-foreground: var(--brand-gray-900);
+    --header-border: var(--brand-gray-200);
+
+    /* ===== SIDEBAR ===== */
+    --sidebar-background: var(--color-white);
+    --sidebar-foreground: var(--brand-gray-800);
+    --sidebar-primary: var(--brand-navy);
+    --sidebar-primary-foreground: var(--color-white);
+    --sidebar-accent: var(--brand-navy-light);
+    --sidebar-accent-foreground: var(--brand-navy-active);
+    --sidebar-border: var(--brand-gray-200);
+    --sidebar-ring: var(--brand-navy);
+
+    /* Main menu */
+    --sidebar-menu-bg: transparent;
+    --sidebar-menu-text: var(--brand-gray-700);
+    --sidebar-menu-icon: var(--brand-gray-600);
+    --sidebar-menu-hover-bg: var(--brand-gray-100);
+    --sidebar-menu-hover-text: var(--brand-gray-900);
+    --sidebar-menu-active-bg: var(--brand-navy-light);
+    --sidebar-menu-active-text: var(--brand-navy-active);
+
+    /* Submenu */
+    --sidebar-submenu-bg: transparent;
+    --sidebar-submenu-text: var(--brand-gray-600);
+    --sidebar-submenu-hover-bg: var(--brand-gray-100);
+    --sidebar-submenu-hover-text: var(--brand-gray-900);
+    --sidebar-submenu-active-bg: var(--brand-navy-light);
+    --sidebar-submenu-active-text: var(--brand-navy-active);
+
+    /* ===== STEP TABS ===== */
+    --step-tabs: var(--brand-gray-100);
+    --step-tabs-text: var(--brand-gray-700);
+    --step-tabs-active: var(--brand-navy);
+    --step-tabs-active-text: var(--color-white);
+    --step-tabs-completed: var(--success);
+    --step-tabs-completed-text: var(--color-white);
+    --step-tabs-disabled: var(--brand-gray-200);
+    --step-tabs-disabled-text: var(--brand-gray-400);
+
+    /* ===== SHADOWS ===== */
+    --shadow-xs: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+    --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+    --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+    --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+
+    /* ===== CHART COLORS ===== */
+    --chart-1: var(--brand-navy);
+    --chart-2: var(--brand-dark);
+    --chart-3: 152 69% 40%;
+    --chart-4: 280 65% 60%;
+    --chart-5: 38 92% 50%;
+  }
+}

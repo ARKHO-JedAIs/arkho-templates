@@ -1,0 +1,7 @@
+{
+  "origination_phone_number_id": "{{ whatsapp_phone_number_id }}",
+  "whatsapp_business_account_id": "{{ whatsapp_business_account_id }}",
+  "meta_api_version": "v20.0",
+  "default_phone_prefix": "{{ default_phone_prefix }}",
+  "auto_reply_message": "{{ auto_reply_message }}"
+}

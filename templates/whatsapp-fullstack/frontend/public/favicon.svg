@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="App icon">
+  <!-- Neutral placeholder mark. Replace it with your own (see CLAUDE.md >
+       "Branding checklist"). Kept as SVG rather than a raster so it stays
+       crisp at every size and can be edited as text. -->
+  <rect width="32" height="32" rx="8" fill="#3C83F6"/>
+  <path d="M10 21V11h4.6a3.2 3.2 0 0 1 0 6.4H10" fill="none" stroke="#fff"
+        stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="21.5" cy="20.5" r="1.8" fill="#fff"/>
+</svg>
