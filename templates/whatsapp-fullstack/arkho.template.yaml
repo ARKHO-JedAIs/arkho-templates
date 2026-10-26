@@ -39,6 +39,27 @@ parameters:
         hint: "WhatsApp section for an existing backend with this API"
 
   # ---------------------------------------------------------------------------
+  # Backend: AWS target
+  # ---------------------------------------------------------------------------
+  # Both land only in backend/.env, which is gitignored in the generated
+  # project: an account id never reaches a committed file.
+  - name: aws_region
+    type: string
+    prompt: "AWS region to deploy to? (End User Messaging Social must be available there)"
+    when: "components != 'frontend'"
+    default: us-east-1
+    pattern: "^[a-z]{2}(-[a-z]+)+-[0-9]$"
+    patternHint: "an AWS region code, e.g. us-east-1"
+
+  - name: aws_account_id
+    type: string
+    prompt: "AWS account id? (12 digits; leave empty to fill backend/.env later)"
+    when: "components != 'frontend'"
+    default: ""
+    pattern: "^([0-9]{12})?$"
+    patternHint: "12 digits, e.g. 123456789012 (aws sts get-caller-identity --query Account)"
+
+  # ---------------------------------------------------------------------------
   # Backend: WhatsApp
   # ---------------------------------------------------------------------------
   - name: whatsapp_ready
@@ -160,12 +181,16 @@ parameters:
     prompt: "Ask for a verification code after the password? (emailed one-time code; mock code 000000)"
     default: false
 
+  # With email MFA on, the backend refuses to synth without a sender, so the
+  # pattern rejects an empty answer whenever this is asked. The empty default is
+  # only for the conditioned-out case: without it the literal token would be
+  # left in backend/.env.
   - name: ses_from_email
     type: string
-    prompt: "Sender address for the codes? (a verified SES identity; may be left empty until deploy)"
+    prompt: "Sender address for the codes? (must be a verified SES identity in that region)"
     when: "components != 'frontend' && login_otp"
     default: ""
-    pattern: "^([^@\\s]+@[^@\\s]+\\.[^@\\s]+)?$"
+    pattern: "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$"
     patternHint: "an email address, e.g. no-reply@example.com"
 
   - name: api_base_url
@@ -220,6 +245,10 @@ templating:
     - path: "frontend/src/features/admin/**"
       when: "include_users_admin && components != 'backend'"
 
+    # Only pnpm reads it; npm and yarn run esbuild's postinstall on their own.
+    - path: "frontend/pnpm-workspace.yaml"
+      when: "package_manager == 'pnpm' && components != 'backend'"
+
     # One sign-in layout per project; layouts/index.ts re-exports the chosen one.
     - path: "frontend/src/features/auth/layouts/basic.tsx"
       when: "login_layout == 'basic' && components != 'backend'"
@@ -258,7 +287,7 @@ nextSteps:
   # Not `cd {{ project_name }}`: the folder is named after the CLI's own project-name
   # answer, which may differ from this parameter when the first one failed its pattern.
   - "cd into the generated project folder   # README.md has the full guide, including linking a WhatsApp number"
-  - "# Backend (if generated): cd backend && cp .env.example .env   # fill AWS_ACCOUNT_ID and AWS_REGION"
+  - "# Backend (if generated): cd backend   # .env is already filled with your answers"
   - "#   npm install && npm test && npx cdk synth --quiet   # all local, no deploy"
   - "# Frontend (if generated): cd frontend && {{ package_manager }} install && {{ package_manager }} run dev"
   - "#   with auth_provider=mock the WhatsApp section runs on demo data: http://localhost:5173/whatsapp"

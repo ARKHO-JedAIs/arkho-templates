@@ -33,8 +33,7 @@ Frontend <- AppSync subscription (live updates)
 
 ```bash
 # Backend: tests and synth only, nothing is deployed
-cd backend
-cp .env.example .env            # AWS_ACCOUNT_ID can stay a placeholder for synth
+cd backend                      # .env was written with your answers (gitignored)
 npm install
 npm test                        # jest: CDK assertions
 python -m unittest discover -s test/python -v   # ws-handler unit tests
@@ -63,7 +62,7 @@ same realtime path AppSync uses, so the whole screen can be exercised.
 
    ```bash
    cd backend
-   # .env: real AWS_ACCOUNT_ID and AWS_REGION (a region where End User Messaging Social is available)
+   # .env: check AWS_ACCOUNT_ID and AWS_REGION (a region where End User Messaging Social is available)
    npx cdk bootstrap aws://<AWS_ACCOUNT_ID>/<AWS_REGION>   # once per account/region
    npx cdk deploy
    ```
