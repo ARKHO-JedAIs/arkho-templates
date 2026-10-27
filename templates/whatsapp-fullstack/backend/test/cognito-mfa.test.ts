@@ -1,7 +1,7 @@
 import * as cdk from 'aws-cdk-lib';
 import { Template } from 'aws-cdk-lib/assertions';
 import { MainStack } from '../lib/stack/main-stack';
-import { getTemplate, TEST_ENV, TEST_PARAMS } from './helpers/setup';
+import { getTemplate, TEST_ENV, TEST_PARAMS, TEST_WHATSAPP } from './helpers/setup';
 
 function templateWithEmailMfa(): Template {
   const app = new cdk.App();
@@ -13,6 +13,7 @@ function templateWithEmailMfa(): Template {
       entraId: { enabled: false },
       emailMfa: { enabled: true, fromEmail: 'no-reply@example.com' },
     },
+    whatsapp: TEST_WHATSAPP,
   });
   return Template.fromStack(stack);
 }

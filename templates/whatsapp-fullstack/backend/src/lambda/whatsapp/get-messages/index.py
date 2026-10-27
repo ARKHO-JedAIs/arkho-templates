@@ -13,6 +13,8 @@ def handler(event, context):
     The last page of one conversation, oldest first; ``before`` (the oldest
     date already shown) pages backwards.
     """
+    if not http.is_allowed(event):
+        return create_error_response("Your profile cannot use WhatsApp", 403, "FORBIDDEN")
     phone = http.get_query(event, "phone")
     if not phone.isdigit():
         return create_error_response("phone is required (digits only)", 422, "VALIDATION_ERROR")

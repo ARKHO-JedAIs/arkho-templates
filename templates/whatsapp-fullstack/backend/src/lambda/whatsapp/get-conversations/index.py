@@ -1,7 +1,7 @@
 from traceback import format_exc
 
 from common import create_error_response, create_success_response, get_logger, with_cors
-from common.whatsapp import store
+from common.whatsapp import http, store
 
 logger = get_logger(__name__)
 
@@ -9,6 +9,8 @@ logger = get_logger(__name__)
 @with_cors()
 def handler(event, context):
     """GET /whatsapp/conversations: the inbox, most recent first."""
+    if not http.is_allowed(event):
+        return create_error_response("Your profile cannot use WhatsApp", 403, "FORBIDDEN")
     try:
         conversations = store.list_conversations()
     except Exception:  # noqa: BLE001

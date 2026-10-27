@@ -7,8 +7,9 @@ which is why every event announces something already written to DynamoDB.
 
 Channels (the subscription's ``id``):
 
-* the contact's phone - MESSAGE_RECEIVED, MESSAGE_SENT, TEMPLATE_SENT and
-  CONTROL_CHANGED, with the stored item as payload
+* the contact's phone - MESSAGE_RECEIVED, MESSAGE_SENT, TEMPLATE_SENT,
+  MESSAGE_STATUS (sent / delivered / read / failed) and CONTROL_CHANGED, with
+  the stored item as payload
 * ``inbox`` - CONVERSATION_UPDATED with the conversation summary, so the list
   of conversations reorders itself without polling
 """
@@ -32,6 +33,7 @@ MESSAGE_RECEIVED = "MESSAGE_RECEIVED"
 MESSAGE_SENT = "MESSAGE_SENT"
 TEMPLATE_SENT = "TEMPLATE_SENT"
 CONTROL_CHANGED = "CONTROL_CHANGED"
+MESSAGE_STATUS = "MESSAGE_STATUS"
 CONVERSATION_UPDATED = "CONVERSATION_UPDATED"
 
 PUBLISH_EVENT = """

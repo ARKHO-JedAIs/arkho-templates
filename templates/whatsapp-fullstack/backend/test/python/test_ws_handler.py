@@ -47,7 +47,7 @@ def install_aws_stubs() -> None:
 install_aws_stubs()
 sys.path.insert(0, str(ROOT / "src" / "layer" / "python-common" / "python"))
 
-from common.whatsapp import config, messaging, realtime, store  # noqa: E402
+from common.whatsapp import config, http, messaging, realtime, store  # noqa: E402
 
 spec = importlib.util.spec_from_file_location(
     "ws_handler", ROOT / "src" / "lambda" / "whatsapp" / "ws-handler" / "index.py"
@@ -56,8 +56,9 @@ ws_handler = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(ws_handler)
 
 
-def sns_event(*messages: dict, contacts: list | None = None) -> dict:
-    entry = {"changes": [{"value": {"messages": list(messages), "contacts": contacts or []}}]}
+def sns_event(*messages: dict, contacts: list | None = None, statuses: list | None = None) -> dict:
+    value = {"messages": list(messages), "contacts": contacts or [], "statuses": statuses or []}
+    entry = {"changes": [{"value": value}]}
     body = {
         "context": {"MetaPhoneNumberIds": [{"arn": "arn:phone"}]},
         "whatsAppWebhookEntry": json.dumps(entry),
@@ -80,7 +81,9 @@ class WsHandlerTest(unittest.TestCase):
 
         self.conversation = {"phone": "56911111111", "mode": "assistant"}
         patches = [
-            mock.patch.object(store, "get_conversation", return_value={}),
+            mock.patch.object(store, "find_message_key", return_value=None),
+            mock.patch.object(store, "update_status", return_value=None),
+            mock.patch.object(realtime, "publish"),
             mock.patch.object(store, "save_message", side_effect=save_message),
             mock.patch.object(store, "touch_conversation", side_effect=lambda *a, **k: self.conversation),
             mock.patch.object(realtime, "announce_message"),
@@ -118,9 +121,32 @@ class WsHandlerTest(unittest.TestCase):
         self.assertEqual(len(self.saved), 1)
 
     def test_ignores_a_duplicate_delivery(self):
-        self.mocks["get_conversation"].return_value = {"last_inbound_message_id": "wamid.1"}
+        self.mocks["find_message_key"].return_value = {"phone": "56911111111", "date": "x"}
         ws_handler.handler(sns_event(text_message()), None)
         self.assertEqual(self.saved, [])
+
+    def test_a_message_that_cannot_be_stored_fails_the_invocation_for_a_retry(self):
+        self.mocks["save_message"].side_effect = RuntimeError("DynamoDB down")
+        with self.assertRaises(ws_handler.NotificationFailed):
+            ws_handler.handler(sns_event(text_message()), None)
+
+    def test_a_failed_auto_reply_does_not_fail_the_invocation(self):
+        self.mocks["auto_reply_message"].return_value = "Gracias"
+        self.mocks["send_text"].side_effect = RuntimeError("throttled")
+        self.assertEqual(ws_handler.handler(sns_event(text_message()), None), {"status": "processed"})
+        self.assertEqual(len(self.saved), 1)
+
+    def test_records_and_announces_a_delivery_status(self):
+        updated = {"phone": "56911111111", "date": "x", "status": "read"}
+        self.mocks["update_status"].return_value = updated
+        ws_handler.handler(sns_event(statuses=[{"id": "wamid.out", "status": "read"}]), None)
+        self.mocks["update_status"].assert_called_once_with("wamid.out", "read", "")
+        self.mocks["publish"].assert_called_once_with("56911111111", realtime.MESSAGE_STATUS, payload=updated)
+
+    def test_a_failed_status_keeps_its_reason(self):
+        status = {"id": "wamid.out", "status": "failed", "errors": [{"title": "Re-engagement message"}]}
+        ws_handler.handler(sns_event(statuses=[status]), None)
+        self.mocks["update_status"].assert_called_once_with("wamid.out", "failed", "Re-engagement message")
 
     def test_stores_media_as_a_placeholder_with_its_caption(self):
         image = {"from": "56911111111", "id": "wamid.2", "type": "image", "image": {"id": "m1", "caption": "mi receta"}}
@@ -132,6 +158,53 @@ class WsHandlerTest(unittest.TestCase):
         event = sns_event()
         ws_handler.handler(event, None)
         self.assertEqual(self.saved, [])
+
+
+class UpdateStatusTest(unittest.TestCase):
+    def setUp(self):
+        self.table = mock.MagicMock()
+        self.table.update_item.return_value = {"Attributes": {"status": "updated"}}
+        patches = [
+            mock.patch.object(store, "messages_table", self.table),
+            mock.patch.object(store, "find_message_key", return_value={"phone": "1", "date": "d"}),
+        ]
+        for patch in patches:
+            patch.start()
+        self.addCleanup(mock.patch.stopall)
+
+    def stored(self, status: str):
+        self.table.get_item.return_value = {"Item": {"status": status}}
+
+    def test_moves_a_status_forward(self):
+        self.stored("sent")
+        self.assertEqual(store.update_status("wamid.1", "delivered"), {"status": "updated"})
+
+    def test_never_moves_a_status_back(self):
+        self.stored("read")
+        self.assertIsNone(store.update_status("wamid.1", "delivered"))
+        self.table.update_item.assert_not_called()
+
+    def test_failed_always_wins_and_unknown_ids_are_ignored(self):
+        self.stored("read")
+        self.assertIsNotNone(store.update_status("wamid.1", "failed", "expired"))
+        with mock.patch.object(store, "find_message_key", return_value=None):
+            self.assertIsNone(store.update_status("wamid.2", "read"))
+        self.assertIsNone(store.update_status("wamid.1", "deleted"))
+
+
+class AdminGroupTest(unittest.TestCase):
+    def event(self, groups: str) -> dict:
+        return {"requestContext": {"authorizer": {"username": "ana", "groups": groups}}}
+
+    def test_requires_the_admin_group_when_set(self):
+        with mock.patch.object(http, "ADMIN_GROUP", "admin"):
+            self.assertTrue(http.is_allowed(self.event("member,admin")))
+            self.assertFalse(http.is_allowed(self.event("member")))
+            self.assertFalse(http.is_allowed(self.event("")))
+
+    def test_any_signed_in_user_when_no_group_is_set(self):
+        with mock.patch.object(http, "ADMIN_GROUP", ""):
+            self.assertTrue(http.is_allowed(self.event("")))
 
 
 class NormalizePhoneTest(unittest.TestCase):

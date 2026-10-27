@@ -1,5 +1,10 @@
 """Request helpers shared by the WhatsApp API handlers."""
 import json
+import os
+
+# Cognito group every WhatsApp route requires (WhatsAppFactory). Empty: any
+# signed-in user, for projects with a single profile.
+ADMIN_GROUP = os.environ.get("WHATSAPP_ADMIN_GROUP", "")
 
 
 class BadRequest(ValueError):
@@ -29,7 +34,13 @@ def get_caller(event: dict) -> dict:
     return {
         "username": str(authorizer.get("username") or authorizer.get("userId") or ""),
         "email": str(authorizer.get("email") or ""),
+        "groups": [group for group in str(authorizer.get("groups") or "").split(",") if group],
     }
+
+
+def is_allowed(event: dict) -> bool:
+    """Whether the caller may use the WhatsApp API: member of the admin group, if one is set."""
+    return not ADMIN_GROUP or ADMIN_GROUP in get_caller(event)["groups"]
 
 
 def require_text(body: dict, name: str, max_length: int) -> str:

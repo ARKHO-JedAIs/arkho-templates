@@ -80,10 +80,11 @@ same realtime path AppSync uses, so the whole screen can be exercised.
 3. **Send its events to the backend** - in the WABA, set the **event
    destination** to the SNS topic `WhatsAppTopicArn`.
 
-4. **Give the backend the ids** - copy the phone number ARN and the WABA id into
-   `backend/src/parameter/whatsapp-configuration.json` and deploy again (or edit
-   the Parameter Store parameter `WhatsAppConfigurationParameterName` directly,
-   no deploy needed; Lambdas read it on cold start).
+4. **Give the backend the ids** - set `WHATSAPP_PHONE_NUMBER_ID` (the phone
+   number ARN) and `WHATSAPP_BUSINESS_ACCOUNT_ID` in `backend/.env` and deploy
+   again (or edit the Parameter Store parameter
+   `WhatsAppConfigurationParameterName` directly, no deploy needed; Lambdas read
+   it on cold start).
 
 5. **Point the frontend at it** - in `frontend/.env`:
 
@@ -95,7 +96,18 @@ same realtime path AppSync uses, so the whole screen can be exercised.
    VITE_APPSYNC_URL=<WhatsAppEventsGraphqlUrl>
    ```
 
-   Create a user in the Cognito pool, sign in, and open **WhatsApp**.
+   Create the first administrator (sign-up is closed: admins create the
+   rest from the Usuarios screen, if you included it):
+
+   ```bash
+   POOL=<UserPoolId>; EMAIL=you@example.com
+   aws cognito-idp admin-create-user --user-pool-id $POOL --username $EMAIL      --user-attributes Name=email,Value=$EMAIL Name=email_verified,Value=true
+   aws cognito-idp admin-add-user-to-group --user-pool-id $POOL --username $EMAIL --group-name admin
+   ```
+
+   Cognito emails a temporary password; sign in, set yours, and open **WhatsApp**.
+   (Without user management, create the `admin` group first:
+   `aws cognito-idp create-group --user-pool-id $POOL --group-name admin`.)
 
 6. **Try it** - write to the business number from your phone: the conversation
    shows up live. Reply from the web within 24 hours, or send a template
@@ -103,17 +115,25 @@ same realtime path AppSync uses, so the whole screen can be exercised.
 
 ## WhatsApp configuration
 
-`backend/src/parameter/whatsapp-configuration.json` (non-secret ids only):
+In `backend/.env` (gitignored: the phone number ARN carries the account id).
+At deploy they become the Parameter Store parameter the Lambdas read.
 
-| Key | Meaning |
+| Variable | Meaning |
 |---|---|
-| `origination_phone_number_id` | Phone number ARN in End User Messaging Social. Needed to send from the web. |
-| `whatsapp_business_account_id` | WABA id (`waba-...`). Needed to list templates. |
-| `meta_api_version` | Meta Graph API version the payloads target. |
-| `default_phone_prefix` | Country prefix added to numbers typed without one. |
-| `auto_reply_message` | Sent to every inbound message while the assistant answers. Empty = none. |
+| `WHATSAPP_PHONE_NUMBER_ID` | Phone number ARN in End User Messaging Social. Needed to send from the web. |
+| `WHATSAPP_BUSINESS_ACCOUNT_ID` | WABA id (`waba-...`). Needed to list templates. |
+| `WHATSAPP_META_API_VERSION` | Meta Graph API version the payloads target. |
+| `WHATSAPP_DEFAULT_PHONE_PREFIX` | Country prefix added to numbers typed without one. |
+| `WHATSAPP_AUTO_REPLY_MESSAGE` | Sent to every inbound message while the assistant answers. Empty = none. |
+| `WHATSAPP_ADMIN_GROUP` / `WHATSAPP_REQUIRE_ADMIN` | Cognito group the WhatsApp API and live channel require; `false` = any signed-in user. |
+
+Inbound notifications that still fail after Lambda's retries are kept 14 days
+in the `WhatsAppDeadLetterQueueUrl` queue: fix the cause, then redrive them.
 
 ## Backend API (all behind the Cognito authorizer)
+
+Every route requires the `WHATSAPP_ADMIN_GROUP` group (403 otherwise), unless
+`WHATSAPP_REQUIRE_ADMIN=false`.
 
 | Method | Path | Body / query | Returns `data` |
 |---|---|---|---|
@@ -124,9 +144,24 @@ same realtime path AppSync uses, so the whole screen can be exercised.
 | POST | `/whatsapp/templates/send` | `{ phone, template_name, language, parameters? }` | the stored message |
 | PUT | `/whatsapp/control` | `{ phone, mode: "human" \| "assistant" }` | the conversation |
 
+With `USERS_API_ENABLED=true`, the Usuarios screen's API (one `admin-users`
+function over Cognito, roles = the `admin` and `member` groups):
+
+| Method | Path | Body | Returns |
+|---|---|---|---|
+| GET | `/admin/users` | | users with their roles |
+| POST | `/admin/users` | `{ email, name?, roles? }` | the user; Cognito emails the temporary password |
+| PATCH | `/admin/users/{username}` | `{ name?, email?, roles? }` | 204 |
+| PATCH | `/admin/users/{username}/status` | `{ enabled }` | 204 |
+| POST | `/admin/users/{username}/password` | | `{ temporaryPassword }` |
+| DELETE | `/admin/users/{username}` | | 204 |
+
+Nobody can disable, delete or change the roles of their own account.
+
 Realtime (AppSync `onEvent(id)`): `id=<phone>` carries `MESSAGE_RECEIVED`,
-`MESSAGE_SENT`, `TEMPLATE_SENT` and `CONTROL_CHANGED`; `id=inbox` carries
-`CONVERSATION_UPDATED`. The payload is the stored item.
+`MESSAGE_SENT`, `TEMPLATE_SENT`, `MESSAGE_STATUS` (sent, delivered, read,
+failed) and `CONTROL_CHANGED`; `id=inbox` carries `CONVERSATION_UPDATED`. The
+payload is the stored item. Only the admin group can subscribe when one is set.
 
 ## Not included yet
 
@@ -134,3 +169,9 @@ Realtime (AppSync `onEvent(id)`): `id=<phone>` carries `MESSAGE_RECEIVED`,
   their caption, not downloaded.
 - An AI agent: plug it into `answer()` in `backend/src/lambda/whatsapp/ws-handler`.
 - Message rate limits per contact.
+
+To verify on the first deploy (built from midoc's working setup, not yet run
+against AWS from this template): the Python 3.12 Lambda runtime ships a boto3
+with the `socialmessaging` client, and the delivery statuses match the sent
+messages (the message id End User Messaging Social returns is the one its
+status notifications carry - an unmatched status is logged and ignored).

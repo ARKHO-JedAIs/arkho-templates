@@ -16,6 +16,9 @@ export interface Conversation {
   takenByName: string | null;
 }
 
+/** Where a message we sent is, as WhatsApp reports it. */
+export type MessageStatus = 'sent' | 'delivered' | 'read' | 'failed';
+
 /** One message of a conversation, as the thread draws it. */
 export interface ChatMessage {
   /** Stable across reloads and realtime events: what de-duplicates them. */
@@ -28,6 +31,10 @@ export interface ChatMessage {
   timestamp: string;
   /** A person wrote it from the web: their name or email. */
   sentBy?: string;
+  /** Our side only: the latest delivery status WhatsApp reported. */
+  status?: MessageStatus;
+  /** Why it failed, when `status` is `failed`. */
+  error?: string;
 }
 
 export interface WhatsAppTemplate {

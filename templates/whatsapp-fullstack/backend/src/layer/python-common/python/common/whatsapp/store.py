@@ -28,6 +28,15 @@ SERVICE_WINDOW = timedelta(hours=24)
 
 MESSAGES_PAGE_SIZE = 50
 
+# Index names and the constant partition of the inbox index (WhatsAppFactory).
+INBOX_INDEX = "by-recent"
+INBOX_PARTITION = "all"
+MESSAGE_ID_INDEX = "by-message-id"
+
+# Delivery statuses in the order WhatsApp reports them. A late "delivered" must
+# not overwrite a "read" that arrived first; "failed" always wins.
+STATUS_RANK = {"sent": 1, "delivered": 2, "read": 3, "failed": 4}
+
 _dynamodb = boto3.resource("dynamodb")
 conversations_table = _dynamodb.Table(CONVERSATIONS_TABLE_NAME) if CONVERSATIONS_TABLE_NAME else None
 messages_table = _dynamodb.Table(MESSAGES_TABLE_NAME) if MESSAGES_TABLE_NAME else None
@@ -48,22 +57,63 @@ def get_conversation(phone: str) -> dict:
     return table.get_item(Key={"phone": phone}).get("Item", {})
 
 
-def list_conversations() -> list[dict]:
-    """Every conversation, the most recent first.
-
-    A scan is fine for an inbox of a few thousand contacts; past that, add a
-    GSI on last_message_at and query it instead.
-    """
+def list_conversations(limit: int = 500) -> list[dict]:
+    """The most recent conversations first, through the inbox index (no scan)."""
     table = _require(conversations_table, "WHATSAPP_CONVERSATIONS_TABLE_NAME")
     items: list[dict] = []
-    kwargs: dict = {}
-    while True:
-        response = table.scan(**kwargs)
+    kwargs: dict = {
+        "IndexName": INBOX_INDEX,
+        "KeyConditionExpression": Key("inbox").eq(INBOX_PARTITION),
+        "ScanIndexForward": False,
+    }
+    while len(items) < limit:
+        response = table.query(**kwargs)
         items.extend(response.get("Items", []))
         if "LastEvaluatedKey" not in response:
             break
         kwargs["ExclusiveStartKey"] = response["LastEvaluatedKey"]
-    return sorted(items, key=lambda item: str(item.get("last_message_at", "")), reverse=True)
+    return items[:limit]
+
+
+def find_message_key(message_id: str) -> dict | None:
+    """The table key of the message with this WhatsApp id, or None."""
+    table = _require(messages_table, "WHATSAPP_MESSAGES_TABLE_NAME")
+    response = table.query(
+        IndexName=MESSAGE_ID_INDEX,
+        KeyConditionExpression=Key("message_id").eq(message_id),
+        Limit=1,
+    )
+    items = response.get("Items", [])
+    if not items:
+        return None
+    return {"phone": items[0]["phone"], "date": items[0]["date"]}
+
+
+def update_status(message_id: str, status: str, error: str = "") -> dict | None:
+    """Records a delivery status on the stored message; None when it is unknown or older."""
+    if status not in STATUS_RANK:
+        return None
+    key = find_message_key(message_id)
+    if key is None:
+        return None
+    table = _require(messages_table, "WHATSAPP_MESSAGES_TABLE_NAME")
+    current = table.get_item(Key=key).get("Item", {})
+    if STATUS_RANK.get(str(current.get("status", "")), 0) >= STATUS_RANK[status]:
+        return None
+    names = {"#status": "status", "#status_at": "status_at"}
+    values = {":status": status, ":status_at": now_iso()}
+    expression = "SET #status = :status, #status_at = :status_at"
+    if error:
+        names["#error"] = "error"
+        values[":error"] = error
+        expression += ", #error = :error"
+    return table.update_item(
+        Key=key,
+        UpdateExpression=expression,
+        ExpressionAttributeNames=names,
+        ExpressionAttributeValues=values,
+        ReturnValues="ALL_NEW",
+    ).get("Attributes")
 
 
 def save_message(phone: str, direction: str, message_type: str, text: str = "", **extra) -> dict:
@@ -109,6 +159,7 @@ def touch_conversation(message: dict, name: str = "") -> dict:
         "#last_direction": "last_direction",
         "#last_type": "last_type",
         "#mode": "mode",
+        "#inbox": "inbox",
     }
     values = {
         ":last_message": message.get("message", ""),
@@ -116,11 +167,12 @@ def touch_conversation(message: dict, name: str = "") -> dict:
         ":last_direction": message["direction"],
         ":last_type": message["type"],
         ":assistant": ASSISTANT_MODE,
+        ":inbox": INBOX_PARTITION,
     }
     expression = (
         "SET #last_message = :last_message, #last_message_at = :last_message_at, "
         "#last_direction = :last_direction, #last_type = :last_type, "
-        "#mode = if_not_exists(#mode, :assistant)"
+        "#mode = if_not_exists(#mode, :assistant), #inbox = :inbox"
     )
     if message["direction"] == INBOUND:
         names["#last_inbound_at"] = "last_inbound_at"

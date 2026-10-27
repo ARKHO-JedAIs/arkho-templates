@@ -3,7 +3,7 @@ from traceback import format_exc
 from botocore.exceptions import ClientError
 
 from common import create_error_response, create_success_response, get_logger, with_cors
-from common.whatsapp import config, messaging
+from common.whatsapp import config, http, messaging
 
 logger = get_logger(__name__)
 
@@ -11,6 +11,8 @@ logger = get_logger(__name__)
 @with_cors()
 def handler(event, context):
     """GET /whatsapp/templates: the approved templates, with their body text."""
+    if not http.is_allowed(event):
+        return create_error_response("Your profile cannot use WhatsApp", 403, "FORBIDDEN")
     try:
         templates = messaging.list_templates()
     except config.ConfigurationError as error:

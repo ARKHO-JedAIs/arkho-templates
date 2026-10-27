@@ -8,9 +8,16 @@ The WABA publishes every webhook notification to the ws-handler SNS topic
 3. marks it as read,
 4. answers it, unless a person took the conversation over from the web.
 
+Delivery statuses (sent / delivered / read / failed) of what we sent are
+recorded on the stored message and announced too.
+
+A message that could not be stored makes the invocation fail, so Lambda
+retries it (and after the retries it lands in the dead-letter queue): it is
+never silently lost. The retry is safe because a message already stored is
+recognised by its WhatsApp id and skipped.
+
 ``answer`` is the seam for an agent: today it returns the configured automatic
 reply (or nothing); replace it with a call to your model or agent runtime.
-Delivery status notifications (sent / delivered / read) are ignored.
 """
 import json
 from traceback import format_exc
@@ -75,6 +82,32 @@ def extract_messages(entry: dict) -> list[dict]:
     return messages
 
 
+def extract_statuses(entry: dict) -> list[dict]:
+    statuses = []
+    for change in entry.get("changes", []):
+        for status in (change.get("value") or {}).get("statuses", []):
+            errors = status.get("errors") or []
+            statuses.append(
+                {
+                    "message_id": str(status.get("id", "")),
+                    "status": str(status.get("status", "")).lower(),
+                    "error": str((errors[0] or {}).get("title", "")) if errors else "",
+                }
+            )
+    return statuses
+
+
+def handle_status(status: dict) -> None:
+    if not status["message_id"]:
+        return
+    updated = store.update_status(status["message_id"], status["status"], status["error"])
+    if updated is None:
+        # Unknown id (not sent through this backend) or older than the stored status.
+        logger.info("Status %s for %s not applied", status["status"], status["message_id"])
+        return
+    realtime.publish(updated["phone"], realtime.MESSAGE_STATUS, payload=updated)
+
+
 def answer(conversation: dict, text: str) -> str:
     """The automatic reply to ``text``; empty means do not reply.
 
@@ -85,9 +118,9 @@ def answer(conversation: dict, text: str) -> str:
 
 def handle_message(message: dict, origination_phone_number_id: str) -> None:
     phone = message["phone"]
-    previous = store.get_conversation(phone)
-    # SNS delivers at least once: the same message twice is stored once.
-    if message["message_id"] and previous.get("last_inbound_message_id") == message["message_id"]:
+    # SNS delivers at least once and a failed invocation is retried: a message
+    # already stored is recognised by its WhatsApp id and not stored twice.
+    if message["message_id"] and store.find_message_key(message["message_id"]):
         logger.info("Duplicate delivery of %s ignored", message["message_id"])
         return
 
@@ -112,30 +145,62 @@ def handle_message(message: dict, origination_phone_number_id: str) -> None:
         logger.info("Conversation answered by a person: no automatic reply")
         return
 
-    reply = answer(conversation, message["text"])
-    if not reply:
-        return
-    message_id = messaging.send_text(phone, reply, origination_phone_number_id)
-    sent = store.save_message(phone, store.OUTBOUND, "text", reply, message_id=message_id, sent_by="assistant")
-    realtime.announce_message(realtime.MESSAGE_SENT, sent, store.touch_conversation(sent))
+    # The message is stored: from here on a failure must not fail the
+    # invocation, or the retry would skip it as a duplicate and never answer.
+    try:
+        reply = answer(conversation, message["text"])
+        if not reply:
+            return
+        message_id = messaging.send_text(phone, reply, origination_phone_number_id)
+        sent = store.save_message(
+            phone,
+            store.OUTBOUND,
+            "text",
+            reply,
+            message_id=message_id,
+            sent_by="assistant",
+            status="sent",
+        )
+        realtime.announce_message(realtime.MESSAGE_SENT, sent, store.touch_conversation(sent))
+    except Exception:  # noqa: BLE001
+        logger.error("Could not send the automatic reply to %s", phone[-4:])
+        logger.error(format_exc())
+
+
+class NotificationFailed(RuntimeError):
+    """Raised at the end of an invocation when something could not be stored."""
 
 
 def handler(event, context):
+    failures = 0
     for record in event.get("Records", []):
         sns = record.get("Sns", {})
         try:
             body = json.loads(sns.get("Message", "{}"))
-            phone_number_ids = (body.get("context") or {}).get("MetaPhoneNumberIds") or [{}]
-            origination_phone_number_id = phone_number_ids[0].get("arn", "")
-            for message in extract_messages(parse_entry(body)):
-                if not message["phone"]:
-                    continue
-                try:
-                    handle_message(message, origination_phone_number_id)
-                except Exception:  # noqa: BLE001
-                    logger.error("Error handling a message from %s", message["phone"][-4:])
-                    logger.error(format_exc())
-        except Exception:  # noqa: BLE001
-            logger.error("Error processing SNS record %s", sns.get("MessageId"))
-            logger.error(format_exc())
+        except json.JSONDecodeError:
+            # Malformed for good: retrying cannot fix it.
+            logger.error("SNS record %s is not JSON", sns.get("MessageId"))
+            continue
+        phone_number_ids = (body.get("context") or {}).get("MetaPhoneNumberIds") or [{}]
+        origination_phone_number_id = phone_number_ids[0].get("arn", "")
+        entry = parse_entry(body)
+        for message in extract_messages(entry):
+            if not message["phone"]:
+                continue
+            try:
+                handle_message(message, origination_phone_number_id)
+            except Exception:  # noqa: BLE001
+                failures += 1
+                logger.error("Error storing a message from %s", message["phone"][-4:])
+                logger.error(format_exc())
+        for status in extract_statuses(entry):
+            try:
+                handle_status(status)
+            except Exception:  # noqa: BLE001
+                failures += 1
+                logger.error("Error recording status %s", status["status"])
+                logger.error(format_exc())
+    if failures:
+        # Lambda retries the whole notification; what was stored is skipped.
+        raise NotificationFailed(f"{failures} item(s) could not be stored")
     return {"status": "processed"}

@@ -5,7 +5,8 @@ import type { CreateUserInput, ManagedUser, UpdateUserInput } from '../types/use
 /** Thrown when the backend rejects the request because the session/token expired. */
 export class UsersAuthError extends Error {}
 
-const BASE_URL = `${import.meta.env.VITE_API_BASE_URL}${import.meta.env.VITE_USERS_API_PATH ?? '/admin/users'}`;
+// The CDK API URL ends in "/": trimmed so the path does not become "//admin/users".
+const BASE_URL = `${(import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/+$/, '')}${import.meta.env.VITE_USERS_API_PATH ?? '/admin/users'}`;
 
 async function parseErrorMessage(response: Response, fallback: string): Promise<never> {
   if (response.status === 401) {

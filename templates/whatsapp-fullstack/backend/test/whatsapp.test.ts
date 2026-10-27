@@ -97,6 +97,62 @@ describe('WhatsAppFactory', () => {
     });
   });
 
+  it('indexes conversations by recency and messages by WhatsApp id', () => {
+    const template = getTemplate();
+    template.hasResourceProperties('AWS::DynamoDB::Table', {
+      TableName: `${PREFIX}-whatsapp-conversations`,
+      GlobalSecondaryIndexes: Match.arrayWith([
+        Match.objectLike({
+          IndexName: 'by-recent',
+          KeySchema: [
+            { AttributeName: 'inbox', KeyType: 'HASH' },
+            { AttributeName: 'last_message_at', KeyType: 'RANGE' },
+          ],
+        }),
+      ]),
+    });
+    template.hasResourceProperties('AWS::DynamoDB::Table', {
+      TableName: `${PREFIX}-whatsapp-messages`,
+      GlobalSecondaryIndexes: Match.arrayWith([
+        Match.objectLike({
+          IndexName: 'by-message-id',
+          KeySchema: [{ AttributeName: 'message_id', KeyType: 'HASH' }],
+        }),
+      ]),
+    });
+  });
+
+  it('retries a failed ws-handler invocation and keeps what still fails in a DLQ', () => {
+    const template = getTemplate();
+    template.hasResourceProperties('AWS::SQS::Queue', {
+      QueueName: `${PREFIX}-whatsapp-ws-handler-dlq`,
+      MessageRetentionPeriod: 14 * 24 * 60 * 60,
+    });
+    template.hasResourceProperties('AWS::Lambda::EventInvokeConfig', {
+      MaximumRetryAttempts: 2,
+      DestinationConfig: { OnFailure: { Destination: Match.anyValue() } },
+    });
+  });
+
+  it('passes the admin group to the functions and the realtime subscription', () => {
+    const template = getTemplate();
+    template.hasResourceProperties('AWS::Lambda::Function', {
+      FunctionName: `${PREFIX}-whatsapp-send-message`,
+      Environment: { Variables: Match.objectLike({ WHATSAPP_ADMIN_GROUP: 'admin' }) },
+    });
+    template.hasResourceProperties('AWS::AppSync::GraphQLSchema', {
+      Definition: Match.stringLikeRegexp('@aws_cognito_user_pools\\(cognito_groups: \\["admin"\\]\\)'),
+    });
+  });
+
+  it('writes the WhatsApp settings from .env into the configuration parameter', () => {
+    const template = getTemplate();
+    template.hasResourceProperties('AWS::SSM::Parameter', {
+      Name: `/${PREFIX}-whatsapp-configuration`,
+      Value: Match.stringLikeRegexp('"whatsapp_business_account_id":"waba-abc123"'),
+    });
+  });
+
   it('exposes the WhatsApp routes behind the authorizer', () => {
     const template = getTemplate();
     for (const pathPart of ['conversations', 'messages', 'templates', 'send', 'control']) {

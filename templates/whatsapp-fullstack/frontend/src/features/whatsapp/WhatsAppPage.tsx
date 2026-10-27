@@ -129,6 +129,9 @@ export function WhatsAppPage() {
             loading={thread.loading}
             error={thread.error}
             onRetry={thread.reload}
+            canLoadOlder={thread.canLoadOlder}
+            loadingOlder={thread.loadingOlder}
+            onLoadOlder={thread.loadOlder}
             header={
               <div className='flex flex-wrap items-center justify-between gap-2'>
                 <div className='flex min-w-0 items-center gap-2'>

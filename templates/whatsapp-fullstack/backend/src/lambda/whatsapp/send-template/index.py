@@ -30,6 +30,8 @@ def handler(event, context):
 
     The only way to start a conversation, or to write after the 24 hour window.
     """
+    if not http.is_allowed(event):
+        return create_error_response("Your profile cannot use WhatsApp", 403, "FORBIDDEN")
     try:
         body = http.get_body(event)
         phone = messaging.normalize_phone(http.require_text(body, "phone", 32))
@@ -61,6 +63,7 @@ def handler(event, context):
             message_id=message_id,
             template=name,
             sent_by="human",
+            status="sent",
             sent_by_name=caller["email"] or caller["username"],
         )
         realtime.announce_message(realtime.TEMPLATE_SENT, sent, store.touch_conversation(sent))

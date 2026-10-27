@@ -47,7 +47,7 @@ export async function fetchConversations(): Promise<Conversation[]> {
 }
 
 export async function fetchMessages(phone: string, before?: string): Promise<ChatMessage[]> {
-  if (usingDemoData) return mockWhatsApp.messages(phone);
+  if (usingDemoData) return mockWhatsApp.messages(phone, before);
   const query = new URLSearchParams(before ? { phone, before } : { phone });
   const data = await request<{ messages?: unknown[] }>(
     `/whatsapp/messages?${query.toString()}`,

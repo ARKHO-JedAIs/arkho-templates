@@ -1,4 +1,4 @@
-import type { ChatMessage, Conversation } from '../types';
+import type { ChatMessage, Conversation, MessageStatus } from '../types';
 
 const text = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
 const orNull = (value: unknown) => text(value) || null;
@@ -22,6 +22,8 @@ export function toConversation(item: unknown): Conversation | null {
   };
 }
 
+const STATUSES: readonly MessageStatus[] = ['sent', 'delivered', 'read', 'failed'];
+
 /** A stored message from the API or a realtime payload; `null` if unusable. */
 export function toChatMessage(item: unknown): ChatMessage | null {
   if (!item || typeof item !== 'object') return null;
@@ -30,6 +32,7 @@ export function toChatMessage(item: unknown): ChatMessage | null {
   if (!timestamp) return null;
   const direction = text(raw.direction) === 'inbound' ? 'in' : 'out';
   const type = text(raw.type);
+  const status = text(raw.status) as MessageStatus;
   return {
     id: text(raw.message_id) || `${timestamp}-${direction}`,
     direction,
@@ -37,6 +40,8 @@ export function toChatMessage(item: unknown): ChatMessage | null {
     text: text(raw.message),
     timestamp,
     ...(raw.sent_by === 'human' ? { sentBy: text(raw.sent_by_name) || 'Operador' } : {}),
+    ...(STATUSES.includes(status) ? { status } : {}),
+    ...(text(raw.error) ? { error: text(raw.error) } : {}),
   };
 }
 

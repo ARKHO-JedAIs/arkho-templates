@@ -1,6 +1,6 @@
 import * as cdk from 'aws-cdk-lib';
 import { Construct } from 'constructs';
-import { CognitoConfig, EnvironmentConfig, ParamsConfig } from './shared/util/env-config';
+import { CognitoConfig, EnvironmentConfig, ParamsConfig, WhatsAppConfig } from './shared/util/env-config';
 import { DynamoFactory } from './dynamo';
 import { S3Factory } from './s3';
 import { LayerFactory } from './layer';
@@ -8,12 +8,16 @@ import { LambdaFactory } from './lambda';
 import { CognitoFactory } from './cognito';
 import { ApiFactory } from './api';
 import { SetupFactory } from './setup';
+import { UsersFactory } from './users';
 import { WhatsAppFactory } from './whatsapp';
 
 interface MainStackProps extends cdk.StackProps {
   env: EnvironmentConfig;
   params: ParamsConfig;
   cognito: CognitoConfig;
+  whatsapp: WhatsAppConfig;
+  /** Wire the /admin/users API of the frontend's Usuarios screen. */
+  usersApiEnabled?: boolean;
 }
 
 /**
@@ -33,7 +37,7 @@ export class MainStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: MainStackProps) {
     super(scope, id, props);
 
-    const { params, cognito } = props;
+    const { params, cognito, whatsapp, usersApiEnabled } = props;
     const { envName, projectName } = params;
 
     new DynamoFactory(this, 'DynamoFactory', { params });
@@ -63,7 +67,23 @@ export class MainStack extends cdk.Stack {
     // exist after the user pool is created.
     new SetupFactory(this, 'SetupFactory', { lambdaFactory, cognitoFactory });
 
-    new WhatsAppFactory(this, 'WhatsAppFactory', { params, layerFactory, cognitoFactory, apiFactory });
+    new WhatsAppFactory(this, 'WhatsAppFactory', {
+      params,
+      whatsapp,
+      layerFactory,
+      cognitoFactory,
+      apiFactory,
+    });
+
+    if (usersApiEnabled) {
+      new UsersFactory(this, 'UsersFactory', {
+        params,
+        adminGroup: whatsapp.adminGroup,
+        layerFactory,
+        cognitoFactory,
+        apiFactory,
+      });
+    }
 
     cdk.Tags.of(this).add('Project', projectName);
     cdk.Tags.of(this).add('Environment', envName);

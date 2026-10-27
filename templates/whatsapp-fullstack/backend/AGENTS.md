@@ -80,7 +80,7 @@ this file - do not fork content into the bootstraps.
 7. **WhatsApp** (`WhatsAppFactory`, `lib/stack/whatsapp`) - one self-contained
    module from the `whatsapp-fullstack` template: the `whatsapp-conversations`
    and `whatsapp-messages` tables, the `whatsapp-configuration` Parameter Store
-   parameter (from `src/parameter/whatsapp-configuration.json`), one Lambda per
+   parameter (built from the `WHATSAPP_*` variables of `.env`), one Lambda per
    folder under `src/lambda/whatsapp`, the `whatsapp-ws-handler` SNS topic that
    AWS End User Messaging Social publishes to, and the `whatsapp-events` AppSync
    API the front subscribes to. Its Python helpers live in
@@ -89,6 +89,11 @@ this file - do not fork content into the bootstraps.
    `apiFactory.restApi.addRoute`) instead of going through `LambdaFactory` and
    `ApiFactory`, so the whole feature is one folder to read, change or remove.
    Unit tests of the handlers: `python -m unittest discover -s test/python`.
+8. **Users** (`UsersFactory`, `lib/stack/users`) - wired only when
+   `USERS_API_ENABLED=true`: one `admin-users` Lambda serving every
+   `/admin/users` route of the frontend's Usuarios screen over Cognito, plus the
+   `admin` and `member` role groups. Same documented exception as WhatsApp: it
+   registers its own routes.
 
 **Add every new route in `ApiFactory` (`lib/stack/api`)**, so the URL surface
 stays in one place; `RestApiConstruct` stays generic. Two ordering constraints

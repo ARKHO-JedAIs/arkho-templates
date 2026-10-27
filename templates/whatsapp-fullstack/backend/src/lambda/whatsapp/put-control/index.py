@@ -12,6 +12,8 @@ MODES = (store.ASSISTANT_MODE, store.HUMAN_MODE)
 def handler(event, context):
     """PUT /whatsapp/control {phone, mode}: a person takes the conversation (human)
     or hands it back to the automatic replies (assistant)."""
+    if not http.is_allowed(event):
+        return create_error_response("Your profile cannot use WhatsApp", 403, "FORBIDDEN")
     try:
         body = http.get_body(event)
         phone = http.require_text(body, "phone", 32)

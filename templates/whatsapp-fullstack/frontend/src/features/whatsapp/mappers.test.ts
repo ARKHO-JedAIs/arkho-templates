@@ -43,6 +43,21 @@ describe('toChatMessage', () => {
     expect(message?.sentBy).toBe('ana@example.com');
   });
 
+  it('keeps the delivery status and the failure reason', () => {
+    const message = toChatMessage({
+      date: '2026-10-01T10:00:00.000+00:00',
+      direction: 'outbound',
+      type: 'text',
+      status: 'failed',
+      error: 'Re-engagement message',
+    });
+    expect(message?.status).toBe('failed');
+    expect(message?.error).toBe('Re-engagement message');
+    expect(
+      toChatMessage({ date: '2026-10-01T10:00:00Z', status: 'deleted' })?.status
+    ).toBeUndefined();
+  });
+
   it('drops an item without a date', () => {
     expect(toChatMessage({ message: 'x' })).toBeNull();
   });

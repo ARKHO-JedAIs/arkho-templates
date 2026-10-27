@@ -9,6 +9,15 @@ export const TEST_ENV = {
   region: 'us-east-1',
 };
 
+export const TEST_WHATSAPP = {
+  phoneNumberId: 'arn:aws:social-messaging:us-east-1:111111111111:phone-number-id/abc123',
+  businessAccountId: 'waba-abc123',
+  defaultPhonePrefix: '56',
+  autoReplyMessage: '',
+  metaApiVersion: 'v20.0',
+  adminGroup: 'admin',
+};
+
 export const TEST_PARAMS = {
   envName: 'dev',
   projectName: '{{ project_name }}',
@@ -28,6 +37,7 @@ export function getTemplate(): Template {
         entraId: { enabled: false },
         emailMfa: { enabled: false },
       },
+      whatsapp: TEST_WHATSAPP,
     });
     _template = Template.fromStack(stack);
   }

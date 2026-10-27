@@ -149,7 +149,21 @@ function messagePayload(phone: string, message: ChatMessage) {
     type: message.kind,
     message: message.text,
     ...(message.sentBy ? { sent_by: 'human', sent_by_name: message.sentBy } : {}),
+    ...(message.status ? { status: message.status } : {}),
   };
+}
+
+/** sent -> delivered -> read, through the same event the backend publishes. */
+function simulateStatuses(phone: string, message: ChatMessage) {
+  (['delivered', 'read'] as const).forEach((status, index) => {
+    window.setTimeout(
+      () => {
+        message.status = status;
+        publishDemoEvent(phone, 'MESSAGE_STATUS', messagePayload(phone, message));
+      },
+      700 * (index + 1)
+    );
+  });
 }
 
 /** The contact answers a moment later, as a real one would. */
@@ -178,7 +192,9 @@ export const mockWhatsApp = {
       )
     ),
 
-  messages: (phone: string) => delay([...(messages.get(phone) ?? [])]),
+  // The demo history fits in one page: there is never anything older.
+  messages: (phone: string, before?: string) =>
+    delay(before ? [] : [...(messages.get(phone) ?? [])]),
 
   send: (phone: string, text: string) => {
     const message: ChatMessage = {
@@ -188,8 +204,10 @@ export const mockWhatsApp = {
       text,
       timestamp: new Date().toISOString(),
       sentBy: 'demo@example.com',
+      status: 'sent',
     };
     append(phone, message);
+    simulateStatuses(phone, message);
     simulateReply(phone);
     return delay(message);
   },
@@ -206,8 +224,10 @@ export const mockWhatsApp = {
         (input.parameters.length ? `: ${input.parameters.join(', ')}` : ''),
       timestamp: new Date().toISOString(),
       sentBy: 'demo@example.com',
+      status: 'sent',
     };
     append(input.phone, message);
+    simulateStatuses(input.phone, message);
     simulateReply(input.phone);
     return delay(message);
   },

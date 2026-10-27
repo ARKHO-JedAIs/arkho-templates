@@ -1,8 +1,8 @@
 import { useLayoutEffect, useMemo, useRef, type ReactNode } from 'react';
-import { AlertCircle, FileText, Loader2, UserRound } from 'lucide-react';
+import { AlertCircle, Check, CheckCheck, FileText, Loader2, UserRound } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import type { ChatMessage } from '../types';
+import type { ChatMessage, MessageStatus } from '../types';
 import { formatMessage } from './formatMessage';
 
 interface ChatThreadProps {
@@ -12,6 +12,29 @@ interface ChatThreadProps {
   loading?: boolean;
   error?: string | null;
   onRetry?: () => void;
+  /** Older messages exist and can be asked for. */
+  canLoadOlder?: boolean;
+  loadingOlder?: boolean;
+  onLoadOlder?: () => void;
+}
+
+const STATUS_LABEL: Record<MessageStatus, string> = {
+  sent: 'Enviado',
+  delivered: 'Entregado',
+  read: 'Leído',
+  failed: 'No se pudo entregar',
+};
+
+/** WhatsApp's ticks: one when sent, two when delivered, two in colour when read. */
+function StatusIcon({ status, error }: { status: MessageStatus; error?: string }) {
+  const label = error ? `${STATUS_LABEL[status]}: ${error}` : STATUS_LABEL[status];
+  if (status === 'failed') {
+    return <AlertCircle className='h-3.5 w-3.5 text-destructive' aria-label={label} />;
+  }
+  const Icon = status === 'sent' ? Check : CheckCheck;
+  return (
+    <Icon className={cn('h-3.5 w-3.5', status === 'read' && 'text-primary')} aria-label={label} />
+  );
 }
 
 const time = new Intl.DateTimeFormat('es', { hour: '2-digit', minute: '2-digit' });
@@ -28,8 +51,21 @@ function dayLabel(date: Date, now = new Date()): string {
 }
 
 /** One conversation, its messages grouped by day: the contact on the left, us on the right. */
-export function ChatThread({ messages, header, footer, loading, error, onRetry }: ChatThreadProps) {
+export function ChatThread({
+  messages,
+  header,
+  footer,
+  loading,
+  error,
+  onRetry,
+  canLoadOlder,
+  loadingOlder,
+  onLoadOlder,
+}: ChatThreadProps) {
   const scroller = useRef<HTMLDivElement>(null);
+  // What was on screen last render, to tell a new message (scroll to it) from
+  // older ones loaded above (keep the reader where they were).
+  const last = useRef<{ newest?: string; height: number }>({ height: 0 });
 
   const days = useMemo(() => {
     const groups: { key: string; label: string; messages: ChatMessage[] }[] = [];
@@ -45,7 +81,15 @@ export function ChatThread({ messages, header, footer, loading, error, onRetry }
 
   useLayoutEffect(() => {
     const element = scroller.current;
-    if (element) element.scrollTop = element.scrollHeight;
+    if (!element) return;
+    const newest = messages.at(-1)?.id;
+    if (newest !== last.current.newest) {
+      element.scrollTop = element.scrollHeight;
+    } else {
+      // Older messages went in above: keep the same message under the eye.
+      element.scrollTop += element.scrollHeight - last.current.height;
+    }
+    last.current = { newest, height: element.scrollHeight };
   }, [messages]);
 
   return (
@@ -80,6 +124,14 @@ export function ChatThread({ messages, header, footer, loading, error, onRetry }
           </p>
         ) : (
           <div className='flex flex-col gap-4'>
+            {canLoadOlder && onLoadOlder ? (
+              <div className='flex justify-center'>
+                <Button variant='ghost' size='sm' onClick={onLoadOlder} disabled={loadingOlder}>
+                  {loadingOlder ? <Loader2 className='h-4 w-4 animate-spin' aria-hidden /> : null}
+                  Ver mensajes anteriores
+                </Button>
+              </div>
+            ) : null}
             {days.map(day => (
               <div key={day.key} className='flex flex-col gap-1.5'>
                 <p className='sticky top-0 z-10 mx-auto my-1 rounded-full bg-card px-3 py-0.5 text-xs font-medium text-muted-foreground shadow-sm'>
@@ -119,10 +171,13 @@ export function ChatThread({ messages, header, footer, loading, error, onRetry }
                       <p className='whitespace-pre-wrap break-words'>
                         {formatMessage(message.text)}
                       </p>
-                      <p className='mt-1 text-right text-[11px] text-muted-foreground'>
+                      <p className='mt-1 flex items-center justify-end gap-1 text-[11px] text-muted-foreground'>
                         <time dateTime={message.timestamp}>
                           {time.format(new Date(message.timestamp))}
                         </time>
+                        {message.direction === 'out' && message.status ? (
+                          <StatusIcon status={message.status} error={message.error} />
+                        ) : null}
                       </p>
                     </div>
                   </div>

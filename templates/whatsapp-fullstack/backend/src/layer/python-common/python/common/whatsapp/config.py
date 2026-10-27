@@ -4,7 +4,7 @@ import os
 import boto3
 
 # Name of the Parameter Store parameter holding the WhatsApp configuration
-# (src/parameter/whatsapp-configuration.json). Injected by WhatsAppFactory.
+# (built by WhatsAppFactory from the WHATSAPP_* variables of backend/.env).
 CONFIGURATION_PARAMETER_NAME = os.environ.get("WHATSAPP_CONFIGURATION_PARAMETER_NAME", "")
 
 ORIGINATION_PHONE_NUMBER_ID_KEY = "origination_phone_number_id"

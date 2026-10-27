@@ -69,7 +69,7 @@ parameters:
     default: false
 
   # Empty defaults on purpose: the stack deploys without them and the ids can be
-  # set later in src/parameter/whatsapp-configuration.json.
+  # set later in backend/.env (or the Parameter Store parameter).
   - name: whatsapp_phone_number_id
     type: string
     prompt: "Phone number id? (End User Messaging Social > Phone numbers, the ARN)"
@@ -94,7 +94,8 @@ parameters:
     pattern: "^[0-9]{1,3}$"
     patternHint: "1 to 3 digits, no +, e.g. 56"
 
-  # Substituted inside a JSON string, so quotes and backslashes are rejected.
+  # Written as a double-quoted value in backend/.env, so quotes and backslashes
+  # are rejected.
   - name: auto_reply_message
     type: string
     prompt: "Automatic reply to every message? (leave empty for none; a person answers from the web)"
@@ -205,24 +206,26 @@ parameters:
     when: "components != 'backend'"
     default: ""
 
+  # Shared by both sides: the frontend gates its admin screens with the group
+  # and the backend requires it on the WhatsApp API and realtime channel.
   - name: use_roles
     type: boolean
-    prompt: "Will the frontend have more than one user profile? (no = every signed-in user sees everything)"
-    when: "components != 'backend'"
+    prompt: "Will the app have more than one user profile? (no = every signed-in user can use WhatsApp)"
     default: true
 
   - name: admin_group
     type: string
-    prompt: "Which Cognito group grants access to admin-only screens?"
-    when: "components != 'backend' && use_roles"
+    prompt: "Which Cognito group may use WhatsApp and the admin-only screens?"
+    when: "use_roles"
     default: admin
     pattern: "^[A-Za-z0-9_-]{1,64}$"
     patternHint: "a Cognito group name, e.g. admin"
 
+  # Both sides: the Usuarios screen in the frontend and the /admin/users API
+  # (backend USERS_API_ENABLED) it calls.
   - name: include_users_admin
     type: boolean
-    prompt: "Include the user-management screen? (needs a /admin/users API, not part of this backend)"
-    when: "components != 'backend'"
+    prompt: "Include user management? (Usuarios screen + /admin/users API over Cognito)"
     default: false
 
 templating:
@@ -234,6 +237,8 @@ templating:
     - "frontend/src/features/whatsapp/services/mockWhatsApp.ts"
 
   skip:
+    # Bytecode Python leaves behind when the backend tests run in this folder.
+    - "backend/**/__pycache__/**"
     - "frontend/dist/**"
     - "frontend/.env.local"
 

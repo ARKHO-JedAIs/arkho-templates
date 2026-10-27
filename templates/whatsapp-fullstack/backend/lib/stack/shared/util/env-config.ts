@@ -26,10 +26,33 @@ export interface CognitoConfig {
   emailMfa: EmailMfaConfig;
 }
 
+/**
+ * WhatsApp settings, from .env (gitignored): the phone number ARN carries the
+ * AWS account id, so it must not live in a committed file. WhatsAppFactory
+ * writes them to a Parameter Store parameter the Lambdas read at runtime, so
+ * they can also be edited there without a deploy.
+ */
+export interface WhatsAppConfig {
+  phoneNumberId: string;
+  businessAccountId: string;
+  defaultPhonePrefix: string;
+  autoReplyMessage: string;
+  metaApiVersion: string;
+  /**
+   * Cognito group the WhatsApp API and realtime channel require. Empty when the
+   * project has a single profile (WHATSAPP_REQUIRE_ADMIN=false): then any
+   * signed-in user may use them, as the frontend shows them to everyone.
+   */
+  adminGroup: string;
+}
+
 export interface AppConfig {
   env: EnvironmentConfig;
   params: ParamsConfig;
   cognito: CognitoConfig;
+  whatsapp: WhatsAppConfig;
+  /** USERS_API_ENABLED: wire the /admin/users API of the Usuarios screen. */
+  usersApiEnabled: boolean;
 }
 
 function optionalEnv(name: string): string | undefined {
@@ -98,7 +121,25 @@ export function loadEnvironment(): AppConfig {
     emailMfa,
   };
 
-  return { env, params, cognito };
+  const whatsapp: WhatsAppConfig = {
+    phoneNumberId: optionalEnv('WHATSAPP_PHONE_NUMBER_ID') ?? '',
+    businessAccountId: optionalEnv('WHATSAPP_BUSINESS_ACCOUNT_ID') ?? '',
+    defaultPhonePrefix: (optionalEnv('WHATSAPP_DEFAULT_PHONE_PREFIX') ?? '').replace(/^\+/, ''),
+    autoReplyMessage: optionalEnv('WHATSAPP_AUTO_REPLY_MESSAGE') ?? '',
+    metaApiVersion: optionalEnv('WHATSAPP_META_API_VERSION') ?? 'v20.0',
+    adminGroup:
+      process.env.WHATSAPP_REQUIRE_ADMIN?.trim() === 'false'
+        ? ''
+        : (optionalEnv('WHATSAPP_ADMIN_GROUP') ?? 'admin'),
+  };
+  if (whatsapp.defaultPhonePrefix && !/^[0-9]{1,3}$/.test(whatsapp.defaultPhonePrefix)) {
+    console.error('Error: WHATSAPP_DEFAULT_PHONE_PREFIX must be 1 to 3 digits, e.g. 56');
+    process.exit(1);
+  }
+
+  const usersApiEnabled = process.env.USERS_API_ENABLED?.trim() === 'true';
+
+  return { env, params, cognito, whatsapp, usersApiEnabled };
 }
 
 export const config: AppConfig = loadEnvironment();

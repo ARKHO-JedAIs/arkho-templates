@@ -18,6 +18,8 @@ def handler(event, context):
     Free-form text only reaches the contact within 24 hours of their last
     message (409 WINDOW_CLOSED otherwise): outside it, send a template.
     """
+    if not http.is_allowed(event):
+        return create_error_response("Your profile cannot use WhatsApp", 403, "FORBIDDEN")
     try:
         body = http.get_body(event)
         phone = messaging.normalize_phone(http.require_text(body, "phone", 32))
@@ -53,6 +55,7 @@ def handler(event, context):
             text,
             message_id=message_id,
             sent_by="human",
+            status="sent",
             sent_by_name=caller["email"] or caller["username"],
         )
         realtime.announce_message(realtime.MESSAGE_SENT, sent, store.touch_conversation(sent))
