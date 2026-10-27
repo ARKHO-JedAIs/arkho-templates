@@ -179,7 +179,7 @@ parameters:
   # 000000 under mock auth) and the backend turns on Cognito email MFA.
   - name: login_otp
     type: boolean
-    prompt: "Ask for a verification code after the password? (emailed one-time code; mock code 000000)"
+    prompt: "Ask for a 2FA verification code after the password? (emailed one-time code; mock code 000000)"
     default: false
 
   # With email MFA on, the backend refuses to synth without a sender, so the
