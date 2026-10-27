@@ -1,8 +1,9 @@
 import { Menu } from 'lucide-react';
+import { BrandMark } from '@/components/brand/BrandMark';
 import { useSidebar } from '@/components/ui/sidebar';
 import { NavUser } from './NavUser';
 
-/** App name shown in the header. Swap for an <img> logo when you have one. */
+/** App name: the header wordmark until src/styles/brand.json has a logo. */
 const APP_NAME = '{{ project_name }}';
 
 function Header() {
@@ -11,7 +12,7 @@ function Header() {
   return (
     <header className='flex h-14 shrink-0 items-center justify-between border-b border-border px-4 sm:px-6 fixed top-0 left-0 right-0 z-[100] bg-card'>
       <div className='flex items-center gap-3'>
-        <span className='text-foreground font-semibold tracking-tight'>{APP_NAME}</span>
+        <BrandMark appName={APP_NAME} className='h-7 text-base text-foreground' />
       </div>
 
       <div className='flex items-center gap-1'>

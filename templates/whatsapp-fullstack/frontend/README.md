@@ -125,21 +125,43 @@ Under `VITE_AUTH_PROVIDER=mock` the section runs on in-memory demo data
 
 ## Theming
 
-Two hues in `src/styles/colors.css` drive the whole palette:
+The brand lives in one file, `src/styles/brand.json`:
 
-| Token | Role | Semantic tokens fed |
-|---|---|---|
-| `--brand-accent` | calls to action | `--primary`, `--btn-default-*`, `--ring` |
-| `--brand-navy` | surfaces and chrome | `--secondary`, `--sidebar-*`, `--btn-secondary-*` |
+```json
+{
+  "primary": "#E30613",
+  "secondary": "",
+  "logo": "/brand/logo.svg",
+  "logoOnDark": "/brand/logo-white.svg"
+}
+```
 
-Everything below them is derived, so changing those two re-themes the app.
+| Key | What it drives |
+|---|---|
+| `primary` | calls to action: `--brand-accent-*` -> `--primary`, `--btn-default-*`, highlights, the sign-in layouts |
+| `secondary` | surfaces and chrome: `--brand-navy-*` -> `--secondary`, `--sidebar-*`, `--btn-secondary-*`, `--ring`. Empty = a dark shade of the primary's hue |
+| `logo` | the header and sign-in wordmark (`BrandMark`); empty = the app name as text |
+| `logoOnDark` | the logo on the coloured sign-in panels (`brand-panel`, `insights`, the `orbit` disc); empty = `logo` |
+
+`tailwind.config.ts` turns each hex into CSS variables at build time
+(`src/lib/theme/brandPalette.ts`): a Tailwind-style scale `50`-`950`, the
+`-hover`, `-active` and `-light` states, and the text colour that reads on it
+(white or dark, by contrast; hover and active are kept at 4.5:1 against it).
+So `bg-primary`, `bg-primary-100` and `text-secondary-700` all follow the
+brand, and changing a hex re-themes the app with no other edit.
+`src/styles/colors.css` maps those variables onto the semantic tokens, and
+holds the neutrals and the state colours (success, warning, error).
+
+Logos go in `public/brand/` and are referenced from the root
+(`/brand/logo.svg`). Prefer SVG with a transparent background.
+
 Components use semantic Tailwind classes (`bg-primary`, `text-muted-foreground`,
 `text-warning`) — avoid reintroducing raw hex values, which is what silently
 decouples a component from the theme.
 
 The template is light-only by design: a scaffold should not ship a theme
 nobody can switch. If you add a dark theme, define a `.dark` block redefining
-the semantic tokens, set `darkMode: ['class']` in `tailwind.config.js`, and add
+the semantic tokens, set `darkMode: ['class']` in `tailwind.config.ts`, and add
 the control that toggles the class on `<html>` - all three, or it is dead code.
 
 ## Security notes

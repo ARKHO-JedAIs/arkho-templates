@@ -26,9 +26,6 @@ interface ImportMetaEnv {
 
   // WhatsApp
   readonly VITE_APPSYNC_URL?: string;
-
-  // Brand
-  readonly VITE_BRAND_COLOR?: string;
 }
 
 interface ImportMeta {

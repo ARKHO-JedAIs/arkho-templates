@@ -1,4 +1,5 @@
 import { BarChart3, MessageCircle, Users } from 'lucide-react';
+import { BrandMark } from '@/components/brand/BrandMark';
 import type { LoginLayoutProps } from './types';
 
 /** Replace with what your app does. */
@@ -11,7 +12,7 @@ const FEATURES = [
 /**
  * Lines, rings and a rising chart in the brand colour over the dark surface
  * hue. `currentColor` is the brand colour (set on the svg), so the drawing
- * follows VITE_BRAND_COLOR; the white strokes are the neutral texture.
+ * follows src/styles/brand.json; the white strokes are the neutral texture.
  */
 function Decoration() {
   return (
@@ -60,9 +61,7 @@ export function LoginLayout({ appName, children }: LoginLayoutProps) {
         <Decoration />
 
         <div className='relative z-10 flex h-full flex-col px-12 py-12'>
-          <span className='text-xl font-semibold tracking-tight text-secondary-foreground'>
-            {appName}
-          </span>
+          <BrandMark appName={appName} onDark className='w-fit text-secondary-foreground' />
 
           <div className='flex max-w-sm flex-1 flex-col justify-center'>
             <div className='mb-6 inline-flex w-fit items-center gap-2 rounded-full border border-secondary-foreground/10 bg-secondary-foreground/10 px-3 py-1.5'>

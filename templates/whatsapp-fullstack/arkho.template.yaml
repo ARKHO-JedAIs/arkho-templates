@@ -114,16 +114,23 @@ parameters:
     default: npm
     choices: [{ value: npm }, { value: pnpm }, { value: yarn }]
 
-  # Lands in frontend/.env as VITE_BRAND_COLOR and is applied at startup over
-  # the --brand-accent tokens (src/lib/theme/brandColor.ts): the token engine
-  # cannot convert a hex to the HSL triples colors.css uses.
+  # Written into frontend/src/styles/brand.json, the one place the brand lives:
+  # tailwind.config.ts turns each hex into a full palette at build time.
   - name: brand_color
     type: string
-    prompt: "Brand colour as a hex? (buttons, accents and the sign-in screen)"
+    prompt: "Main brand colour? (hex, e.g. #E30613: buttons, highlights and the sign-in screen)"
     when: "components != 'backend'"
     default: "#3B82F6"
     pattern: "^#[0-9A-Fa-f]{6}$"
     patternHint: "a 6-digit hex with #, e.g. #E30613 (red) or #0057A8 (blue)"
+
+  - name: brand_secondary_color
+    type: string
+    prompt: "Secondary colour? (hex for the sidebar and secondary buttons; empty = a dark shade of the main one)"
+    when: "components != 'backend'"
+    default: ""
+    pattern: "^(#[0-9A-Fa-f]{6})?$"
+    patternHint: "a 6-digit hex with #, e.g. #1E293B, or empty"
 
   # Selects one file under frontend/src/features/auth/layouts (see include) and
   # is written into that folder's index.ts.

@@ -21,6 +21,7 @@ answers:
 
   package_manager: npm
   brand_color: "#E30613"
+  brand_secondary_color: "#1E293B"
   login_layout: orbit
   auth_provider: cognito
   login_otp: true

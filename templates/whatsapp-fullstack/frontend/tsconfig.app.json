@@ -8,6 +8,7 @@
     "skipLibCheck": true,
     "composite": true,
     "moduleResolution": "bundler",
+    "resolveJsonModule": true,
     "isolatedModules": true,
     "moduleDetection": "force",
     // Vite owns the bundle; tsc is only here to typecheck.

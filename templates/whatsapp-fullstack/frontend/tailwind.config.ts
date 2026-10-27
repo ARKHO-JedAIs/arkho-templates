@@ -1,7 +1,17 @@
-/* eslint-disable no-undef */
-/** @type {import('tailwindcss').Config} */
+import type { Config } from 'tailwindcss';
+import plugin from 'tailwindcss/plugin';
+import animate from 'tailwindcss-animate';
+import { brandVariables, scaleColors } from './src/lib/theme/brandPalette';
+import brand from './src/styles/brand.json';
 
-module.exports = {
+// The brand lives in src/styles/brand.json. Its hexes become the --brand-*
+// variables (scale 50-950, hover, active, light, text colour) at build time,
+// and colors.css maps them onto the semantic tokens the components use.
+const brandPlugin = plugin(({ addBase }) => {
+  addBase({ ':root': brandVariables(brand) });
+});
+
+export default {
   content: ['./index.html', './src/**/*.{ts,tsx,js,jsx}'],
   theme: {
     extend: {
@@ -15,10 +25,14 @@ module.exports = {
         primary: {
           DEFAULT: 'hsl(var(--primary))',
           foreground: 'hsl(var(--primary-foreground))',
+          light: 'hsl(var(--primary-light))',
+          ...scaleColors('brand-accent'),
         },
         secondary: {
           DEFAULT: 'hsl(var(--secondary))',
           foreground: 'hsl(var(--secondary-foreground))',
+          light: 'hsl(var(--secondary-light))',
+          ...scaleColors('brand-navy'),
         },
         destructive: {
           DEFAULT: 'hsl(var(--destructive))',
@@ -158,6 +172,5 @@ module.exports = {
       },
     },
   },
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  plugins: [require('tailwindcss-animate')],
-};
+  plugins: [animate, brandPlugin],
+} satisfies Config;

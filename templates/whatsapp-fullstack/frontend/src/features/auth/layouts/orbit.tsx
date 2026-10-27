@@ -1,4 +1,5 @@
 import { MessageCircle, ShieldCheck, Users, Zap } from 'lucide-react';
+import { BrandMark, brandLogo } from '@/components/brand/BrandMark';
 import type { LoginLayoutProps } from './types';
 
 /** Replace with your own words: where they sit is the design, not the text. */
@@ -17,19 +18,20 @@ const STATS = [
 
 /**
  * A greeting and the form on the left, and on the right three slow orbits
- * around a disc with the app's initial, callouts and a row of highlights - all
- * in the brand colour. The right side only exists from `lg` up. The orbits
+ * around a disc with the logo (or the app's initial), callouts and a row of
+ * highlights - all in the brand colour. The right side only exists from `lg` up. The orbits
  * spin only for users who have not asked for reduced motion (`motion-safe`).
  */
 export function LoginLayout({ appName, children }: LoginLayoutProps) {
   const initial = appName.trim().charAt(0).toUpperCase() || 'A';
+  const logo = brandLogo(true);
 
   return (
     <main className='relative min-h-screen overflow-hidden bg-background lg:flex'>
       <section className='relative z-20 flex min-h-screen w-full items-center justify-center px-5 py-8 lg:w-[42%] lg:px-10'>
         <div className='flex min-h-[calc(100vh-4rem)] w-full max-w-[34rem] flex-col px-4 py-8 sm:px-8'>
           <header className='mt-6'>
-            <span className='text-xl font-semibold tracking-tight text-foreground'>{appName}</span>
+            <BrandMark appName={appName} className='text-foreground' />
           </header>
 
           <div className='flex flex-1 flex-col justify-center pb-16'>
@@ -88,7 +90,11 @@ export function LoginLayout({ appName, children }: LoginLayoutProps) {
                   'linear-gradient(135deg, hsl(var(--primary)) 0%, hsl(var(--brand-accent-active)) 100%)',
               }}
             >
-              <span className='text-[60px] font-black text-primary-foreground'>{initial}</span>
+              {logo ? (
+                <img src={logo} alt='' className='h-20 w-20 object-contain' />
+              ) : (
+                <span className='text-[60px] font-black text-primary-foreground'>{initial}</span>
+              )}
             </div>
           </div>
         </div>

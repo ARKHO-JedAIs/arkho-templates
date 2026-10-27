@@ -52,7 +52,7 @@ same realtime path AppSync uses, so the whole screen can be exercised.
 
 | Setting | Where | Notes |
 |---|---|---|
-| Brand colour | `frontend/.env` `VITE_BRAND_COLOR` | 6-digit hex, applied at startup over the `--brand-accent` tokens. Change it and restart `dev`. |
+| Brand colours and logo | `frontend/src/styles/brand.json` | `primary` and `secondary` hex (empty secondary = a dark shade of the primary), `logo` and `logoOnDark` paths under `frontend/public/`. Tailwind turns each hex into a full palette at build time; `dev` picks up an edit by itself. |
 | Sign-in layout | `frontend/src/features/auth/layouts/` | One of `basic`, `brand-panel`, `insights`, `orbit`, chosen at generation; `index.ts` re-exports it. |
 | Verification code | `frontend/.env` `VITE_MOCK_AUTH_OTP`, `backend/.env` `EMAIL_MFA_ENABLED` + `SES_FROM_EMAIL` | Mock mode: code `000000`. Real: Cognito email MFA through SES (verified sender, SES out of the sandbox). |
 
@@ -169,6 +169,16 @@ payload is the stored item. Only the admin group can subscribe when one is set.
   their caption, not downloaded.
 - An AI agent: plug it into `answer()` in `backend/src/lambda/whatsapp/ws-handler`.
 - Message rate limits per contact.
+- Inbox: unread counters, search and filters, and the hours left in the 24 h
+  window, computed by the backend.
+- Quick replies (saved texts inserted with one click) and a new-message alert
+  (tab title counter and sound).
+- Deploying with an AWS SSO profile from a script (`deploy` with `--profile`),
+  and dropping the account id prompt: CDK already takes the account from the
+  active profile.
+- Filling `frontend/.env` from the stack outputs after a deploy (API URL,
+  AppSync URL, Cognito ids) instead of asking for them at generation.
+- Terraform as an alternative to CDK: no ARKHO template ships Terraform yet.
 
 To verify on the first deploy (built from midoc's working setup, not yet run
 against AWS from this template): the Python 3.12 Lambda runtime ships a boto3

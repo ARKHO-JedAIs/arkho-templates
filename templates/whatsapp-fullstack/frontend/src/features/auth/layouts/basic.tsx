@@ -1,3 +1,4 @@
+import { BrandMark } from '@/components/brand/BrandMark';
 import type { LoginLayoutProps } from './types';
 
 /**
@@ -17,8 +18,8 @@ export function LoginLayout({ appName, children }: LoginLayoutProps) {
       />
 
       <main className='relative w-full max-w-[26rem]'>
-        <div className='mb-7 text-center'>
-          <span className='text-xl font-semibold tracking-tight text-foreground'>{appName}</span>
+        <div className='mb-7 flex justify-center'>
+          <BrandMark appName={appName} className='text-foreground' />
         </div>
 
         <div className='rounded-2xl border border-border bg-card p-7 shadow-sm sm:p-8'>

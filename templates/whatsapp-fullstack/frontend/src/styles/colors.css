@@ -3,30 +3,19 @@
     /* ============================================================
        Design tokens.
 
-       Two hues drive everything below: --brand-navy (surfaces, sidebar,
-       secondary actions) and --brand-accent (primary CTA). Change those two
-       and the whole palette follows - the semantic tokens further down
-       (--primary, --border, --muted, ...) are all derived, never hardcoded.
+       THE BRAND IS NOT SET HERE. It lives in src/styles/brand.json (primary
+       and secondary hex, logo). tailwind.config.ts turns each hex into the
+       --brand-accent-* (primary) and --brand-navy-* (secondary) variables at
+       build time: a 50-950 scale plus -hover, -active, -light and the text
+       colour that reads on it (-foreground). Change a hex there and the whole
+       app follows; this file only maps those variables onto semantic roles.
+
        Values are SPACE-separated `H S% L%` triples, not comma-separated. That is
        not cosmetic: Tailwind renders an opacity modifier as `hsl(var(--x) / .8)`,
        and the slash-alpha syntax is invalid CSS when mixed with commas. With
        commas, every `/opacity` utility in the app silently resolves to
        transparent - which is what left the sign-in panel's gradient unpainted.
        ============================================================ */
-
-    /* ===== BRAND COLORS ===== */
-
-    /* Slate - surfaces, sidebar, secondary actions */
-    --brand-navy: 215 25% 27%; /* slate-700 */
-    --brand-navy-light: 206 20% 50%; /* derived light tint - soft backgrounds */
-    --brand-navy-hover: 215 25% 22%; /* hover */
-    --brand-navy-active: 209 21% 22%; /* derived dark shade - active/pressed */
-
-    /* Accent - primary CTA */
-    --brand-accent: 217 91% 60%; /* blue-500 */
-    --brand-accent-light: 214 95% 93%; /* derived light tint - soft backgrounds */
-    --brand-accent-hover: 221 83% 53%; /* hover */
-    --brand-accent-active: 224 76% 48%; /* derived dark shade - active/pressed */
 
     /* Neutrals */
     --brand-sky: 0 0% 100%; /* cards and backgrounds */
@@ -87,11 +76,11 @@
        brand hues cosmetic and left --brand-accent with zero references. */
     --primary: var(--brand-accent);
     --primary-light: var(--brand-accent-light);
-    --primary-foreground: var(--color-white);
+    --primary-foreground: var(--brand-accent-foreground);
 
     --secondary: var(--brand-navy);
     --secondary-light: var(--brand-navy-light);
-    --secondary-foreground: var(--color-white);
+    --secondary-foreground: var(--brand-navy-foreground);
 
     --accent: var(--brand-gray-100);
     --accent-foreground: var(--brand-gray-900);
@@ -99,7 +88,7 @@
     /* ===== BUTTONS ===== */
     /* Default - primary call to action */
     --btn-default-bg: var(--brand-accent);
-    --btn-default-text: var(--color-white);
+    --btn-default-text: var(--brand-accent-foreground);
     --btn-default-hover: var(--brand-accent-hover);
     --btn-default-active: var(--brand-accent-active);
     --btn-default-disabled: var(--brand-gray-300);
@@ -107,7 +96,7 @@
 
     /* Secondary action */
     --btn-secondary-bg: var(--brand-navy);
-    --btn-secondary-text: var(--color-white);
+    --btn-secondary-text: var(--brand-navy-foreground);
     --btn-secondary-hover: var(--brand-navy-hover);
     --btn-secondary-active: var(--brand-navy-active);
     --btn-secondary-disabled: var(--brand-gray-300);
@@ -173,7 +162,7 @@
     --sidebar-background: var(--color-white);
     --sidebar-foreground: var(--brand-gray-800);
     --sidebar-primary: var(--brand-navy);
-    --sidebar-primary-foreground: var(--color-white);
+    --sidebar-primary-foreground: var(--brand-navy-foreground);
     --sidebar-accent: var(--brand-navy-light);
     --sidebar-accent-foreground: var(--brand-navy-active);
     --sidebar-border: var(--brand-gray-200);

@@ -1,4 +1,5 @@
 import { MessageCircle, ShieldCheck, Zap, type LucideIcon } from 'lucide-react';
+import { BrandMark } from '@/components/brand/BrandMark';
 import type { LoginLayoutProps } from './types';
 
 /** Replace with what your app does: one line each, true of this product. */
@@ -29,9 +30,7 @@ export function LoginLayout({ appName, children }: LoginLayoutProps) {
           <div className='absolute bottom-24 right-16 h-24 w-24 rounded-full bg-primary-foreground/10' />
         </div>
 
-        <span className='relative text-xl font-semibold tracking-tight text-primary-foreground'>
-          {appName}
-        </span>
+        <BrandMark appName={appName} onDark className='relative w-fit text-primary-foreground' />
 
         <div className='relative max-w-md'>
           <p className='text-sm font-semibold uppercase tracking-[0.14em] text-primary-foreground/70'>
@@ -62,9 +61,9 @@ export function LoginLayout({ appName, children }: LoginLayoutProps) {
 
       <main className='flex min-h-screen flex-col items-center justify-center px-4 py-10 sm:px-8'>
         <div className='w-full max-w-[26rem]'>
-          <p className='mb-8 text-center text-xl font-semibold tracking-tight text-foreground lg:hidden'>
-            {appName}
-          </p>
+          <div className='mb-8 flex justify-center lg:hidden'>
+            <BrandMark appName={appName} className='text-foreground' />
+          </div>
           <div className='rounded-2xl border border-border bg-card p-7 shadow-sm sm:p-9'>
             <h2 className='mb-6 text-2xl font-bold leading-tight text-foreground'>Inicia sesión</h2>
             {children}

@@ -11,43 +11,41 @@ the conventions that keep it coherent while you do.
 
 ## If this project is still unbranded
 
-Signal: `src/styles/colors.css` still carries the shipped defaults —
-`--brand-accent: 217 91% 60%` and `--brand-navy: 215 25% 27%`.
+Signal: `src/styles/brand.json` has an empty `logo`. The colours were already
+asked at generation time; the logo is what is usually still missing.
 
 When that is true, **mention once** that the `arkho-branding` skill can run the
 whole checklist below as a short interview, and then get on with whatever was
 actually asked. Do not raise it again in the same session, and never block a
 request on it: a team can legitimately postpone branding for weeks.
 
-The signal turns itself off — branding changes those exact values — so there is
-no marker file to remember to clean up.
+The signal turns itself off - adding a logo changes it - so there is no marker
+file to remember to clean up.
 
 ---
 
 ## Branding checklist
 
-The template ships deliberately unbranded. The `arkho-branding` skill
-(`.claude/skills/arkho-branding/`) automates this list; what follows is the same
-work done by hand. Each step is small, and together they are the whole of it.
+The brand lives in **one file**, `src/styles/brand.json`. The `arkho-branding`
+skill (`.claude/skills/arkho-branding/`) automates this list; what follows is
+the same work done by hand.
 
-### 1. The two hues
+### 1. The colours
 
-`src/styles/colors.css` has exactly two brand hues at the top. Everything else
-in the file is derived from them.
-
-```css
---brand-accent: 217 91% 60%;   /* calls to action  -> --primary */
---brand-navy:   215 25% 27%;   /* surfaces, chrome -> --secondary */
+```json
+{ "primary": "#E30613", "secondary": "", "logo": "", "logoOnDark": "" }
 ```
 
-Change those two and the whole app re-themes: buttons, focus rings, active
-sidebar items, the sign-in wash, chart colours. Adjust `-hover`, `-active` and
-`-light` alongside each so states stay proportional.
+- `primary` - calls to action: buttons, focus, highlights, the sign-in layouts.
+- `secondary` - surfaces and chrome: sidebar, secondary buttons. Empty = a dark
+  shade of the primary's hue.
 
-> **Format matters.** Values are space-separated `H S% L%`, never
-> `H, S%, L%`. Tailwind renders an opacity modifier as `hsl(var(--x) / .8)`,
-> and slash-alpha is invalid CSS when mixed with commas — with commas, every
-> `/opacity` utility in the app silently paints nothing.
+Write plain 6-digit hexes. `tailwind.config.ts` turns each into the
+`--brand-accent-*` / `--brand-navy-*` variables at build time
+(`src/lib/theme/brandPalette.ts`): a `50`-`950` scale, `-hover`, `-active`,
+`-light` and the readable text colour. Never write HSL triples by hand and never
+edit those variables in `colors.css` - they are generated, and `colors.css` only
+maps them onto semantic roles (`--primary`, `--secondary`, `--sidebar-*`).
 
 ### 2. The name
 
@@ -55,32 +53,28 @@ sidebar items, the sign-in wash, chart colours. Adjust `-hover`, `-active` and
 
 | Where | What it is |
 |---|---|
-| `package.json` → `name` | the npm package name |
-| `index.html` → `<title>` | the browser tab |
-| `src/features/auth/LoginPage.tsx` → `APP_NAME` | the sign-in wordmark |
-| `src/components/layout/Header.tsx` → `APP_NAME` | the header wordmark |
-
-The two `APP_NAME` constants are intentionally separate: the sign-in screen and
-the app shell usually diverge (a full logo on one, a compact mark on the other).
+| `package.json` -> `name` | the npm package name |
+| `index.html` -> `<title>` | the browser tab |
+| `src/features/auth/LoginPage.tsx` -> `APP_NAME` | the sign-in wordmark |
+| `src/components/layout/Header.tsx` -> `APP_NAME` | the header wordmark |
 
 ### 3. The logo
 
-Both wordmarks are a `<span>` holding `APP_NAME`. Swap each for an `<img>`:
+Put the files in `public/brand/` and point `brand.json` at them:
 
-```tsx
-<img src={logo} alt={APP_NAME} className='h-7 w-auto' />
-```
+- `logo` - the header and the sign-in wordmark, on a light background.
+- `logoOnDark` - the coloured sign-in panels (`brand-panel`, `insights`) and the
+  disc in the middle of `orbit`, the sign-in's brand image. Empty = `logo`.
 
-Put the asset in `src/assets/` and import it, so Vite fingerprints it. Give the
-header version a height, not a width — the header is a fixed 3.5rem and a tall
-logo will push it.
+Both render through `src/components/brand/BrandMark.tsx`; with no logo it shows
+`APP_NAME` as text. Prefer SVG with a transparent background. The header is a
+fixed 3.5rem: the logo is sized by height there, never by width.
 
 ### 4. Favicon and title
 
 `public/favicon.svg` is a neutral placeholder mark. Replace it (keep the
-filename, or update the `<link>` in `index.html`). It is SVG rather than a
-raster so it stays crisp at every size and can be edited as text. Add a
-`<meta name="description">` while you are in there — the template does not ship
+filename, or update the `<link>` in `index.html`). Add a
+`<meta name="description">` while you are in there - the template does not ship
 one, because a scaffold has nothing true to say.
 
 ### 5. Typography
@@ -103,12 +97,10 @@ strings — nothing else keys off the language.
 
 ### 7. Sign-in screen
 
-`LoginPage.tsx` is a single centred card on purpose: a scaffold has no product
-to sell, and placeholder value propositions mean every project starts by
-deleting copy that was never true. If your product does have a story, the split
-layout belongs there — but write it, do not inherit it.
-
----
+The layout was chosen at generation time (`basic`, `brand-panel`, `insights` or
+`orbit`) and lives in `src/features/auth/layouts/`; `index.ts` re-exports it.
+To switch, change that one export. The marketing copy on the decorated layouts
+is a starting point: rewrite it for the product, do not ship it as is.
 
 ## Conventions worth keeping
 
