@@ -75,3 +75,82 @@ export function isWindowOpen(conversation: Conversation | null, now = Date.now()
   if (!conversation?.lastInboundAt) return false;
   return now - new Date(conversation.lastInboundAt).getTime() < SERVICE_WINDOW_MS;
 }
+
+const HOUR_MS = 60 * 60 * 1000;
+
+/**
+ * Whole hours left in the 24 hour window, rounded up (30 minutes left reads
+ * "1 h"); 0 when the window is closed or the contact never wrote.
+ */
+export function windowHoursLeft(conversation: Conversation | null, now = Date.now()): number {
+  if (!conversation?.lastInboundAt) return 0;
+  const left = SERVICE_WINDOW_MS - (now - new Date(conversation.lastInboundAt).getTime());
+  return left > 0 ? Math.ceil(left / HOUR_MS) : 0;
+}
+
+/** Up to two letters for an avatar: first and last word of the name, else the phone's last digits. */
+export function initials(name: string, phone: string): string {
+  const words = name
+    .split(/\s+/)
+    .map(word => word.replace(/[^\p{L}\p{N}]/gu, ''))
+    .filter(Boolean);
+  const [first, ...rest] = words;
+  if (!first) return phone.slice(-2);
+  return (first.charAt(0) + (rest.at(-1)?.charAt(0) ?? '')).toUpperCase();
+}
+
+/** How many avatar tints colors.css defines (`--avatar-1` ... `--avatar-5`). */
+export const AVATAR_TONES = 5;
+
+/** The same tint for the same contact on every render and every device. */
+export function avatarTone(phone: string): number {
+  let hash = 0;
+  for (const char of phone) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  return hash % AVATAR_TONES;
+}
+
+/** The inbox's quick filters. */
+export type InboxFilter = 'all' | 'human' | 'closed';
+
+const fold = (value: string) =>
+  value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+
+/**
+ * The conversations matching a search (name, accents and case ignored, or
+ * phone digits, spaces and "+" ignored) and a quick filter. Client-side, over
+ * what the inbox has already loaded.
+ */
+export function filterConversations(
+  list: readonly Conversation[],
+  query: string,
+  filter: InboxFilter,
+  now = Date.now()
+): Conversation[] {
+  const words = fold(query.trim());
+  const digits = query.replace(/\D/g, '');
+  return list.filter(conversation => {
+    if (filter === 'human' && conversation.mode !== 'human') return false;
+    if (filter === 'closed' && isWindowOpen(conversation, now)) return false;
+    if (!words) return true;
+    return (
+      fold(conversation.name).includes(words) ||
+      (digits.length > 0 && conversation.phone.includes(digits))
+    );
+  });
+}
+
+/**
+ * A template message as the backend stores it - `name (language)` plus
+ * `: parameters` when it has any - split for the bubble; `null` otherwise.
+ */
+export function templateParts(
+  text: string
+): { name: string; language: string; detail: string } | null {
+  const [, name, language, detail] =
+    /^(\S+) \(([^)]+)\)(?::\s*([\s\S]*))?$/.exec(text.trim()) ?? [];
+  if (!name || !language) return null;
+  return { name, language, detail: (detail ?? '').trim() };
+}

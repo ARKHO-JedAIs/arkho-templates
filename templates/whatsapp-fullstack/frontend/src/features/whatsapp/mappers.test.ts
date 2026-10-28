@@ -1,10 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import {
+  AVATAR_TONES,
+  avatarTone,
+  filterConversations,
+  initials,
   isWindowOpen,
   mergeMessages,
+  templateParts,
   toChatMessage,
   toConversation,
   upsertConversation,
+  windowHoursLeft,
 } from './services/mappers';
 
 const conversation = (phone: string, lastMessageAt: string) =>
@@ -94,5 +100,114 @@ describe('isWindowOpen', () => {
     const closed = toConversation({ phone: '1', last_inbound_at: '2026-10-01T09:00:00Z' });
     expect(isWindowOpen(closed, now)).toBe(false);
     expect(isWindowOpen(toConversation({ phone: '1' }), now)).toBe(false);
+  });
+});
+
+describe('windowHoursLeft', () => {
+  const now = new Date('2026-10-02T10:00:00Z').getTime();
+  const at = (lastInboundAt: string) =>
+    toConversation({ phone: '1', last_inbound_at: lastInboundAt });
+
+  it('counts the whole hours left, rounding up', () => {
+    expect(windowHoursLeft(at('2026-10-02T04:00:00Z'), now)).toBe(18);
+    expect(windowHoursLeft(at('2026-10-02T03:30:00Z'), now)).toBe(18);
+    expect(windowHoursLeft(at('2026-10-01T10:30:00Z'), now)).toBe(1);
+  });
+
+  it('is 0 when the window closed or the contact never wrote', () => {
+    expect(windowHoursLeft(at('2026-10-01T10:00:00Z'), now)).toBe(0);
+    expect(windowHoursLeft(at('2026-09-30T10:00:00Z'), now)).toBe(0);
+    expect(windowHoursLeft(toConversation({ phone: '1' }), now)).toBe(0);
+    expect(windowHoursLeft(null, now)).toBe(0);
+  });
+
+  it('agrees with isWindowOpen', () => {
+    for (const iso of ['2026-10-02T09:59:00Z', '2026-10-01T10:00:01Z', '2026-10-01T09:59:59Z']) {
+      const conversation = at(iso);
+      expect(windowHoursLeft(conversation, now) > 0).toBe(isWindowOpen(conversation, now));
+    }
+  });
+});
+
+describe('initials', () => {
+  it('takes the first and last word of the name', () => {
+    expect(initials('María Fernández', '56911111111')).toBe('MF');
+    expect(initials('ana maría de la paz', '1')).toBe('AP');
+    expect(initials('Diego', '1')).toBe('D');
+  });
+
+  it('falls back to the last digits of the phone', () => {
+    expect(initials('', '56911111234')).toBe('34');
+    expect(initials('  🙂 ', '56911111234')).toBe('34');
+  });
+});
+
+describe('avatarTone', () => {
+  it('is stable and within the tints colors.css defines', () => {
+    for (const phone of ['56911111111', '56922222222', '1', '']) {
+      const tone = avatarTone(phone);
+      expect(tone).toBe(avatarTone(phone));
+      expect(tone).toBeGreaterThanOrEqual(0);
+      expect(tone).toBeLessThan(AVATAR_TONES);
+    }
+  });
+});
+
+describe('filterConversations', () => {
+  const now = new Date('2026-10-02T10:00:00Z').getTime();
+  const list = [
+    toConversation({
+      phone: '56911111111',
+      name: 'María Fernández',
+      last_inbound_at: '2026-10-02T09:00:00Z',
+      mode: 'human',
+    })!,
+    toConversation({
+      phone: '56922222222',
+      name: 'Diego Soto',
+      last_inbound_at: '2026-09-30T09:00:00Z',
+      mode: 'assistant',
+    })!,
+  ];
+  const phones = (query: string, filter: 'all' | 'human' | 'closed' = 'all') =>
+    filterConversations(list, query, filter, now).map(item => item.phone);
+
+  it('searches the name ignoring case and accents', () => {
+    expect(phones('maria')).toEqual(['56911111111']);
+    expect(phones('SOTO')).toEqual(['56922222222']);
+  });
+
+  it('searches the phone ignoring spaces and the plus sign', () => {
+    expect(phones('+56 9 2222')).toEqual(['56922222222']);
+    expect(phones('nadie')).toEqual([]);
+  });
+
+  it('keeps everything for an empty search', () => {
+    expect(phones('  ')).toEqual(['56911111111', '56922222222']);
+  });
+
+  it('applies the quick filters', () => {
+    expect(phones('', 'human')).toEqual(['56911111111']);
+    expect(phones('', 'closed')).toEqual(['56922222222']);
+    expect(phones('maria', 'closed')).toEqual([]);
+  });
+});
+
+describe('templateParts', () => {
+  it('splits a stored template message', () => {
+    expect(templateParts('recordatorio_cita (es): Diego, jueves 10:00')).toEqual({
+      name: 'recordatorio_cita',
+      language: 'es',
+      detail: 'Diego, jueves 10:00',
+    });
+    expect(templateParts('hello_world (en_US)')).toEqual({
+      name: 'hello_world',
+      language: 'en_US',
+      detail: '',
+    });
+  });
+
+  it('is null for anything else', () => {
+    expect(templateParts('Hola, ¿cómo estás?')).toBeNull();
   });
 });

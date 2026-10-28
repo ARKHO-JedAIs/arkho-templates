@@ -8,7 +8,9 @@ import type {
 import { publishDemoEvent } from '../realtime';
 
 /**
- * In-memory WhatsApp for `VITE_AUTH_PROVIDER=mock`: two demo contacts, and a
+ * In-memory WhatsApp for `VITE_AUTH_PROVIDER=mock`: three demo contacts - one
+ * answered by the AI agent, one taken by a person (with a message that failed
+ * to deliver), one whose 24 hour window has closed - and a
  * contact that answers a few seconds after you write, through the same event
  * path the AppSync channel uses. Nothing leaves the browser.
  */
@@ -27,6 +29,19 @@ const conversations = new Map<string, Conversation>([
       lastInboundAt: minutesAgo(5),
       mode: 'assistant',
       takenByName: null,
+    },
+  ],
+  [
+    '56933333333',
+    {
+      phone: '56933333333',
+      name: 'María Fernández',
+      lastMessage: 'Listo, ya quedó actualizada. Te aviso cuando salga el despacho.',
+      lastMessageAt: minutesAgo(20),
+      lastDirection: 'outbound',
+      lastInboundAt: minutesAgo(22),
+      mode: 'human',
+      takenByName: 'demo@example.com',
     },
   ],
   [
@@ -55,6 +70,7 @@ const messages = new Map<string, ChatMessage[]>([
         kind: 'text',
         text: 'Gracias por escribirnos, en breve te respondemos.',
         timestamp: minutesAgo(7),
+        status: 'read',
       },
       {
         id: 'demo-3',
@@ -62,6 +78,52 @@ const messages = new Map<string, ChatMessage[]>([
         kind: 'text',
         text: '¿Tienen disponibilidad para mañana?',
         timestamp: minutesAgo(5),
+      },
+    ],
+  ],
+  [
+    '56933333333',
+    [
+      {
+        id: 'demo-6',
+        direction: 'in',
+        kind: 'text',
+        text: 'Hola, quería saber el estado de mi pedido 4821',
+        timestamp: minutesAgo(30),
+      },
+      {
+        id: 'demo-7',
+        direction: 'out',
+        kind: 'text',
+        text: '¡Hola María! Tu pedido 4821 salió hoy y llega *mañana* entre 9:00 y 13:00.',
+        timestamp: minutesAgo(29),
+        status: 'read',
+      },
+      {
+        id: 'demo-8',
+        direction: 'in',
+        kind: 'text',
+        text: '¿Puedo cambiar la dirección de entrega? Av. Providencia 1234, depto 56',
+        timestamp: minutesAgo(22),
+      },
+      {
+        id: 'demo-9',
+        direction: 'out',
+        kind: 'text',
+        text: 'Claro, María. Ya la cambiamos.',
+        timestamp: minutesAgo(21),
+        sentBy: 'demo@example.com',
+        status: 'delivered',
+      },
+      {
+        id: 'demo-10',
+        direction: 'out',
+        kind: 'text',
+        text: 'Listo, ya quedó actualizada. Te aviso cuando salga el despacho.',
+        timestamp: minutesAgo(20),
+        sentBy: 'demo@example.com',
+        status: 'failed',
+        error: 'Mensaje de demostración: falla simulada',
       },
     ],
   ],

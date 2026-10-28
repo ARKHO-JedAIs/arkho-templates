@@ -173,6 +173,36 @@
     color: hsl(var(--brand-gray-900));
   }
 
+  /* WhatsApp-like chat wallpaper: a faint dot grid on a warm off-white. */
+  .chat-wallpaper {
+    background-color: hsl(var(--chat-wallpaper));
+    background-image: radial-gradient(hsl(var(--chat-wallpaper-dot)) 1px, transparent 1px);
+    background-size: 18px 18px;
+  }
+
+  /* A soft ring that pulses out of the AI agent's badge while it answers. */
+  .agent-pulse {
+    animation: agent-pulse 1.8s infinite;
+  }
+
+  @keyframes agent-pulse {
+    0% {
+      box-shadow: 0 0 0 0 hsl(var(--agent) / 0.45);
+    }
+    70% {
+      box-shadow: 0 0 0 8px hsl(var(--agent) / 0);
+    }
+    100% {
+      box-shadow: 0 0 0 0 hsl(var(--agent) / 0);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .agent-pulse {
+      animation: none;
+    }
+  }
+
   /* Highlighted text */
   .text-highlight {
     color: hsl(var(--brand-navy));

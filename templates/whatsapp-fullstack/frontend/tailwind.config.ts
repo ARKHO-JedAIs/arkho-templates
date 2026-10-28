@@ -22,6 +22,8 @@ export default {
         background: 'hsl(var(--background))',
         'background-secondary': 'hsl(var(--background-secondary))',
         foreground: 'hsl(var(--foreground))',
+        // Secondary text that still reads at 4.5:1 on white and on the -light tints.
+        'foreground-secondary': 'hsl(var(--foreground-secondary))',
         primary: {
           DEFAULT: 'hsl(var(--primary))',
           foreground: 'hsl(var(--primary-foreground))',
@@ -37,6 +39,8 @@ export default {
         destructive: {
           DEFAULT: 'hsl(var(--destructive))',
           foreground: 'hsl(var(--destructive-foreground))',
+          light: 'hsl(var(--error-light))',
+          strong: 'hsl(var(--destructive-strong))',
         },
         error: {
           DEFAULT: 'hsl(var(--error))',
@@ -65,6 +69,36 @@ export default {
         warning: {
           DEFAULT: 'hsl(var(--warning))',
           foreground: 'hsl(var(--warning-foreground))',
+          light: 'hsl(var(--warning-light))',
+          strong: 'hsl(var(--warning-strong))',
+        },
+        info: {
+          DEFAULT: 'hsl(var(--info))',
+          foreground: 'hsl(var(--info-foreground))',
+          light: 'hsl(var(--info-light))',
+        },
+        whatsapp: {
+          DEFAULT: 'hsl(var(--whatsapp))',
+          foreground: 'hsl(var(--whatsapp-foreground))',
+        },
+        agent: {
+          DEFAULT: 'hsl(var(--agent))',
+          foreground: 'hsl(var(--agent-foreground))',
+          strong: 'hsl(var(--agent-strong))',
+          light: 'hsl(var(--agent-light))',
+          border: 'hsl(var(--agent-border))',
+        },
+        avatar: {
+          1: 'hsl(var(--avatar-1))',
+          '1-foreground': 'hsl(var(--avatar-1-foreground))',
+          2: 'hsl(var(--avatar-2))',
+          '2-foreground': 'hsl(var(--avatar-2-foreground))',
+          3: 'hsl(var(--avatar-3))',
+          '3-foreground': 'hsl(var(--avatar-3-foreground))',
+          4: 'hsl(var(--avatar-4))',
+          '4-foreground': 'hsl(var(--avatar-4-foreground))',
+          5: 'hsl(var(--avatar-5))',
+          '5-foreground': 'hsl(var(--avatar-5-foreground))',
         },
         'btn-default': {
           DEFAULT: 'hsl(var(--btn-default-bg))',

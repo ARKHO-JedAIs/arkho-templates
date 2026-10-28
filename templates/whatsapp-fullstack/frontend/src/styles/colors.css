@@ -144,6 +144,42 @@
     --info-light: 210 92% 95%;
     --info-foreground: var(--color-white);
 
+    /* Text-strength shades of the states above: the base hues fall under
+       4.5:1 as small text on their own -light backgrounds. */
+    --warning-strong: 31 89% 29%;
+    --destructive-strong: 0 67% 38%;
+
+    /* ===== WHATSAPP SECTION =====
+       --whatsapp is WhatsApp's own green, the one fixed colour of the section:
+       it only marks the channel (the page title icon), never brand UI.
+       --agent marks what the AI agent does. --agent fills shapes (decorative,
+       3:1 is enough); --agent-strong is the shade text and filled buttons use,
+       6:1 against white and against --agent-light. */
+    --whatsapp: 142 70% 49%;
+    --whatsapp-foreground: var(--color-white);
+    --agent: 252 96% 67%;
+    --agent-strong: 252 64% 52%;
+    --agent-light: 252 100% 97%;
+    --agent-border: 252 100% 91%;
+    --agent-foreground: var(--color-white);
+
+    /* Chat wallpaper: a warm off-white with a faint dot grid. */
+    --chat-wallpaper: 43 24% 94%;
+    --chat-wallpaper-dot: 40 18% 87%;
+
+    /* Avatar tints: soft background + an ink that reads on it at 4.5:1.
+       A contact always gets the same pair (picked from its phone). */
+    --avatar-1: 211 85% 92%;
+    --avatar-1-foreground: 213 65% 33%;
+    --avatar-2: 140 50% 92%;
+    --avatar-2-foreground: 142 59% 26%;
+    --avatar-3: 276 80% 95%;
+    --avatar-3-foreground: 268 54% 37%;
+    --avatar-4: 0 83% 95%;
+    --avatar-4-foreground: 0 67% 38%;
+    --avatar-5: 188 46% 92%;
+    --avatar-5-foreground: 187 59% 25%;
+
     /* ===== INPUTS & FORMS ===== */
     --border: var(--color-border);
     --border-focus: var(--brand-navy);
