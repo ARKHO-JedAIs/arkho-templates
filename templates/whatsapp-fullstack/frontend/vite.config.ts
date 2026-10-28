@@ -12,14 +12,24 @@ export default defineConfig({
   plugins: [react()],
   build: {
     outDir: 'dist',
-    // Just above today's entry chunk (~620 kB), so any real growth trips the
-    // warning again. The number is not arbitrary: the entry is dominated by
-    // `aws-amplify`, which `src/lib/auth/cognitoProvider.ts` imports statically
-    // and therefore ships even in a `VITE_AUTH_PROVIDER=mock` build. Loading it
-    // behind `initializeAuth()` would make the auth seam async and is a change
-    // of its own; until then this is the honest ceiling. Section pages and the
-    // Transcribe SDK are already split out.
+    // Above today's largest chunk (the entry, ~555 kB), so real growth trips the
+    // warning again. `aws-amplify` ships even in a `VITE_AUTH_PROVIDER=mock`
+    // build because `src/lib/auth/cognitoProvider.ts` imports it statically;
+    // loading it behind `initializeAuth()` would make the auth seam async and is
+    // a change of its own. Section pages are already split out.
     chunkSizeWarningLimit: 650,
+    rollupOptions: {
+      output: {
+        // aws-amplify changes far less often than the app: its own chunk keeps
+        // the entry under the limit and stays cached across deploys.
+        manualChunks(id) {
+          if (/[\\/]node_modules[\\/](@aws-amplify|aws-amplify|@aws-sdk|@smithy)[\\/]/.test(id)) {
+            return 'amplify';
+          }
+          return undefined;
+        },
+      },
+    },
   },
   resolve: {
     alias: {
