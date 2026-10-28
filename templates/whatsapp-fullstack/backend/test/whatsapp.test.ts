@@ -81,6 +81,23 @@ describe('WhatsAppFactory', () => {
     expect(Object.keys(policies)).toHaveLength(3);
   });
 
+  it('lets only the template functions list and read templates', () => {
+    const template = getTemplate();
+    const policies = template.findResources('AWS::IAM::Policy', {
+      Properties: {
+        PolicyDocument: {
+          Statement: Match.arrayWith([
+            Match.objectLike({
+              Action: ['social-messaging:ListWhatsAppMessageTemplates', 'social-messaging:GetWhatsAppMessageTemplate'],
+            }),
+          ]),
+        },
+      },
+    });
+    // get-templates, and send-template, which checks the status before sending.
+    expect(Object.keys(policies)).toHaveLength(2);
+  });
+
   it('stores the WhatsApp configuration in Parameter Store', () => {
     const template = getTemplate();
     template.hasResourceProperties('AWS::SSM::Parameter', {

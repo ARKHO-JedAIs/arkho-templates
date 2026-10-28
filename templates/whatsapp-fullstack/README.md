@@ -142,7 +142,7 @@ Every route requires the `WHATSAPP_ADMIN_GROUP` group (403 otherwise), unless
 | GET | `/whatsapp/conversations` | | conversations, most recent first |
 | GET | `/whatsapp/messages` | `?phone=<digits>[&before=<iso>]` | `{ conversation, messages, window_open }` |
 | POST | `/whatsapp/messages` | `{ phone, message }` | the stored message; 409 `WINDOW_CLOSED` after 24 h |
-| GET | `/whatsapp/templates` | | approved templates with body and variable count |
+| GET | `/whatsapp/templates` | | every template with its status, components and variables (only APPROVED ones can be sent) |
 | POST | `/whatsapp/templates/send` | `{ phone, template_name, language, parameters? }` | the stored message |
 | PUT | `/whatsapp/control` | `{ phone, mode: "human" \| "assistant" }` | the conversation |
 
@@ -166,6 +166,9 @@ failed) and `CONTROL_CHANGED`; `id=inbox` carries `CONVERSATION_UPDATED`. The
 payload is the stored item. Only the admin group can subscribe when one is set.
 
 ## Not included yet
+
+Every WhatsApp event, what the template does with it today and what to add
+next: [docs/WHATSAPP_EVENTS.md](docs/WHATSAPP_EVENTS.md).
 
 - Media: images, audio and documents are stored as a placeholder text with
   their caption, not downloaded.

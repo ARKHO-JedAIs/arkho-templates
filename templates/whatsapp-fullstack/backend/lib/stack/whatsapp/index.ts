@@ -80,8 +80,8 @@ const FUNCTIONS: WhatsAppFunction[] = [
   { name: 'get-conversations', description: 'Lists the WhatsApp conversations', route: { path: '/whatsapp/conversations', method: 'GET' }, tables: 'read' },
   { name: 'get-messages', description: 'Returns one WhatsApp conversation', route: { path: '/whatsapp/messages', method: 'GET' }, tables: 'read' },
   { name: 'send-message', description: 'Sends a WhatsApp text message from the web', route: { path: '/whatsapp/messages', method: 'POST' }, tables: 'write', sends: true },
-  { name: 'get-templates', description: 'Lists the approved WhatsApp templates', route: { path: '/whatsapp/templates', method: 'GET' }, tables: 'read', readsTemplates: true },
-  { name: 'send-template', description: 'Sends an approved WhatsApp template', route: { path: '/whatsapp/templates/send', method: 'POST' }, tables: 'write', sends: true },
+  { name: 'get-templates', description: 'Lists the WhatsApp templates with their status', route: { path: '/whatsapp/templates', method: 'GET' }, tables: 'read', readsTemplates: true },
+  { name: 'send-template', description: 'Sends an approved WhatsApp template', route: { path: '/whatsapp/templates/send', method: 'POST' }, tables: 'write', sends: true, readsTemplates: true },
   { name: 'put-control', description: 'Hands a conversation to a person or back to the automatic replies', route: { path: '/whatsapp/control', method: 'PUT' }, tables: 'write' },
 ];
 

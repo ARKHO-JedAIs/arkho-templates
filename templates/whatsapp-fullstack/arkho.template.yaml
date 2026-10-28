@@ -280,6 +280,7 @@ templating:
   # double braces, which the token engine would otherwise blank out.
   exclude:
     - "frontend/src/features/whatsapp/services/mockWhatsApp.ts"
+    - "docs/WHATSAPP_EVENTS.md"
 
   skip:
     # Bytecode Python leaves behind when the backend tests run in this folder.

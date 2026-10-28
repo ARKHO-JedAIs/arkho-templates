@@ -43,7 +43,23 @@ def handler(event, context):
 
     caller = http.get_caller(event)
     try:
-        message_id = messaging.send_template(phone, name, language, parameters)
+        template = messaging.find_template(name, language)
+        if template["status"] != messaging.APPROVED:
+            return create_error_response(
+                f"Template {name} ({language}) is {template['status']}: only APPROVED templates can be sent",
+                409,
+                "TEMPLATE_NOT_APPROVED",
+            )
+        if len(parameters) != template["variables"]:
+            return create_error_response(
+                f"Template {name} expects {template['variables']} parameter(s), got {len(parameters)}",
+                422,
+                "VALIDATION_ERROR",
+            )
+        parameter_names = template["variableNames"] if template["parameterFormat"] == messaging.NAMED else None
+        message_id = messaging.send_template(phone, name, language, parameters, parameter_names)
+    except messaging.TemplateNotFound as error:
+        return create_error_response(str(error), 404, "TEMPLATE_NOT_FOUND")
     except config.ConfigurationError as error:
         return create_error_response(str(error), 409, "NOT_CONFIGURED")
     except ClientError as error:

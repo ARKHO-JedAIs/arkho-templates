@@ -5,11 +5,15 @@ forwards them to Meta as they are, signed with the function's IAM role, so no
 Meta access token is ever stored.
 """
 import json
+import logging
 import re
 
 import boto3
+from botocore.exceptions import ClientError
 
 from . import config
+
+logger = logging.getLogger(__name__)
 
 PHONE_PATTERN = re.compile(r"^\d{8,15}$")
 
@@ -57,13 +61,30 @@ def send_text(phone: str, text: str, origination_phone_number_id: str | None = N
     )
 
 
-def send_template(phone: str, name: str, language: str, parameters: list[str]) -> str | None:
+def send_template(
+    phone: str,
+    name: str,
+    language: str,
+    parameters: list[str],
+    parameter_names: list[str] | None = None,
+) -> str | None:
+    """Sends an approved template, filling its body variables in order.
+
+    A NAMED template needs each value tagged with its variable name, so pass
+    ``parameter_names`` (same order as ``parameters``) for those.
+    """
     template: dict = {"name": name, "language": {"code": language}}
     if parameters:
+        names = parameter_names or []
         template["components"] = [
             {
                 "type": "body",
-                "parameters": [{"type": "text", "text": value} for value in parameters],
+                "parameters": [
+                    {"type": "text", "parameter_name": names[index], "text": value}
+                    if index < len(names)
+                    else {"type": "text", "text": value}
+                    for index, value in enumerate(parameters)
+                ],
             }
         ]
     return _send(
@@ -87,13 +108,25 @@ def mark_as_read(message_id: str, origination_phone_number_id: str | None = None
 
 VARIABLE = re.compile(r"\{\{\s*([^{}]+?)\s*\}\}")
 
+APPROVED = "APPROVED"
+POSITIONAL = "POSITIONAL"
+NAMED = "NAMED"
 
-def list_templates() -> list[dict]:
-    """The approved templates of the business account, with their body text.
 
-    Only APPROVED ones are returned: Meta rejects sending any other.
-    """
-    waba_id = config.waba_id()
+class TemplateNotFound(LookupError):
+    """No template of the business account has that name and language."""
+
+
+def variable_names(text: str) -> list[str]:
+    """Distinct variable names of a template text, in order of first use."""
+    names: list[str] = []
+    for name in VARIABLE.findall(text or ""):
+        if name not in names:
+            names.append(name)
+    return names
+
+
+def _template_summaries(waba_id: str) -> list[dict]:
     summaries: list[dict] = []
     kwargs = {"id": waba_id, "maxResults": 100}
     while True:
@@ -102,30 +135,81 @@ def list_templates() -> list[dict]:
         if not response.get("nextToken"):
             break
         kwargs["nextToken"] = response["nextToken"]
+    return summaries
 
-    templates = []
-    for summary in summaries:
-        if summary.get("templateStatus") != "APPROVED":
-            continue
-        body = ""
-        meta_template_id = summary.get("metaTemplateId")
-        if meta_template_id:
-            definition = json.loads(
-                social_messaging.get_whatsapp_message_template(
-                    id=waba_id, metaTemplateId=meta_template_id
-                ).get("template")
-                or "{}"
-            )
-            for component in definition.get("components") or []:
-                if str(component.get("type", "")).upper() == "BODY":
-                    body = component.get("text", "")
-        templates.append(
-            {
-                "name": summary.get("templateName"),
-                "language": summary.get("templateLanguage"),
-                "category": summary.get("templateCategory"),
-                "body": body,
-                "variables": len(VARIABLE.findall(body)),
-            }
-        )
+
+def _template_definition(waba_id: str, meta_template_id: str | None) -> dict:
+    """The Meta definition of a template; empty when it cannot be read.
+
+    A rejected or deleted template may no longer be readable, and one such
+    template must not hide the rest of the list.
+    """
+    if not meta_template_id:
+        return {}
+    try:
+        raw = social_messaging.get_whatsapp_message_template(
+            id=waba_id, metaTemplateId=meta_template_id
+        ).get("template")
+        definition = json.loads(raw or "{}")
+    except (ClientError, ValueError):
+        logger.warning("Could not read the definition of template %s", meta_template_id)
+        return {}
+    return definition if isinstance(definition, dict) else {}
+
+
+def describe_template(summary: dict, definition: dict) -> dict:
+    header = body = footer = None
+    buttons: list[dict] = []
+    for component in definition.get("components") or []:
+        kind = str(component.get("type", "")).upper()
+        if kind == "HEADER" and str(component.get("format", "TEXT")).upper() == "TEXT":
+            header = component.get("text")
+        elif kind == "BODY":
+            body = component.get("text")
+        elif kind == "FOOTER":
+            footer = component.get("text")
+        elif kind == "BUTTONS":
+            buttons = [
+                {"type": button.get("type"), "text": button.get("text")}
+                for button in component.get("buttons") or []
+            ]
+    names = variable_names(body or "")
+    declared = str(definition.get("parameter_format") or "").upper()
+    if declared in (POSITIONAL, NAMED):
+        parameter_format = declared
+    else:
+        parameter_format = NAMED if any(not name.isdigit() for name in names) else POSITIONAL
+    return {
+        "name": summary.get("templateName"),
+        "language": summary.get("templateLanguage"),
+        "category": summary.get("templateCategory"),
+        "status": summary.get("templateStatus"),
+        "qualityScore": summary.get("templateQualityScore"),
+        "metaTemplateId": summary.get("metaTemplateId"),
+        "header": header,
+        "body": body or "",
+        "footer": footer,
+        "buttons": buttons,
+        "variables": len(names),
+        "variableNames": names,
+        "parameterFormat": parameter_format,
+    }
+
+
+def list_templates() -> list[dict]:
+    """Every template of the business account, whatever its status."""
+    waba_id = config.waba_id()
+    templates = [
+        describe_template(summary, _template_definition(waba_id, summary.get("metaTemplateId")))
+        for summary in _template_summaries(waba_id)
+    ]
     return sorted(templates, key=lambda item: (str(item["name"]), str(item["language"])))
+
+
+def find_template(name: str, language: str) -> dict:
+    """One template by name and language, described as ``list_templates`` does."""
+    waba_id = config.waba_id()
+    for summary in _template_summaries(waba_id):
+        if summary.get("templateName") == name and summary.get("templateLanguage") == language:
+            return describe_template(summary, _template_definition(waba_id, summary.get("metaTemplateId")))
+    raise TemplateNotFound(f"There is no template {name} in {language}")

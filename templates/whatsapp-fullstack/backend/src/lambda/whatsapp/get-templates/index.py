@@ -10,7 +10,7 @@ logger = get_logger(__name__)
 
 @with_cors()
 def handler(event, context):
-    """GET /whatsapp/templates: the approved templates, with their body text."""
+    """GET /whatsapp/templates: every template of the WABA, with its status and components."""
     if not http.is_allowed(event):
         return create_error_response("Your profile cannot use WhatsApp", 403, "FORBIDDEN")
     try:
