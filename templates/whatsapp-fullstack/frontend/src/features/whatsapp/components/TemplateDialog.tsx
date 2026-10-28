@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { isSendable } from '../services/mappers';
 import { fetchTemplates } from '../services/whatsappService';
 import type { SendTemplateInput, WhatsAppTemplate } from '../types';
 
@@ -41,7 +42,9 @@ export function TemplateDialog({ open, onOpenChange, phone, onSend }: TemplateDi
     setLoading(true);
     setError(null);
     fetchTemplates()
-      .then(list => {
+      .then(all => {
+        // The API lists every template; only the approved ones can be sent.
+        const list = all.filter(isSendable);
         setTemplates(list);
         setSelected(list[0] ? templateKey(list[0]) : '');
       })
@@ -131,7 +134,11 @@ export function TemplateDialog({ open, onOpenChange, phone, onSend }: TemplateDi
               </div>
               {values.map((value, index) => (
                 <div key={index} className='flex flex-col gap-1.5'>
-                  <Label htmlFor={`template-variable-${index}`}>Variable {index + 1}</Label>
+                  <Label htmlFor={`template-variable-${index}`}>
+                    {template?.parameterFormat === 'NAMED' && template.variableNames[index]
+                      ? `Variable «${template.variableNames[index]}»`
+                      : `Variable ${index + 1}`}
+                  </Label>
                   <Input
                     id={`template-variable-${index}`}
                     value={value}

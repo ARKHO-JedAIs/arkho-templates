@@ -37,14 +37,41 @@ export interface ChatMessage {
   error?: string;
 }
 
+/**
+ * Where a template stands in Meta's review. Meta may add states; anything else
+ * arrives as is and the UI shows it as unknown.
+ */
+export type TemplateStatus = 'APPROVED' | 'PENDING' | 'REJECTED' | 'PAUSED' | 'DISABLED';
+
+/** Meta's quality rating, from the readers' reactions to the template. */
+export type TemplateQuality = 'GREEN' | 'YELLOW' | 'RED' | 'UNKNOWN';
+
+export interface TemplateButton {
+  /** `QUICK_REPLY`, `URL`, `PHONE_NUMBER`... */
+  type: string;
+  text: string;
+}
+
+/** One message template of the WhatsApp Business account (`GET /whatsapp/templates`). */
 export interface WhatsAppTemplate {
   name: string;
   language: string;
+  /** `UTILITY`, `MARKETING` or `AUTHENTICATION`. */
   category: string;
-  /** The body text, with WhatsApp's numbered variables in double braces. */
+  status: TemplateStatus | (string & {});
+  qualityScore: TemplateQuality;
+  metaTemplateId: string | null;
+  header: string | null;
+  /** The body text, with WhatsApp's variables in double braces (numbered or named). */
   body: string;
+  footer: string | null;
+  buttons: TemplateButton[];
   /** How many body variables must be filled in. */
   variables: number;
+  /** The variables in the order their values are sent: `1`, `2`... or the names. */
+  variableNames: string[];
+  /** `POSITIONAL`: numbered variables, filled in order. `NAMED`: by name. */
+  parameterFormat: 'POSITIONAL' | 'NAMED';
 }
 
 export interface SendTemplateInput {

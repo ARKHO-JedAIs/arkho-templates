@@ -65,6 +65,8 @@ export default {
         success: {
           DEFAULT: 'hsl(var(--success))',
           foreground: 'hsl(var(--success-foreground))',
+          light: 'hsl(var(--success-light))',
+          strong: 'hsl(var(--success-strong))',
         },
         warning: {
           DEFAULT: 'hsl(var(--warning))',
@@ -76,6 +78,7 @@ export default {
           DEFAULT: 'hsl(var(--info))',
           foreground: 'hsl(var(--info-foreground))',
           light: 'hsl(var(--info-light))',
+          strong: 'hsl(var(--info-strong))',
         },
         whatsapp: {
           DEFAULT: 'hsl(var(--whatsapp))',

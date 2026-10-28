@@ -148,6 +148,8 @@
        4.5:1 as small text on their own -light backgrounds. */
     --warning-strong: 31 89% 29%;
     --destructive-strong: 0 67% 38%;
+    --success-strong: 152 69% 24%;
+    --info-strong: 210 92% 33%;
 
     /* ===== WHATSAPP SECTION =====
        --whatsapp is WhatsApp's own green, the one fixed colour of the section:

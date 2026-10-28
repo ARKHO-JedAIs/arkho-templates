@@ -1,10 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import type { LucideIcon } from 'lucide-react';
 import { sections, sortSections, type AppSection } from './sections';
 
 function fixture(partial: Partial<AppSection> & Pick<AppSection, 'path' | 'label'>): AppSection {
   return {
-    icon: (() => null) as unknown as LucideIcon,
+    icon: () => null,
     load: async () => ({ default: () => null }),
     ...partial,
   };

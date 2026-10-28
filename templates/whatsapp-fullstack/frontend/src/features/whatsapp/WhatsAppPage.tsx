@@ -1,15 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
-import {
-  ArrowLeft,
-  MessageCircle,
-  MessagesSquare,
-  Plus,
-  RefreshCw,
-  Sparkles,
-  UserRound,
-} from 'lucide-react';
+import { ArrowLeft, MessagesSquare, Plus, RefreshCw, Sparkles, UserRound } from 'lucide-react';
 import { toast } from 'sonner';
+import { WhatsAppIcon } from '@/components/brand/WhatsAppIcon';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { ChatThread } from './components/ChatThread';
@@ -111,7 +104,7 @@ export function WhatsAppPage() {
         <div>
           <h1 className='flex items-center gap-2.5 text-2xl font-bold leading-tight text-foreground'>
             <span className='flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-whatsapp text-whatsapp-foreground'>
-              <MessageCircle className='h-[22px] w-[22px]' aria-hidden />
+              <WhatsAppIcon className='h-[22px] w-[22px]' />
             </span>
             WhatsApp
           </h1>

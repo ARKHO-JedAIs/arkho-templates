@@ -4,11 +4,15 @@ import {
   avatarTone,
   filterConversations,
   initials,
+  isSendable,
   isWindowOpen,
   mergeMessages,
   templateParts,
+  templateSegments,
+  templateVariableNames,
   toChatMessage,
   toConversation,
+  toTemplate,
   upsertConversation,
   windowHoursLeft,
 } from './services/mappers';
@@ -209,5 +213,103 @@ describe('templateParts', () => {
 
   it('is null for anything else', () => {
     expect(templateParts('Hola, ¿cómo estás?')).toBeNull();
+  });
+});
+
+// WhatsApp variables are written with double braces, which the template
+// generator would read as its own placeholders: build them at runtime.
+const v = (name: string) => '{'.repeat(2) + name + '}'.repeat(2);
+
+describe('toTemplate', () => {
+  const api = {
+    name: 'confirmacion_pedido',
+    language: 'es',
+    category: 'utility',
+    status: 'pending',
+    qualityScore: 'YELLOW',
+    metaTemplateId: '123',
+    header: 'Pedido',
+    body: `Hola ${v('nombre')}, tu pedido ${v('numero')}.`,
+    footer: '',
+    buttons: [{ type: 'QUICK_REPLY', text: 'Ver estado' }, { type: 'URL' }, null],
+    variables: 2,
+    variableNames: ['nombre', 'numero'],
+    parameterFormat: 'NAMED',
+  };
+
+  it('maps the API contract', () => {
+    expect(toTemplate(api)).toEqual({
+      name: 'confirmacion_pedido',
+      language: 'es',
+      category: 'UTILITY',
+      status: 'PENDING',
+      qualityScore: 'YELLOW',
+      metaTemplateId: '123',
+      header: 'Pedido',
+      body: api.body,
+      footer: null,
+      buttons: [{ type: 'QUICK_REPLY', text: 'Ver estado' }],
+      variables: 2,
+      variableNames: ['nombre', 'numero'],
+      parameterFormat: 'NAMED',
+    });
+  });
+
+  it('fills what an older backend left out', () => {
+    const template = toTemplate({
+      name: 'recordatorio',
+      language: 'es',
+      category: 'UTILITY',
+      body: `Hola ${v('1')}, tu cita es el ${v('2')}.`,
+      variables: 2,
+    })!;
+    // The old endpoint only listed approved templates, without a status.
+    expect(template.status).toBe('APPROVED');
+    expect(template.qualityScore).toBe('UNKNOWN');
+    expect(template.variableNames).toEqual(['1', '2']);
+    expect(template.parameterFormat).toBe('POSITIONAL');
+    expect(template.buttons).toEqual([]);
+    expect(template.header).toBeNull();
+  });
+
+  it('reads named variables from the body when the names are missing', () => {
+    const template = toTemplate({ name: 'x', body: `Hola ${v('nombre')}` })!;
+    expect(template.variableNames).toEqual(['nombre']);
+    expect(template.variables).toBe(1);
+    expect(template.parameterFormat).toBe('NAMED');
+  });
+
+  it('drops an item without a name', () => {
+    expect(toTemplate({ body: 'x' })).toBeNull();
+    expect(toTemplate(null)).toBeNull();
+  });
+});
+
+describe('isSendable', () => {
+  it('only lets approved templates through', () => {
+    const statuses = ['APPROVED', 'PENDING', 'REJECTED', 'PAUSED', 'DISABLED'];
+    const sendable = statuses.filter(status => isSendable(toTemplate({ name: 'x', status })!));
+    expect(sendable).toEqual(['APPROVED']);
+  });
+});
+
+describe('template variables', () => {
+  it('lists each variable once, in order of appearance', () => {
+    expect(templateVariableNames(`${v('2')} ${v('1')} ${v('2')} ${v(' nombre ')}`)).toEqual([
+      '2',
+      '1',
+      'nombre',
+    ]);
+    expect(templateVariableNames('Sin variables')).toEqual([]);
+  });
+
+  it('splits a text into plain runs and variables', () => {
+    expect(templateSegments(`Hola ${v('1')}, nos vemos el ${v('2')}`)).toEqual([
+      { kind: 'text', value: 'Hola ' },
+      { kind: 'variable', name: '1' },
+      { kind: 'text', value: ', nos vemos el ' },
+      { kind: 'variable', name: '2' },
+    ]);
+    expect(templateSegments('Hola')).toEqual([{ kind: 'text', value: 'Hola' }]);
   });
 });

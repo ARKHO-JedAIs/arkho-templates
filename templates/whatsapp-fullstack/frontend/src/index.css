@@ -203,6 +203,51 @@
     }
   }
 
+  /* Home orbit: a light that runs along each spoke, toward the centre. */
+  .home-flow-v {
+    animation: home-flow-v 2s ease-in-out infinite;
+  }
+
+  .home-flow-h {
+    animation: home-flow-h 2s ease-in-out infinite;
+  }
+
+  @keyframes home-flow-v {
+    0% {
+      transform: translateY(150%);
+      opacity: 0;
+    }
+    50% {
+      opacity: 1;
+    }
+    100% {
+      transform: translateY(-150%);
+      opacity: 0;
+    }
+  }
+
+  @keyframes home-flow-h {
+    0% {
+      transform: translateX(150%);
+      opacity: 0;
+    }
+    50% {
+      opacity: 1;
+    }
+    100% {
+      transform: translateX(-150%);
+      opacity: 0;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .home-flow-v,
+    .home-flow-h {
+      animation: none;
+      opacity: 0;
+    }
+  }
+
   /* Highlighted text */
   .text-highlight {
     color: hsl(var(--brand-navy));

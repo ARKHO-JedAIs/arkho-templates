@@ -89,6 +89,11 @@ removing one is deleting it** — neither touches the router. That is why a
 project generated without the user-management screen has no admin code, no
 admin route and no dangling import, rather than a hidden feature flag.
 
+Sections that set the same `group` (e.g. `group: 'Configuración'`) render in
+the sidebar as one collapsible entry with a sub-item each; it opens by itself
+when one of its routes is active. Admin filtering runs per section, so a group
+with no visible section is not shown.
+
 Hiding an admin entry from the sidebar is cosmetic. Access is enforced by
 `requireAdmin` in `src/router/routes.tsx`.
 
@@ -122,6 +127,11 @@ outside `src/lib/auth` that imports `aws-amplify`.
 
 Under `VITE_AUTH_PROVIDER=mock` the section runs on in-memory demo data
 (`services/mockWhatsApp.ts`) instead of the API, so it works with no backend.
+
+`src/features/templates` (Configuración > Plantillas, `/settings/templates`)
+lists every message template from `GET /whatsapp/templates` with its Meta
+review status, quality, a WhatsApp-like preview and its variables. The send
+dialog in the inbox offers only the `APPROVED` ones.
 
 ## Theming
 

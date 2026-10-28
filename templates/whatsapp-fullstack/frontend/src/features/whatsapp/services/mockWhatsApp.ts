@@ -1,10 +1,4 @@
-import type {
-  ChatMessage,
-  ControlMode,
-  Conversation,
-  SendTemplateInput,
-  WhatsAppTemplate,
-} from '../types';
+import type { ChatMessage, ControlMode, Conversation, SendTemplateInput } from '../types';
 import { publishDemoEvent } from '../realtime';
 
 /**
@@ -149,20 +143,122 @@ const messages = new Map<string, ChatMessage[]>([
   ],
 ]);
 
-const templates: WhatsAppTemplate[] = [
+/**
+ * The account's templates in the API's shape (`GET /whatsapp/templates`), so
+ * they go through the real mapper: one per review status, the three
+ * categories, numbered and named variables, and one with header and buttons.
+ *
+ * This file is excluded from the generator's token substitution, which is why
+ * WhatsApp's double-brace variables can be written here literally.
+ */
+const templates = [
   {
     name: 'recordatorio_cita',
     language: 'es',
     category: 'UTILITY',
+    status: 'APPROVED',
+    qualityScore: 'GREEN',
+    metaTemplateId: '1029384756',
+    header: null,
     body: 'Hola {{1}}, te recordamos tu cita el {{2}}.',
+    footer: null,
+    buttons: [],
     variables: 2,
+    variableNames: ['1', '2'],
+    parameterFormat: 'POSITIONAL',
+  },
+  {
+    name: 'confirmacion_pedido',
+    language: 'es',
+    category: 'UTILITY',
+    status: 'APPROVED',
+    qualityScore: 'YELLOW',
+    metaTemplateId: '1029384757',
+    header: 'Pedido confirmado',
+    body: 'Hola {{nombre}}, recibimos tu pedido {{numero_pedido}}. Llegará el {{fecha_entrega}}.',
+    footer: 'Responde a este mensaje si necesitas ayuda',
+    buttons: [
+      { type: 'QUICK_REPLY', text: 'Ver estado' },
+      { type: 'URL', text: 'Seguir envío' },
+    ],
+    variables: 3,
+    variableNames: ['nombre', 'numero_pedido', 'fecha_entrega'],
+    parameterFormat: 'NAMED',
   },
   {
     name: 'hello_world',
     language: 'en_US',
     category: 'UTILITY',
-    body: 'Hello World',
+    status: 'APPROVED',
+    qualityScore: 'UNKNOWN',
+    metaTemplateId: '1029384758',
+    header: 'Hello World',
+    body: 'Welcome and congratulations!! This message demonstrates your ability to send a WhatsApp message notification from the Cloud API.',
+    footer: 'WhatsApp Business Platform sample message',
+    buttons: [],
     variables: 0,
+    variableNames: [],
+    parameterFormat: 'POSITIONAL',
+  },
+  {
+    name: 'promocion_temporada',
+    language: 'es',
+    category: 'MARKETING',
+    status: 'PENDING',
+    qualityScore: 'UNKNOWN',
+    metaTemplateId: '1029384759',
+    header: null,
+    body: '¡{{1}}, esta semana tienes {{2}} de descuento en toda la tienda!',
+    footer: 'Para dejar de recibir promociones responde SALIR',
+    buttons: [{ type: 'QUICK_REPLY', text: 'No me interesa' }],
+    variables: 2,
+    variableNames: ['1', '2'],
+    parameterFormat: 'POSITIONAL',
+  },
+  {
+    name: 'codigo_verificacion',
+    language: 'es',
+    category: 'AUTHENTICATION',
+    status: 'REJECTED',
+    qualityScore: 'UNKNOWN',
+    metaTemplateId: '1029384760',
+    header: null,
+    body: 'Tu código de verificación es {{1}}. No lo compartas con nadie.',
+    footer: null,
+    buttons: [{ type: 'URL', text: 'Copiar código' }],
+    variables: 1,
+    variableNames: ['1'],
+    parameterFormat: 'POSITIONAL',
+  },
+  {
+    name: 'reactivacion_cliente',
+    language: 'es',
+    category: 'MARKETING',
+    status: 'PAUSED',
+    qualityScore: 'RED',
+    metaTemplateId: '1029384761',
+    header: null,
+    body: 'Te extrañamos, {{nombre}}. Vuelve y obtén un regalo en tu próxima compra.',
+    footer: null,
+    buttons: [],
+    variables: 1,
+    variableNames: ['nombre'],
+    parameterFormat: 'NAMED',
+  },
+  {
+    name: 'encuesta_antigua',
+    language: 'es',
+    category: 'MARKETING',
+    status: 'DISABLED',
+    qualityScore: 'RED',
+    metaTemplateId: '1029384762',
+    header: null,
+    body: '¿Cómo evaluarías tu última compra, {{1}}?',
+    footer: null,
+    buttons: [],
+    variables: 1,
+    variableNames: ['1'],
+    parameterFormat: 'POSITIONAL',
   },
 ];
 
@@ -274,7 +370,7 @@ export const mockWhatsApp = {
     return delay(message);
   },
 
-  templates: () => delay(templates),
+  templates: (): Promise<unknown[]> => delay(templates),
 
   sendTemplate: (input: SendTemplateInput) => {
     const message: ChatMessage = {

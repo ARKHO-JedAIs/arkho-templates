@@ -1,9 +1,14 @@
 import * as React from 'react';
-import { Home, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { Home, PanelLeftClose, PanelLeftOpen, Settings } from 'lucide-react';
 import { Sidebar, SidebarContent, SidebarRail, useSidebar } from '@/components/ui/sidebar';
 import { sections } from '@/app/sections';
 import useAuthStore, { selectIsAdmin } from '@/lib/stores/useAuthStore';
-import { NavMain } from './NavMain';
+import { NavMain, isNavGroup, type NavEntry, type NavGroup } from './NavMain';
+
+/** Groups with an icon of their own; any other group borrows its first item's. */
+const GROUP_ICONS: Record<string, NavGroup['icon']> = {
+  Configuración: Settings,
+};
 
 export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
   const { state: sidebarState, toggleSidebar } = useSidebar();
@@ -11,13 +16,28 @@ export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
 
   // Home is always here; everything else is whatever sections this build has.
   // Hiding an admin link is cosmetic only - the route itself is enforced by
-  // requireAdmin in src/router/routes.tsx.
-  const navMain = [
-    { title: 'Inicio', url: '/', icon: Home },
-    ...sections
-      .filter(section => !section.requiresAdmin || isAdmin)
-      .map(section => ({ title: section.label, url: section.path, icon: section.icon })),
-  ];
+  // requireAdmin in src/router/routes.tsx. The filter runs per section, before
+  // grouping, so a group whose children are all hidden never appears.
+  const navMain: NavEntry[] = [{ title: 'Inicio', url: '/', icon: Home }];
+  for (const section of sections) {
+    if (section.requiresAdmin && !isAdmin) continue;
+    const link = { title: section.label, url: section.path, icon: section.icon };
+    if (!section.group) {
+      navMain.push(link);
+      continue;
+    }
+    // A group sits where its first (lowest `order`) section would have been.
+    const group = navMain.find(
+      (entry): entry is NavGroup => isNavGroup(entry) && entry.title === section.group
+    );
+    if (group) group.items.push(link);
+    else
+      navMain.push({
+        title: section.group,
+        icon: GROUP_ICONS[section.group] ?? section.icon,
+        items: [link],
+      });
+  }
 
   return (
     <Sidebar className='h-full border-r border-border bg-card' collapsible='icon' {...props}>

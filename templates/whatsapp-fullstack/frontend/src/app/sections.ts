@@ -1,5 +1,10 @@
-import type { FunctionComponent } from 'react';
-import type { LucideIcon } from 'lucide-react';
+import type { ComponentType, FunctionComponent } from 'react';
+
+/**
+ * A sidebar icon: any component that takes a `className`. Lucide icons fit, and
+ * so does a brand glyph such as `WhatsAppIcon`, which lucide does not ship.
+ */
+export type SectionIcon = ComponentType<{ className?: string }>;
 
 /**
  * One optional area of the app: a route, its sidebar entry, and who may see it.
@@ -12,7 +17,13 @@ export interface AppSection {
   path: string;
   /** Sidebar label. */
   label: string;
-  icon: LucideIcon;
+  icon: SectionIcon;
+  /**
+   * Sidebar group: sections sharing a group render as one collapsible entry
+   * (label = the group, e.g. `Configuración`) with each section as a sub-item.
+   * Ungrouped sections are top-level links.
+   */
+  group?: string;
   /**
    * Loads the page, lazily.
    *

@@ -7,7 +7,7 @@ import type {
   SendTemplateInput,
   WhatsAppTemplate,
 } from '../types';
-import { toChatMessage, toConversation } from './mappers';
+import { toChatMessage, toConversation, toTemplate } from './mappers';
 import { mockWhatsApp } from './mockWhatsApp';
 
 /** Thrown when the backend rejects the request because the session expired. */
@@ -67,13 +67,19 @@ export async function sendMessage(phone: string, message: string): Promise<ChatM
   return toChatMessage(data);
 }
 
+/**
+ * Every template of the account, whatever its review status: the templates page
+ * shows them all, and the send dialog keeps the approved ones (`isSendable`).
+ */
 export async function fetchTemplates(): Promise<WhatsAppTemplate[]> {
-  if (usingDemoData) return mockWhatsApp.templates();
-  return request<WhatsAppTemplate[]>(
-    '/whatsapp/templates',
-    { method: 'GET' },
-    'No se pudieron cargar las plantillas'
-  );
+  const data = usingDemoData
+    ? await mockWhatsApp.templates()
+    : await request<unknown[]>(
+        '/whatsapp/templates',
+        { method: 'GET' },
+        'No se pudieron cargar las plantillas'
+      );
+  return (data ?? []).flatMap(item => toTemplate(item) ?? []);
 }
 
 export async function sendTemplate(input: SendTemplateInput): Promise<ChatMessage | null> {

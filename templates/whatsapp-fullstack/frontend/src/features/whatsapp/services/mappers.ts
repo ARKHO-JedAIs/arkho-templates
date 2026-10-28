@@ -1,4 +1,10 @@
-import type { ChatMessage, Conversation, MessageStatus } from '../types';
+import type {
+  ChatMessage,
+  Conversation,
+  MessageStatus,
+  TemplateQuality,
+  WhatsAppTemplate,
+} from '../types';
 
 const text = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
 const orNull = (value: unknown) => text(value) || null;
@@ -154,3 +160,77 @@ export function templateParts(
   if (!name || !language) return null;
   return { name, language, detail: (detail ?? '').trim() };
 }
+
+const TEMPLATE_QUALITIES: readonly TemplateQuality[] = ['GREEN', 'YELLOW', 'RED', 'UNKNOWN'];
+
+/** A WhatsApp variable in a template text: two braces, a number or a name, two braces. */
+const VARIABLE = /\{\{\s*([\w.]+)\s*\}\}/g;
+
+/** The distinct variables of a text, in order of first appearance. */
+export function templateVariableNames(textValue: string): string[] {
+  return [...new Set([...textValue.matchAll(VARIABLE)].map(match => match[1]!))];
+}
+
+/** A text split into plain runs and variables, for a preview that highlights them. */
+export type TemplateSegment = { kind: 'text'; value: string } | { kind: 'variable'; name: string };
+
+export function templateSegments(textValue: string): TemplateSegment[] {
+  const segments: TemplateSegment[] = [];
+  let last = 0;
+  for (const match of textValue.matchAll(VARIABLE)) {
+    const start = match.index ?? 0;
+    if (start > last) segments.push({ kind: 'text', value: textValue.slice(last, start) });
+    segments.push({ kind: 'variable', name: match[1]! });
+    last = start + match[0].length;
+  }
+  if (last < textValue.length) segments.push({ kind: 'text', value: textValue.slice(last) });
+  return segments;
+}
+
+/**
+ * A template from `GET /whatsapp/templates`; `null` if unusable.
+ *
+ * A missing `status` reads as approved: before the endpoint listed every
+ * template it only returned the approved ones, without the field.
+ */
+export function toTemplate(item: unknown): WhatsAppTemplate | null {
+  if (!item || typeof item !== 'object') return null;
+  const raw = item as Record<string, unknown>;
+  const name = text(raw.name);
+  if (!name) return null;
+  const body = typeof raw.body === 'string' ? raw.body : '';
+  const quality = text(raw.qualityScore).toUpperCase() as TemplateQuality;
+  const names = Array.isArray(raw.variableNames)
+    ? raw.variableNames.map(value => String(value).trim()).filter(Boolean)
+    : templateVariableNames(body);
+  const count = typeof raw.variables === 'number' ? raw.variables : names.length;
+  const buttons = Array.isArray(raw.buttons)
+    ? raw.buttons.flatMap(button => {
+        if (!button || typeof button !== 'object') return [];
+        const entry = button as Record<string, unknown>;
+        return text(entry.text) ? [{ type: text(entry.type), text: text(entry.text) }] : [];
+      })
+    : [];
+  return {
+    name,
+    language: text(raw.language),
+    category: text(raw.category).toUpperCase(),
+    status: text(raw.status).toUpperCase() || 'APPROVED',
+    qualityScore: TEMPLATE_QUALITIES.includes(quality) ? quality : 'UNKNOWN',
+    metaTemplateId: orNull(raw.metaTemplateId),
+    header: orNull(raw.header),
+    body,
+    footer: orNull(raw.footer),
+    buttons,
+    variables: count,
+    variableNames: names,
+    parameterFormat:
+      text(raw.parameterFormat).toUpperCase() === 'NAMED' ||
+      (!raw.parameterFormat && names.some(variable => !/^\d+$/.test(variable)))
+        ? 'NAMED'
+        : 'POSITIONAL',
+  };
+}
+
+/** Only approved templates can be sent; Meta rejects the rest. */
+export const isSendable = (template: WhatsAppTemplate) => template.status === 'APPROVED';
