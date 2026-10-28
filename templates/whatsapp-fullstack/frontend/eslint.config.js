@@ -29,8 +29,11 @@ export default [
     },
     rules: {
       // The whole point of installing this plugin: without it, exhaustive-deps
-      // never runs and a stale-closure bug ships silently.
-      ...pluginReactHooks.configs.recommended.rules,
+      // never runs and a stale-closure bug ships silently. Named one by one
+      // because react-hooks 7's `recommended` also turns on the React Compiler
+      // rules, which flag patterns this codebase uses on purpose.
+      'react-hooks/rules-of-hooks': 'error',
+      'react-hooks/exhaustive-deps': 'warn',
       'react/prop-types': 'off',
       'react/react-in-jsx-scope': 'off',
       // No inline options: Prettier reads .prettierrc, which stays the single
@@ -39,7 +42,9 @@ export default [
     },
     settings: {
       react: {
-        version: 'detect',
+        // Not 'detect': eslint-plugin-react 7.37 detects the version through an
+        // API ESLint 10 removed and crashes. Keep this in step with package.json.
+        version: '19.0',
       },
     },
   },

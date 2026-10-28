@@ -4,3 +4,10 @@
 # ERR_PNPM_IGNORED_BUILDS when one is left unapproved.
 allowBuilds:
   esbuild: true
+
+# eslint-plugin-react and eslint-plugin-jsx-a11y work with ESLint 10 (lint and
+# their rules verified) but still declare a peer range that stops at 9.
+peerDependencyRules:
+  allowedVersions:
+    eslint-plugin-react>eslint: '10'
+    eslint-plugin-jsx-a11y>eslint: '10'
