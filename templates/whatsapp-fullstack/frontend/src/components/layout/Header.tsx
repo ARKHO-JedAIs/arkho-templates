@@ -10,7 +10,7 @@ function Header() {
   const { toggleSidebar } = useSidebar();
 
   return (
-    <header className='flex h-14 shrink-0 items-center justify-between border-b border-border px-4 sm:px-6 fixed top-0 left-0 right-0 z-[100] bg-card'>
+    <header className='flex h-14 shrink-0 items-center justify-between border-b border-border px-4 sm:px-6 fixed top-0 left-0 right-0 z-40 bg-card'>
       <div className='flex items-center gap-3'>
         <BrandMark appName={APP_NAME} className='h-7 text-base text-foreground' />
       </div>
