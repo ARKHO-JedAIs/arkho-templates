@@ -21,7 +21,7 @@ export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
 
   return (
     <Sidebar className='h-full border-r border-border bg-card' collapsible='icon' {...props}>
-      <div className='flex flex-col items-start px-3 pt-[3.75rem]'>
+      <div className='flex flex-col items-start px-3 pt-[3.75rem] group-data-[collapsible=icon]:items-center group-data-[collapsible=icon]:px-0'>
         <button
           onClick={toggleSidebar}
           aria-label={sidebarState === 'expanded' ? 'Contraer menú' : 'Expandir menú'}
@@ -35,7 +35,9 @@ export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
         </button>
       </div>
 
-      <SidebarContent className='mt-2 mb-6 px-2'>
+      {/* Collapsed, the rail is 3rem: the group's own p-2 already centres the
+          2rem icon buttons, so the content padding must go. */}
+      <SidebarContent className='mt-2 mb-6 px-2 group-data-[collapsible=icon]:px-0'>
         <NavMain items={navMain} />
       </SidebarContent>
 

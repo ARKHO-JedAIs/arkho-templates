@@ -41,8 +41,9 @@ export function NavMain({ items }: { items: NavItem[] }) {
             <SidebarMenuItem key={item.title}>
               <SidebarMenuButton
                 asChild
+                tooltip={item.title}
                 className={cn(
-                  'py-2.5 rounded-lg font-medium text-sm transition-all duration-200',
+                  'py-2.5 rounded-lg font-medium text-sm transition-all duration-200 group-data-[collapsible=icon]:justify-center',
                   active
                     ? 'bg-muted text-foreground'
                     : 'text-muted-foreground hover:bg-muted hover:text-foreground'
@@ -50,21 +51,23 @@ export function NavMain({ items }: { items: NavItem[] }) {
               >
                 <Link
                   to={item.url}
-                  className='group flex items-center gap-2.5'
+                  className='group/nav flex items-center gap-2.5'
                   onClick={handleLinkClick}
                 >
                   {item.icon && (
                     <item.icon
                       className={cn(
-                        'w-4 h-4',
+                        'w-4 h-4 shrink-0',
                         active
                           ? 'text-primary'
-                          : 'text-muted-foreground group-hover:text-foreground'
+                          : 'text-muted-foreground group-hover/nav:text-foreground'
                       )}
                     />
                   )}
-                  <span>{item.title}</span>
-                  {active && <span className='ml-auto w-1.5 h-1.5 rounded-full bg-primary' />}
+                  <span className='group-data-[collapsible=icon]:hidden'>{item.title}</span>
+                  {active && (
+                    <span className='ml-auto w-1.5 h-1.5 rounded-full bg-primary group-data-[collapsible=icon]:hidden' />
+                  )}
                 </Link>
               </SidebarMenuButton>
             </SidebarMenuItem>
