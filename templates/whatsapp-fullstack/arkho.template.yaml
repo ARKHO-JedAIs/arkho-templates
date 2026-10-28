@@ -335,9 +335,21 @@ templating:
       when: "components != 'backend'"
 
 nextSteps:
-  # Written as "command   # explanation"; a line starting with # is text only.
+  # Written as "command   # explanation"; a line starting with # is text only and
+  # "## " starts an unnumbered section (numbering restarts).
   # Not `cd {{ project_name }}`: the folder is named after the CLI's own project-name
   # answer, which may differ from this parameter when the first one failed its pattern.
+  # One command per step so each can be run on its own; the last step of each part
+  # is the same commands chained, for whoever prefers one line.
   - "# Open the generated project folder; README.md has the full guide, including connecting a WhatsApp number"
-  - "cd backend && npm install && npm test && npx cdk synth --quiet   # Backend (if generated): install, test and synth, all local"
-  - "cd frontend && {{ package_manager }} install && {{ package_manager }} run dev   # Frontend (if generated): with mock sign-in the WhatsApp section runs on demo data at http://localhost:5173/whatsapp"
+  - "## BACKEND (if generated) - all local, nothing is deployed"
+  - "cd backend   # Enter the backend"
+  - "npm install   # Install dependencies (skip it if the CLI already installed them)"
+  - "npm test   # Run the CDK tests"
+  - "npx cdk synth --quiet   # Build the CloudFormation template without deploying"
+  - "cd backend && npm install && npm test && npx cdk synth --quiet   # Backend, all in one line"
+  - "## FRONTEND (if generated) - with mock sign-in it runs on demo data"
+  - "cd frontend   # Enter the frontend"
+  - "{{ package_manager }} install   # Install dependencies (skip it if the CLI already installed them)"
+  - "{{ package_manager }} run dev   # Start it at http://localhost:5173 (WhatsApp at /whatsapp)"
+  - "cd frontend && {{ package_manager }} install && {{ package_manager }} run dev   # Frontend, all in one line"
