@@ -51,14 +51,6 @@ parameters:
     pattern: "^[a-z]{2}(-[a-z]+)+-[0-9]$"
     patternHint: "an AWS region code, e.g. us-east-1"
 
-  - name: aws_account_id
-    type: string
-    prompt: "AWS account id? (12 digits; leave empty to fill backend/.env later)"
-    when: "components != 'frontend'"
-    default: ""
-    pattern: "^([0-9]{12})?$"
-    patternHint: "12 digits, e.g. 123456789012 (aws sts get-caller-identity --query Account)"
-
   # ---------------------------------------------------------------------------
   # Backend: WhatsApp
   # ---------------------------------------------------------------------------

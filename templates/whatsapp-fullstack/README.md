@@ -62,9 +62,11 @@ same realtime path AppSync uses, so the whole screen can be exercised.
 
    ```bash
    cd backend
-   # .env: check AWS_ACCOUNT_ID and AWS_REGION (a region where End User Messaging Social is available)
-   npx cdk bootstrap aws://<AWS_ACCOUNT_ID>/<AWS_REGION>   # once per account/region
-   npx cdk deploy
+   # .env: check AWS_REGION (a region where End User Messaging Social is available).
+   # The account comes from the AWS profile you deploy with (SSO): no keys, no account id.
+   aws sso login --profile <your-profile>
+   npx cdk bootstrap --profile <your-profile>   # once per account/region
+   npx cdk deploy --profile <your-profile>
    ```
 
    Note the outputs: `WhatsAppTopicArn`, `WhatsAppEventsGraphqlUrl`, the REST API
@@ -173,9 +175,7 @@ payload is the stored item. Only the admin group can subscribe when one is set.
   window, computed by the backend.
 - Quick replies (saved texts inserted with one click) and a new-message alert
   (tab title counter and sound).
-- Deploying with an AWS SSO profile from a script (`deploy` with `--profile`),
-  and dropping the account id prompt: CDK already takes the account from the
-  active profile.
+- A `deploy` script that wraps `cdk deploy --profile` for the SSO profile.
 - Filling `frontend/.env` from the stack outputs after a deploy (API URL,
   AppSync URL, Cognito ids) instead of asking for them at generation.
 - Terraform as an alternative to CDK: no ARKHO template ships Terraform yet.
