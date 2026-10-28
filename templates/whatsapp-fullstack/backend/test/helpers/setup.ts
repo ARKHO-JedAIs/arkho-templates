@@ -3,7 +3,7 @@ import { Template } from 'aws-cdk-lib/assertions';
 import { MainStack } from '../../lib/stack/main-stack';
 
 // Fixed values so the synthesized template is deterministic and does not
-// depend on the developer's .env (which jest loads via dotenv).
+// depend on the developer's .env.
 export const TEST_ENV = {
   account: '111111111111',
   region: 'us-east-1',

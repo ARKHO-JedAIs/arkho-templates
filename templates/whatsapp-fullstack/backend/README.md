@@ -150,7 +150,7 @@ curl "$(aws cloudformation describe-stacks \
   /lambda/core/*        # hello-world, not-found, presigned-url-template, authorizer
   /lambda/user/*        # Cognito triggers: pre-signup, post-confirmation-signup
   /layer/python-common  # shared Python layer (logger, response, cors)
-/test                   # Jest (aws-cdk-lib/assertions) tests
+/test                   # Vitest (aws-cdk-lib/assertions) tests
 ```
 
 ## Common commands
@@ -160,7 +160,7 @@ npm install              # install dependencies
 npm run prepare          # install Husky hooks after npm install
 npx cdk synth --quiet    # synthesize CloudFormation (verifies the active graph)
 npx tsc --noEmit         # typecheck the whole repo
-npm test                 # run jest
+npm test                 # run the Vitest CDK tests
 npm run secretlint       # scan the whole repo for secrets
 npx cdk diff             # show pending infrastructure changes
 npm run build && npx cdk deploy

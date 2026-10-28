@@ -43,10 +43,11 @@ npm test -- test/s3/templates-bucket.test.ts
 3. Importa el helper de setup:
 
 ```typescript
+import { describe, it } from 'vitest';
 import { getTemplate } from '../helpers/setup';
 
 describe('Nombre del Recurso', () => {
-  test('comportamiento específico', () => {
+  it('comportamiento específico', () => {
     getTemplate().hasResourceProperties('AWS::Service::Resource', {
       // propiedades esperadas
     });

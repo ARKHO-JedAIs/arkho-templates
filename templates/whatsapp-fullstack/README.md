@@ -35,7 +35,7 @@ Frontend <- AppSync subscription (live updates)
 # Backend: tests and synth only, nothing is deployed
 cd backend                      # .env was written with your answers (gitignored)
 npm install
-npm test                        # jest: CDK assertions
+npm test                        # vitest: CDK assertions
 python -m unittest discover -s test/python -v   # ws-handler unit tests
 npx cdk synth --quiet
 

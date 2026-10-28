@@ -135,7 +135,7 @@ without a reason.
   /lambda/user/*        # Cognito trigger functions: pre-signup,
                         #   post-confirmation-signup
   /layer/python-common  # shared Python layer (common: logger, response, cors)
-/test                   # Jest (aws-cdk-lib/assertions) tests
+/test                   # Vitest (aws-cdk-lib/assertions) tests
 ```
 
 - `lib/construct/*` are generic and parameterized; they do not depend on the
@@ -156,7 +156,8 @@ without a reason.
 - **Runtime**: Python 3.12 Lambda functions.
 - **Tooling**: Node.js 24+ and npm 11+ (`engine-strict=true`). `.env` is loaded
   with `dotenv` (the `@dotenvx/dotenvx` package is not used).
-- **Tests**: Jest + `aws-cdk-lib/assertions`.
+- **Tests**: Vitest + `aws-cdk-lib/assertions` (explicit `vitest` imports, no
+  globals). Python handler tests use `unittest`.
 - **Secret scanning**: `secretlint` (preset-recommend) runs on every commit via
   a `husky` pre-commit hook that calls `lint-staged` against the staged files.
   Config lives in `.secretlintrc.json`; the hook is wired by the `prepare`
@@ -169,7 +170,7 @@ npm install              # install dependencies (node_modules is not committed)
 npm run prepare          # install Husky hooks after npm install
 npx cdk synth --quiet    # synthesize CloudFormation (verifies the active graph)
 npx tsc --noEmit         # typecheck the whole repo
-npm test                 # run jest
+npm test                 # run the Vitest CDK tests
 npm run secretlint       # scan the whole repo for secrets
 npx cdk diff             # review changes before deploy
 npm run build && npx cdk deploy

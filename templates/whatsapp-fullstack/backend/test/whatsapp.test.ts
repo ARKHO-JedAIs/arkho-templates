@@ -1,3 +1,4 @@
+import { describe, it, expect } from 'vitest';
 import { Match } from 'aws-cdk-lib/assertions';
 import { getTemplate, TEST_PARAMS } from './helpers/setup';
 
