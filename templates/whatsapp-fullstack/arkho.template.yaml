@@ -14,9 +14,14 @@ category: other
 tags: [whatsapp, aws, cdk, serverless, react, appsync, cognito, end-user-messaging]
 
 parameters:
+  # ---------------------------------------------------------------------------
+  # Project
+  # ---------------------------------------------------------------------------
   - name: project_name
     type: string
-    prompt: "Project name? (prefix of every AWS resource and npm package name)"
+    group: Project
+    prompt: "Project name?"
+    description: "Prefix of every AWS resource and npm package, e.g. acme-whatsapp."
     required: true
     # Feeds PROJECT_NAME of the backend, so it must stay valid inside an S3
     # bucket name and a Cognito domain prefix.
@@ -25,6 +30,7 @@ parameters:
 
   - name: components
     type: choice
+    group: Project
     prompt: "What do you want to generate?"
     default: fullstack
     choices:
@@ -39,24 +45,25 @@ parameters:
         hint: "WhatsApp section for an existing backend with this API"
 
   # ---------------------------------------------------------------------------
-  # Backend: AWS target
+  # WhatsApp (backend)
   # ---------------------------------------------------------------------------
-  # Both land only in backend/.env, which is gitignored in the generated
-  # project: an account id never reaches a committed file.
+  # Lands only in backend/.env, which is gitignored in the generated project.
+  # The AWS account is not asked: CDK takes it from the profile you deploy with.
   - name: aws_region
     type: string
-    prompt: "AWS region to deploy to? (End User Messaging Social must be available there)"
+    group: WhatsApp
+    prompt: "AWS region?"
+    description: "Where the backend is deployed; WhatsApp (End User Messaging Social) must be available there, e.g. us-east-1."
     when: "components != 'frontend'"
     default: us-east-1
     pattern: "^[a-z]{2}(-[a-z]+)+-[0-9]$"
     patternHint: "an AWS region code, e.g. us-east-1"
 
-  # ---------------------------------------------------------------------------
-  # Backend: WhatsApp
-  # ---------------------------------------------------------------------------
   - name: whatsapp_ready
     type: boolean
-    prompt: "Is a WhatsApp number already linked in AWS End User Messaging Social? (no = README explains how to link one)"
+    group: WhatsApp
+    prompt: "Is a WhatsApp number already connected in AWS?"
+    description: "In End User Messaging Social. No = the README walks you through connecting one; the ids can be added later."
     when: "components != 'frontend'"
     default: false
 
@@ -64,7 +71,9 @@ parameters:
   # set later in backend/.env (or the Parameter Store parameter).
   - name: whatsapp_phone_number_id
     type: string
-    prompt: "Phone number id? (End User Messaging Social > Phone numbers, the ARN)"
+    group: WhatsApp
+    prompt: "Phone number id?"
+    description: "End User Messaging Social > Phone numbers: the number's ARN."
     when: "components != 'frontend' && whatsapp_ready"
     default: ""
     pattern: "^(arn:aws:social-messaging:[a-z0-9-]+:[0-9]{12}:phone-number-id/[a-f0-9]+)?$"
@@ -72,7 +81,9 @@ parameters:
 
   - name: whatsapp_business_account_id
     type: string
-    prompt: "WhatsApp Business Account id? (End User Messaging Social > Business accounts)"
+    group: WhatsApp
+    prompt: "WhatsApp Business Account id?"
+    description: "End User Messaging Social > Business accounts, e.g. waba-0a46e718017b4acd927aa5833b4fb13e."
     when: "components != 'frontend' && whatsapp_ready"
     default: ""
     pattern: "^(waba-[a-f0-9]+)?$"
@@ -80,7 +91,9 @@ parameters:
 
   - name: default_phone_prefix
     type: string
-    prompt: "Default country prefix for numbers typed without one? (56 Chile, 51 Peru, 52 Mexico...)"
+    group: WhatsApp
+    prompt: "Default country code?"
+    description: "Added to numbers typed without one: 56 Chile, 51 Peru, 52 Mexico."
     when: "components != 'frontend'"
     default: "56"
     pattern: "^[0-9]{1,3}$"
@@ -90,7 +103,9 @@ parameters:
   # are rejected.
   - name: auto_reply_message
     type: string
-    prompt: "Automatic reply to every message? (leave empty for none; a person answers from the web)"
+    group: WhatsApp
+    prompt: "Automatic reply to incoming messages?"
+    description: "Sent to every message received. Empty = no automatic reply; your team answers from the web."
     when: "components != 'frontend'"
     default: ""
     pattern: "^[^\"\\\\]{0,500}$"
@@ -101,7 +116,8 @@ parameters:
   # ---------------------------------------------------------------------------
   - name: package_manager
     type: choice
-    prompt: "Which package manager will the frontend use?"
+    group: Frontend
+    prompt: "Package manager for the frontend?"
     when: "components != 'backend'"
     default: npm
     choices: [{ value: npm }, { value: pnpm }, { value: yarn }]
@@ -110,7 +126,9 @@ parameters:
   # tailwind.config.ts turns each hex into a full palette at build time.
   - name: brand_color
     type: string
-    prompt: "Main brand colour? (hex, e.g. #E30613: buttons, highlights and the sign-in screen)"
+    group: Frontend
+    prompt: "Main brand colour?"
+    description: "A hex such as #E30613, for buttons, highlights and the sign-in screen; editable later in frontend/src/styles/brand.json."
     when: "components != 'backend'"
     default: "#3B82F6"
     pattern: "^#[0-9A-Fa-f]{6}$"
@@ -118,7 +136,9 @@ parameters:
 
   - name: brand_secondary_color
     type: string
-    prompt: "Secondary colour? (hex for the sidebar and secondary buttons; empty = a dark shade of the main one)"
+    group: Frontend
+    prompt: "Secondary colour?"
+    description: "A hex for the sidebar and secondary buttons. Empty = a dark shade of the main colour."
     when: "components != 'backend'"
     default: ""
     pattern: "^(#[0-9A-Fa-f]{6})?$"
@@ -128,6 +148,7 @@ parameters:
   # is written into that folder's index.ts.
   - name: login_layout
     type: choice
+    group: Frontend
     prompt: "Sign-in screen layout?"
     when: "components != 'backend'"
     default: basic
@@ -143,24 +164,30 @@ parameters:
         hint: "dark decorated panel (lines, chart) with feature pills, bare form beside it"
       - value: orbit
         label: "Orbit"
-        hint: "big greeting with the form, animated orbits around the app initial beside it"
+        hint: "big greeting with the form, animated orbits around the logo beside it"
 
+  # ---------------------------------------------------------------------------
+  # Access
+  # ---------------------------------------------------------------------------
   - name: auth_provider
     type: choice
-    prompt: "Frontend authentication?"
+    group: Access
+    prompt: "How will users sign in?"
     when: "components != 'backend'"
     default: mock
     choices:
       - value: mock
         label: "Mock (no AWS)"
-        hint: "runs locally with demo WhatsApp data; switch to cognito in .env after deploying"
+        hint: "demo users and demo WhatsApp data; switch to cognito in .env after deploying"
       - value: cognito
         label: "Cognito user pool"
-        hint: "the user pool of the deployed backend"
+        hint: "real users, from the deployed backend"
 
   - name: cognito_user_pool_id
     type: string
-    prompt: "Cognito user pool id? (backend output UserPoolId; may be left empty)"
+    group: Access
+    prompt: "Cognito user pool id?"
+    description: "Backend output UserPoolId, e.g. us-east-1_abc123. Can be left empty and set in frontend/.env after deploying."
     when: "components != 'backend' && auth_provider == 'cognito'"
     default: ""
     pattern: "^([a-z]{2}-[a-z]+-[0-9]_[A-Za-z0-9]+)?$"
@@ -168,7 +195,9 @@ parameters:
 
   - name: cognito_user_pool_client_id
     type: string
-    prompt: "Cognito app client id? (backend output, public client; may be left empty)"
+    group: Access
+    prompt: "Cognito app client id?"
+    description: "Backend output of the public app client. Can be left empty and set in frontend/.env after deploying."
     when: "components != 'backend' && auth_provider == 'cognito'"
     default: ""
     pattern: "^[a-z0-9]*$"
@@ -178,7 +207,9 @@ parameters:
   # 000000 under mock auth) and the backend turns on Cognito email MFA.
   - name: login_otp
     type: boolean
-    prompt: "Ask for a 2FA verification code after the password? (emailed one-time code; mock code 000000)"
+    group: Access
+    prompt: "Require a 2FA code after the password?"
+    description: "A one-time code sent by email. With mock sign-in the code is 000000."
     default: false
 
   # With email MFA on, the backend refuses to synth without a sender, so the
@@ -187,34 +218,28 @@ parameters:
   # left in backend/.env.
   - name: ses_from_email
     type: string
-    prompt: "Sender address for the codes? (must be a verified SES identity in that region)"
+    group: Access
+    prompt: "Email address that sends the 2FA codes?"
+    description: "Must be a verified identity in Amazon SES, in the same region, e.g. no-reply@example.com."
     when: "components != 'frontend' && login_otp"
     default: ""
     pattern: "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$"
     patternHint: "an email address, e.g. no-reply@example.com"
 
-  - name: api_base_url
-    type: string
-    prompt: "Backend API base URL? (backend output RestApiUrl; leave empty until it is deployed)"
-    when: "components != 'backend'"
-    default: ""
-
-  - name: appsync_url
-    type: string
-    prompt: "AppSync GraphQL URL for live updates? (backend output WhatsAppEventsGraphqlUrl; may be left empty)"
-    when: "components != 'backend'"
-    default: ""
-
   # Shared by both sides: the frontend gates its admin screens with the group
   # and the backend requires it on the WhatsApp API and realtime channel.
   - name: use_roles
     type: boolean
-    prompt: "Will the app have more than one user profile? (no = every signed-in user can use WhatsApp)"
+    group: Access
+    prompt: "Will there be admins and regular users?"
+    description: "No = every signed-in user can use WhatsApp and every screen."
     default: true
 
   - name: admin_group
     type: string
-    prompt: "Which Cognito group may use WhatsApp and the admin-only screens?"
+    group: Access
+    prompt: "Name of the admin group?"
+    description: "The Cognito group allowed to use WhatsApp and the admin-only screens."
     when: "use_roles"
     default: admin
     pattern: "^[A-Za-z0-9_-]{1,64}$"
@@ -224,8 +249,29 @@ parameters:
   # (backend USERS_API_ENABLED) it calls.
   - name: include_users_admin
     type: boolean
-    prompt: "Include user management? (Usuarios screen + /admin/users API over Cognito)"
+    group: Access
+    prompt: "Include a user management screen?"
+    description: "Create, disable and reset Cognito users from the web (Usuarios screen and /admin/users API)."
     default: false
+
+  # ---------------------------------------------------------------------------
+  # Connections (frontend to a deployed backend)
+  # ---------------------------------------------------------------------------
+  - name: api_base_url
+    type: string
+    group: Connections
+    prompt: "Backend API URL?"
+    description: "Backend output RestApiUrl. Leave empty until the backend is deployed; then set it in frontend/.env."
+    when: "components != 'backend'"
+    default: ""
+
+  - name: appsync_url
+    type: string
+    group: Connections
+    prompt: "Realtime (AppSync) URL?"
+    description: "Backend output WhatsAppEventsGraphqlUrl, for live updates. Can be left empty."
+    when: "components != 'backend'"
+    default: ""
 
 templating:
   engine: token
@@ -288,10 +334,9 @@ templating:
       when: "components != 'backend'"
 
 nextSteps:
+  # Written as "command   # explanation"; a line starting with # is text only.
   # Not `cd {{ project_name }}`: the folder is named after the CLI's own project-name
   # answer, which may differ from this parameter when the first one failed its pattern.
-  - "cd into the generated project folder   # README.md has the full guide, including linking a WhatsApp number"
-  - "# Backend (if generated): cd backend   # .env is already filled with your answers"
-  - "#   npm install && npm test && npx cdk synth --quiet   # all local, no deploy"
-  - "# Frontend (if generated): cd frontend && {{ package_manager }} install && {{ package_manager }} run dev"
-  - "#   with auth_provider=mock the WhatsApp section runs on demo data: http://localhost:5173/whatsapp"
+  - "# Open the generated project folder; README.md has the full guide, including connecting a WhatsApp number"
+  - "cd backend && npm install && npm test && npx cdk synth --quiet   # Backend (if generated): install, test and synth, all local"
+  - "cd frontend && {{ package_manager }} install && {{ package_manager }} run dev   # Frontend (if generated): with mock sign-in the WhatsApp section runs on demo data at http://localhost:5173/whatsapp"
