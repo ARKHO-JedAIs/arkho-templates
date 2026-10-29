@@ -4,7 +4,7 @@ WhatsApp inbox on AWS, generated from the ARKHO `whatsapp-fullstack` template.
 
 | Folder | What it is | Based on |
 |---|---|---|
-| `backend/` | CDK stack: Cognito, REST API, and the WhatsApp module (`lib/stack/whatsapp`) | `aws-cdk-serverless-backend` |
+| `backend/` | CDK stack: Cognito, REST API, the WhatsApp module (`lib/stack/whatsapp`) and the optional AI agent (`lib/stack/agent`, code in `backend/agent`) | `aws-cdk-serverless-backend` |
 | `frontend/` | React SPA with a live WhatsApp section (`src/features/whatsapp`) | `frontend-base` |
 
 A project generated with `components=backend` or `components=frontend` only has
@@ -15,7 +15,9 @@ that folder; everything below about the other one does not apply.
 ```
 Contact (WhatsApp) -> Meta -> AWS End User Messaging Social -> SNS topic -> ws-handler Lambda
    ws-handler: stores the message (DynamoDB), announces it (AppSync), marks it read,
-               and sends the automatic reply unless a person took the conversation
+               and, unless a person took the conversation, queues it for the AI agent
+               (agent-jobs SQS -> agent-worker -> AgentCore Runtime or Lambda -> reply)
+               or, without an agent, sends the fixed automatic reply
 Frontend -> REST API (Cognito) -> send-message / send-template / put-control ...
 Frontend <- AppSync subscription (live updates)
 ```
@@ -26,8 +28,9 @@ Frontend <- AppSync subscription (live updates)
   Outside that window (or to start a conversation) send an approved template.
 - **Take conversation** pauses the automatic replies for that contact;
   **Return to assistant** resumes them.
-- `ws-handler`'s `answer()` is the seam for an agent: today it returns the
-  configured automatic reply; replace it with a call to your model.
+- `ws-handler`'s `answer()` decides who answers: the AI agent when one is
+  deployed and switched on, otherwise the configured automatic reply. See
+  [AI agent](#ai-agent).
 
 ## Run it locally (no AWS)
 
@@ -36,7 +39,7 @@ Frontend <- AppSync subscription (live updates)
 cd backend                      # .env was written with your answers (gitignored)
 npm install
 npm test                        # vitest: CDK assertions
-python -m unittest discover -s test/python -v   # ws-handler unit tests
+python -m unittest discover -s test/python -v   # Lambda unit tests (ws-handler, agent-worker...)
 npx cdk synth --quiet
 
 # Frontend: with VITE_AUTH_PROVIDER=mock the WhatsApp section runs on demo data
@@ -161,6 +164,93 @@ the `admin` group automatically**: an admin assigns the role from Usuarios
 later step. Client secrets come from `backend/.env` at synth time; move them to
 AWS Secrets Manager before production.
 
+## AI agent
+
+Chosen at generation (`AGENT_RUNTIME` in `backend/.env`); the agent's code is
+`backend/agent` (Python, Bedrock) and is the same for both runtimes.
+
+| `AGENT_RUNTIME` | What is created | When |
+|---|---|---|
+| `agentcore` (default) | The agent image (ARM64, built by `cdk deploy`) on **Bedrock AgentCore Runtime**, X-Ray traces, AgentCore Memory | Managed sessions per customer, memory, traces; scales on its own |
+| `lambda` | The same image as a container **Lambda** (ARM64, 2048 MB, 120 s), same memory | Low traffic, simplest to operate |
+| `none` | Nothing: no agent resource at all | Only the fixed `WHATSAPP_AUTO_REPLY_MESSAGE`, as before |
+
+With either runtime the stack also creates:
+
+- `agent-prompt` Parameter Store parameter (output `AgentPromptParameterName`):
+  JSON with `enabled`, `basePrompt`, `businessName`, `greeting`, `refusal`,
+  `handoffMessage`, `timezone`, seeded from `AGENT_BUSINESS_DESCRIPTION`.
+- `agent-jobs.fifo` SQS queue (+ `agent-jobs-dlq.fifo`) and the
+  `whatsapp-agent-worker` Lambda: ws-handler queues each customer message (one
+  message group per customer, so their turns run in order) and the worker
+  invokes the agent, sends the reply and stores it as `sent_by: agent` (the
+  web labels it **Agente IA**). At most 10 agent turns run at once, to protect
+  the account's Bedrock quotas.
+- AgentCore Memory, unless `AGENT_MEMORY_MODE=off`: `conversation` (only the
+  conversation, as events), `facts` (+ semantic facts and user preferences,
+  namespaces `/facts/{actorId}` and `/preferences/{actorId}`),
+  `facts_summaries` (+ summaries, `/summaries/{actorId}/{sessionId}`). Events
+  expire after 30 days; the memory is retained when `ENV_NAME=prod`.
+
+How it behaves:
+
+- One agent session per customer and day (`wa-<hash>-<YYYYMMDD>`, UTC); the
+  memory knows the customer as `wa-<hash>`. The phone itself never reaches
+  the agent runtime.
+- A conversation a person took (**Tomar conversación**) is not answered by the
+  agent, and nothing is sent once WhatsApp's 24 hour window closed.
+- `AGENT_RATE_LIMIT_PER_HOUR` agent replies per customer per hour (atomic
+  counter on the conversation); beyond it the agent is not called and the
+  customer gets one polite notice per hour.
+- An off-topic (`blocked`) answer is sent as the agent wrote it; the third in
+  24 hours hands the conversation to a person. When the agent fails or times
+  out, the conversation goes to a person with the notice "El agente no pudo
+  responder" - the customer never sees an error.
+
+**Edit the prompt**: Parameter Store > `AgentPromptParameterName` (a web screen
+comes later). No deploy needed; the agent reads it at runtime. CloudFormation
+only rewrites the parameter when its seed changes, so your edits survive
+every deploy unless you change `AGENT_BUSINESS_DESCRIPTION` (or the project
+name), which resets it to the new seed - copy your prompt first.
+
+**Switch it off and on**: set `"enabled": false` in that parameter; within a
+minute ws-handler stops queuing and the fixed automatic reply answers again.
+To remove every agent resource: `AGENT_RUNTIME=none` and deploy.
+
+**Before the first deploy**: enable the model of `AGENT_MODEL_ID` in Bedrock >
+Model access (the default is the `us.` cross-region inference profile of
+Claude Sonnet 4.6; IAM is scoped to exactly that model), and have Docker
+running: `cdk deploy` builds the ARM64 image (on an x86 machine through
+Docker's emulation, slower). `cdk synth` and the tests do not need Docker.
+AgentCore traces need CloudWatch Transaction Search enabled once per account
+(CloudWatch > Application Signals > Transaction Search).
+
+**Cost** (on top of the inbox): Bedrock tokens per agent turn (the bulk of
+it; `MODEL_MAX_TOKENS` 1024 per reply), AgentCore Runtime per vCPU-second the
+agent actually works and per GB-second of memory while its session is alive
+(AgentCore pricing page; an idle session ends after its idle timeout, 15
+minutes by default), AgentCore Memory per
+stored event and, with `facts` / `facts_summaries`, per extracted record (the
+extraction is extra model calls), or Lambda per GB-second for the `lambda`
+variant. SQS, the worker and Parameter Store are cents. The rate limit and the
+concurrency cap bound the worst case.
+
+**Test it**: `npm test` (CDK, every variant) and
+`python -m unittest discover -s test/python -v` (worker and routing) run
+without AWS. Deployed: write to the business number; the reply shows up
+labelled **Agente IA**, and the worker's log (`whatsapp-agent-worker`) records
+each turn's outcome and token usage. Jobs that failed twice (the worker could
+not even read the conversation) wait 14 days in `AgentJobsDeadLetterQueueUrl`.
+
+| Variable | Meaning |
+|---|---|
+| `AGENT_RUNTIME` | `agentcore`, `lambda` or `none` (unset = `none`). |
+| `AGENT_MODEL_ID` | Bedrock model id or inference profile id. |
+| `AGENT_BUSINESS_DESCRIPTION` | One or two sentences that seed the base prompt. |
+| `AGENT_MEMORY_MODE` | `off`, `conversation`, `facts`, `facts_summaries`. |
+| `AGENT_RATE_LIMIT_PER_HOUR` | Agent replies per customer per hour (default 30). |
+| `AGENT_BUSINESS_API_URL` | Optional HTTPS API the agent's tools may call. |
+
 ## WhatsApp configuration
 
 In `backend/.env` (gitignored: the phone number ARN carries the account id).
@@ -172,7 +262,7 @@ At deploy they become the Parameter Store parameter the Lambdas read.
 | `WHATSAPP_BUSINESS_ACCOUNT_ID` | WABA id (`waba-...`). Needed to list templates. |
 | `WHATSAPP_META_API_VERSION` | Meta Graph API version the payloads target. |
 | `WHATSAPP_DEFAULT_PHONE_PREFIX` | Country prefix added to numbers typed without one. |
-| `WHATSAPP_AUTO_REPLY_MESSAGE` | Sent to every inbound message while the assistant answers. Empty = none. |
+| `WHATSAPP_AUTO_REPLY_MESSAGE` | Sent to every inbound message while the assistant answers and no AI agent is on. Empty = none. |
 | `WHATSAPP_ADMIN_GROUP` / `WHATSAPP_REQUIRE_ADMIN` | Cognito group the WhatsApp API and live channel require; `false` = any signed-in user. |
 | `MEDIA_RETENTION_DAYS` | Days the `whatsapp-media` bucket keeps received/sent files. Empty = keep forever. |
 | `MEDIA_URL_TTL_SECONDS` | Lifetime of the presigned URLs the web gets for files (default 900). |
@@ -252,7 +342,8 @@ Realtime (AppSync `onEvent(id)`): `id=<phone>` carries `MESSAGE_RECEIVED`,
 `MESSAGE_SENT`, `TEMPLATE_SENT`, `MESSAGE_STATUS` (sent, delivered, read,
 failed, deleted, warning), `MESSAGE_UPDATED` (a reaction), `CONTROL_CHANGED`
 and `CONVERSATION_EVENT` (an internal notice: `direction: internal`,
-`type: event`, `payload: { kind: human_takeover | assistant_resumed, by }`);
+`type: event`, `payload: { kind: human_takeover | assistant_resumed |
+agent_handoff | agent_failed, by }`);
 `id=inbox` carries `CONVERSATION_UPDATED` with `unreadCount`. The payload is
 the stored item, with a presigned `media.url` instead of the file's key. Every
 inbound WhatsApp message type and how it is stored is mapped in
@@ -265,8 +356,12 @@ next: [docs/WHATSAPP_EVENTS.md](docs/WHATSAPP_EVENTS.md).
 
 - Media: images, audio and documents are stored as a placeholder text with
   their caption, not downloaded.
-- An AI agent: plug it into `answer()` in `backend/src/lambda/whatsapp/ws-handler`.
-- Message rate limits per contact.
+- A web screen to edit the agent's prompt (today: Parameter Store).
+- Voice notes for the agent: transcribe them in ws-handler's
+  `after_media_stored` before they are queued (today the agent reads
+  "[Audio]").
+- Grouping a burst of customer messages into one agent turn (today each
+  message is one turn, answered in order).
 - Inbox: search inside the messages (Amazon OpenSearch Service), and the hours
   left in the 24 h window computed by the backend.
 - Quick replies (saved texts inserted with one click) and a new-message sound.

@@ -69,6 +69,38 @@ export interface WhatsAppConfig {
   mediaUrlTtlSeconds?: number;
 }
 
+export const AGENT_RUNTIMES = ['agentcore', 'lambda', 'none'] as const;
+export type AgentRuntimeName = (typeof AGENT_RUNTIMES)[number];
+
+export const AGENT_MEMORY_MODES = ['off', 'conversation', 'facts', 'facts_summaries'] as const;
+export type AgentMemoryMode = (typeof AGENT_MEMORY_MODES)[number];
+
+export const DEFAULT_AGENT_MODEL_ID = 'us.anthropic.claude-sonnet-4-6';
+export const DEFAULT_AGENT_RATE_LIMIT_PER_HOUR = 30;
+export const AGENT_BUSINESS_DESCRIPTION_MAX_LENGTH = 500;
+
+/**
+ * The AI agent that answers WhatsApp (AgentFactory). `none` creates no agent
+ * resource and leaves the fixed automatic reply in charge.
+ */
+export interface AgentConfig {
+  /** AGENT_RUNTIME: AgentCore Runtime, a container Lambda, or no agent. */
+  runtime: AgentRuntimeName;
+  /** AGENT_MODEL_ID: Bedrock model id or cross-region inference profile id. */
+  modelId: string;
+  /** AGENT_BUSINESS_DESCRIPTION: seeds the base prompt. */
+  businessDescription: string;
+  /** AGENT_MEMORY_MODE: which AgentCore Memory strategies, or no memory. */
+  memoryMode: AgentMemoryMode;
+  /** AGENT_RATE_LIMIT_PER_HOUR: agent turns per customer per hour. */
+  rateLimitPerHour: number;
+  /** AGENT_BUSINESS_API_URL: optional HTTPS API the agent tools may call. */
+  businessApiUrl?: string;
+}
+
+/** A Bedrock model id (`anthropic.claude-...`) or inference profile id (`us.anthropic.claude-...`). */
+export const BEDROCK_MODEL_ID_PATTERN = /^[a-z0-9-]+(\.[a-z0-9-]+)+(:[0-9]+)?$/;
+
 export interface AppConfig {
   env: EnvironmentConfig;
   params: ParamsConfig;
@@ -76,6 +108,7 @@ export interface AppConfig {
   whatsapp: WhatsAppConfig;
   /** USERS_API_ENABLED: wire the /admin/users API of the Usuarios screen. */
   usersApiEnabled: boolean;
+  agent: AgentConfig;
 }
 
 function optionalEnv(name: string): string | undefined {
@@ -97,6 +130,57 @@ function listEnv(name: string): string[] {
     .split(',')
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function choiceEnv<T extends string>(name: string, choices: readonly T[], fallback: T): T {
+  const value = optionalEnv(name)?.toLowerCase() ?? fallback;
+  if (!(choices as readonly string[]).includes(value)) {
+    console.error(`Error: ${name} must be one of ${choices.join(', ')}; got ${value}`);
+    process.exit(1);
+  }
+  return value as T;
+}
+
+/**
+ * The agent settings. An unset AGENT_RUNTIME means no agent, so a project
+ * generated before the agent existed keeps deploying exactly as it did.
+ */
+function agentEnv(): AgentConfig {
+  const runtime = choiceEnv('AGENT_RUNTIME', AGENT_RUNTIMES, 'none');
+  const memoryMode = choiceEnv('AGENT_MEMORY_MODE', AGENT_MEMORY_MODES, 'conversation');
+
+  const modelId = optionalEnv('AGENT_MODEL_ID') ?? DEFAULT_AGENT_MODEL_ID;
+  if (!BEDROCK_MODEL_ID_PATTERN.test(modelId)) {
+    console.error('Error: AGENT_MODEL_ID must be a Bedrock model or inference profile id, e.g. us.anthropic.claude-sonnet-4-6');
+    process.exit(1);
+  }
+
+  const businessDescription = optionalEnv('AGENT_BUSINESS_DESCRIPTION') ?? '';
+  if (businessDescription.length > AGENT_BUSINESS_DESCRIPTION_MAX_LENGTH) {
+    console.error(`Error: AGENT_BUSINESS_DESCRIPTION must be at most ${AGENT_BUSINESS_DESCRIPTION_MAX_LENGTH} characters`);
+    process.exit(1);
+  }
+
+  const rateLimit = optionalEnv('AGENT_RATE_LIMIT_PER_HOUR');
+  if (rateLimit !== undefined && !/^[1-9][0-9]{0,3}$/.test(rateLimit)) {
+    console.error('Error: AGENT_RATE_LIMIT_PER_HOUR must be a whole number from 1 to 9999, e.g. 30');
+    process.exit(1);
+  }
+
+  const businessApiUrl = optionalEnv('AGENT_BUSINESS_API_URL');
+  if (businessApiUrl !== undefined && !/^https:\/\/[^\s]+$/.test(businessApiUrl)) {
+    console.error('Error: AGENT_BUSINESS_API_URL must be empty or an https:// URL');
+    process.exit(1);
+  }
+
+  return {
+    runtime,
+    modelId,
+    businessDescription,
+    memoryMode,
+    rateLimitPerHour: rateLimit !== undefined ? Number(rateLimit) : DEFAULT_AGENT_RATE_LIMIT_PER_HOUR,
+    businessApiUrl,
+  };
 }
 
 function ssoProvidersEnv(): SsoProviderName[] {
@@ -239,7 +323,9 @@ export function loadEnvironment(): AppConfig {
 
   const usersApiEnabled = process.env.USERS_API_ENABLED?.trim() === 'true';
 
-  return { env, params, cognito, whatsapp, usersApiEnabled };
+  const agent = agentEnv();
+
+  return { env, params, cognito, whatsapp, usersApiEnabled, agent };
 }
 
 export const config: AppConfig = loadEnvironment();

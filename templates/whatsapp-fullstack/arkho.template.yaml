@@ -124,6 +124,81 @@ parameters:
     patternHint: "a whole number of days (1 to 99999), or empty to keep them forever"
 
   # ---------------------------------------------------------------------------
+  # Agent (backend)
+  # ---------------------------------------------------------------------------
+  # Written to backend/.env as AGENT_RUNTIME; `none` creates no agent resource
+  # and keeps the fixed automatic reply above.
+  - name: agent_runtime
+    type: choice
+    group: Agent
+    prompt: "AI agent to answer WhatsApp?"
+    description: "Where the AI agent runs. Both runtimes use the same agent code (backend/agent); none keeps only the fixed automatic reply."
+    when: "components != 'frontend'"
+    default: agentcore
+    choices:
+      - value: agentcore
+        label: "AgentCore (recommended)"
+        hint: "managed runtime: memory, traces, isolated sessions, scales"
+      - value: lambda
+        label: "Lambda"
+        hint: "simpler, low traffic; same agent code"
+      - value: none
+        label: "No agent"
+        hint: "only the fixed auto-reply, as today"
+
+  - name: agent_model
+    type: string
+    group: Agent
+    prompt: "Bedrock model for the agent?"
+    description: "A Bedrock model id or inference profile, e.g. us.anthropic.claude-sonnet-4-6. Enable access to it in the account (Bedrock > Model access)."
+    when: "components != 'frontend' && agent_runtime != 'none'"
+    default: us.anthropic.claude-sonnet-4-6
+    pattern: "^[a-z0-9-]+(\\.[a-z0-9-]+)+(:[0-9]+)?$"
+    patternHint: "a Bedrock model id, e.g. us.anthropic.claude-sonnet-4-6 or anthropic.claude-3-5-haiku-20241022-v1:0"
+
+  # Written as a double-quoted value in backend/.env, like auto_reply_message.
+  - name: agent_business_description
+    type: string
+    group: Agent
+    prompt: "What does the business do, in a sentence or two?"
+    description: "Seeds the agent's base prompt (what it may talk about). Editable later in Parameter Store without a deploy."
+    when: "components != 'frontend' && agent_runtime != 'none'"
+    default: ""
+    pattern: "^[^\"\\\\]{0,500}$"
+    patternHint: "up to 500 characters, without double quotes or backslashes"
+
+  - name: agent_memory
+    type: choice
+    group: Agent
+    prompt: "What should the agent remember?"
+    description: "AgentCore Memory keeps it for 30 days. Long-term modes extract facts or summaries with extra model calls."
+    when: "components != 'frontend' && agent_runtime != 'none'"
+    default: conversation
+    choices:
+      - value: conversation
+        label: "The conversation"
+        hint: "remembers the current conversation"
+      - value: facts
+        label: "Facts"
+        hint: "+ customer facts and preferences across conversations"
+      - value: facts_summaries
+        label: "Facts and summaries"
+        hint: "+ conversation summaries"
+      - value: "off"
+        label: "Nothing"
+        hint: "every message is answered on its own"
+
+  - name: agent_rate_limit_per_hour
+    type: string
+    group: Agent
+    prompt: "Max agent replies per customer per hour?"
+    description: "Beyond it the agent is not called (protects cost); the customer gets one polite notice per hour."
+    when: "components != 'frontend' && agent_runtime != 'none'"
+    default: "30"
+    pattern: "^[1-9][0-9]{0,3}$"
+    patternHint: "a whole number from 1 to 9999, e.g. 30"
+
+  # ---------------------------------------------------------------------------
   # Frontend
   # ---------------------------------------------------------------------------
   - name: package_manager
@@ -392,3 +467,10 @@ nextSteps:
   - "# backend/.env: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET"
   - "# Redeploy (npx cdk deploy in backend/) to create the providers"
   - "# frontend/.env: VITE_COGNITO_DOMAIN = output CognitoDomainUrl"
+  - "## AI AGENT (if chosen) - backend/agent, deployed with the backend"
+  - "# Bedrock console > Model access: enable the model in AGENT_MODEL_ID (backend/.env) first"
+  - "# Docker must be running for npx cdk deploy: the agent image (ARM64) is built on deploy"
+  - "# Base prompt: Parameter Store, output AgentPromptParameterName (JSON; basePrompt, greeting...)"
+  - "# Edit it there, no deploy needed; a web screen for it comes later"
+  - "# Switch it off: set enabled to false in that parameter (the fixed auto-reply answers)"
+  - "# Remove it: AGENT_RUNTIME=none in backend/.env, then npx cdk deploy"

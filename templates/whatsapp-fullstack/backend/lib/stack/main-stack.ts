@@ -1,6 +1,6 @@
 import * as cdk from 'aws-cdk-lib';
 import { Construct } from 'constructs';
-import { CognitoConfig, EnvironmentConfig, ParamsConfig, WhatsAppConfig } from './shared/util/env-config';
+import { AgentConfig, CognitoConfig, EnvironmentConfig, ParamsConfig, WhatsAppConfig } from './shared/util/env-config';
 import { LayerFactory } from './layer';
 import { LambdaFactory } from './lambda';
 import { CognitoFactory } from './cognito';
@@ -8,6 +8,7 @@ import { ApiFactory } from './api';
 import { SetupFactory } from './setup';
 import { UsersFactory } from './users';
 import { WhatsAppFactory } from './whatsapp';
+import { AgentFactory } from './agent';
 
 interface MainStackProps extends cdk.StackProps {
   env: EnvironmentConfig;
@@ -16,6 +17,8 @@ interface MainStackProps extends cdk.StackProps {
   whatsapp: WhatsAppConfig;
   /** Wire the /admin/users API of the frontend's Usuarios screen. */
   usersApiEnabled?: boolean;
+  /** The AI agent that answers WhatsApp; unset or runtime none = no agent. */
+  agent?: AgentConfig;
 }
 
 /**
@@ -23,9 +26,9 @@ interface MainStackProps extends cdk.StackProps {
  *
  * Active resources: the python-common layer, the core Lambda functions
  * (authorizer, not-found), Cognito (with optional Microsoft Entra ID and Google
- * sign-in), the REST API, and the WhatsApp and Users modules that register
- * their own routes on it. The authorizer receives the Cognito ids after the
- * user pool is created.
+ * sign-in), the REST API, the WhatsApp and Users modules that register their
+ * own routes on it, and the optional AI agent that answers WhatsApp. The
+ * authorizer receives the Cognito ids after the user pool is created.
  *
  * The remaining service constructs under lib/construct stay as generic,
  * reusable building blocks and are wired in as the backend grows.
@@ -34,7 +37,7 @@ export class MainStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: MainStackProps) {
     super(scope, id, props);
 
-    const { params, cognito, whatsapp, usersApiEnabled } = props;
+    const { params, cognito, whatsapp, usersApiEnabled, agent } = props;
     const { envName, projectName } = params;
 
     const layerFactory = new LayerFactory(this, 'LayerFactory', { params });
@@ -49,13 +52,22 @@ export class MainStack extends cdk.Stack {
     // exist after the user pool is created.
     new SetupFactory(this, 'SetupFactory', { lambdaFactory, cognitoFactory });
 
-    new WhatsAppFactory(this, 'WhatsAppFactory', {
+    const whatsappFactory = new WhatsAppFactory(this, 'WhatsAppFactory', {
       params,
       whatsapp,
       layerFactory,
       cognitoFactory,
       apiFactory,
     });
+
+    if (agent && agent.runtime !== 'none') {
+      new AgentFactory(this, 'AgentFactory', {
+        params,
+        agent,
+        adminGroup: whatsapp.adminGroup,
+        whatsappFactory,
+      });
+    }
 
     if (usersApiEnabled) {
       new UsersFactory(this, 'UsersFactory', {

@@ -139,11 +139,23 @@ def search_conversations(raw: str, limit: int = SEARCH_RESULTS_LIMIT) -> list[di
     return items[:limit]
 
 
+# Bookkeeping of the inbox and the AI agent the web does not need.
+INTERNAL_KEYS = (
+    "search_key",
+    "inbox",
+    "agent_turn_hour",
+    "agent_turns",
+    "agent_rate_notice_hour",
+    "agent_blocked_since",
+    "agent_blocked_count",
+)
+
+
 def conversation_view(item: dict | None) -> dict:
     """A conversation as the web gets it: ``unreadCount`` as a number, no internals."""
     if not item:
         return {}
-    view = {key: value for key, value in item.items() if key not in ("search_key", "inbox")}
+    view = {key: value for key, value in item.items() if key not in INTERNAL_KEYS}
     try:
         view["unreadCount"] = max(int(item.get("unread_count") or 0), 0)
     except (TypeError, ValueError):

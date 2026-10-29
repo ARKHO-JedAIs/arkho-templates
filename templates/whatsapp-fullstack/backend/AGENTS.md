@@ -96,6 +96,22 @@ this file - do not fork content into the bootstraps.
    registers its own routes. Every successful change logs one JSON audit line
    (acting admin, action, target, roles; never a password); CloudTrail also
    records the Cognito `Admin*` calls.
+7. **Agent** (`AgentFactory`, `lib/stack/agent`) - wired only when
+   `AGENT_RUNTIME` is `agentcore` or `lambda` (`none` or unset creates no agent
+   resource and ws-handler keeps the fixed auto-reply). The agent's code is
+   `agent/` (its own Dockerfile, ARM64); it runs on Bedrock AgentCore Runtime
+   (`AgentCoreRuntimeConstruct`, X-Ray tracing) or as a container Lambda of the
+   same image with the command `lambda_handler.handler`. Around it: the
+   `agent-prompt` Parameter Store parameter (base prompt and on/off switch;
+   CloudFormation only rewrites it when its seed changes, so console edits
+   survive deploys), AgentCore Memory (`AgentCoreMemoryConstruct`, strategies by
+   `AGENT_MEMORY_MODE`, 30 days, retained in prod), the `agent-jobs.fifo` queue
+   (+ DLQ) and the `whatsapp-agent-worker` Lambda (added through
+   `WhatsAppFactory.addFunction`, batch size 1, maximum concurrency 10).
+   ws-handler queues customer messages (rate limit per customer and hour) and
+   the worker invokes the agent and replies; helpers in
+   `common/whatsapp/agent.py`. Bedrock IAM is scoped to `AGENT_MODEL_ID` only
+   (its inference profile plus the foundation model through it).
 
 **Add every new route in `ApiFactory` (`lib/stack/api`)**, so the URL surface
 stays in one place; `RestApiConstruct` stays generic. Two ordering constraints
@@ -129,7 +145,9 @@ without a reason.
     /setup              # Active: post-creation wiring (authorizer <- Cognito ids)
     /whatsapp           # Active: WhatsApp module (own Lambdas and routes)
     /users              # Active when USERS_API_ENABLED: Usuarios API
+    /agent              # Active when AGENT_RUNTIME != none: AI agent
     /shared/util        # Environment config + helpers
+/agent                  # AI agent image (Python): AgentCore app + Lambda handler
 /src
   /lambda/core/*        # core functions: authorizer, not-found
   /lambda/whatsapp/*    # WhatsApp functions
@@ -141,7 +159,8 @@ without a reason.
 
 - `lib/construct/*` are generic and parameterized; they do not depend on the
   factories. Available constructs include: cognito, dynamo, s3, lambda, layer,
-  rest-api, sns, appsync, ssm-parameters, glue, plus governance (cloudtrail,
+  rest-api, sns, appsync, ssm-parameters, agentcore-runtime,
+  agentcore-memory, glue, plus governance (cloudtrail,
   guardduty, waf, budget, access-analyzer, github-oidc). Only glue and the
   governance ones are still unwired.
 - `lib/stack/<service>` factories compose constructs into project wiring. Only
@@ -195,6 +214,12 @@ Set in `.env` (gitignored; see `.env.example`):
 - `MEDIA_RETENTION_DAYS`: days the WhatsApp media bucket keeps files (empty =
   forever; validated as a positive integer).
 - `MEDIA_URL_TTL_SECONDS`: lifetime of a presigned media URL (default 900).
+- `AGENT_RUNTIME`: `agentcore`, `lambda` or `none` (unset = `none`).
+- `AGENT_MODEL_ID`: Bedrock model or inference profile id the agent uses.
+- `AGENT_BUSINESS_DESCRIPTION`: seeds the agent's base prompt (max 500).
+- `AGENT_MEMORY_MODE`: `off`, `conversation`, `facts`, `facts_summaries`.
+- `AGENT_RATE_LIMIT_PER_HOUR`: agent replies per customer per hour (1-9999).
+- `AGENT_BUSINESS_API_URL`: optional https URL the agent's tools may call.
 
 ## Workflow (Spec Kit)
 

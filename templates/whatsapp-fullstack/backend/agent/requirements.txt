@@ -1,0 +1,4 @@
+bedrock-agentcore[strands-agents]==1.21.0
+strands-agents==1.52.0
+boto3==1.43.122
+tzdata==2026.6

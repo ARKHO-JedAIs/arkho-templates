@@ -37,7 +37,8 @@ const SCHEMA_FILE = 'src/graphql/schema.graphql';
 // admin group when one is configured.
 const SUBSCRIBERS_MARKER = '@aws_cognito_user_pools # subscribers';
 const CONFIGURATION_KEY = 'whatsappConfiguration';
-const PUBLISH_EVENT_FIELD = 'publishEvent';
+/** The AppSync mutation every WhatsApp event goes through. */
+export const PUBLISH_EVENT_FIELD = 'publishEvent';
 
 /** Index of the conversations by recency: every item carries inbox = "all". */
 export const INBOX_INDEX = 'by-recent';
@@ -66,7 +67,8 @@ const RESOLVER_RESPONSE = `
 $util.toJson($ctx.result)
 `;
 
-interface WhatsAppFunction {
+/** One Lambda of the module, from its folder under src/lambda/whatsapp. */
+export interface WhatsAppFunction {
   name: string;
   description: string;
   routes?: { path: string; method: string }[];
@@ -153,6 +155,15 @@ export class WhatsAppFactory extends Construct {
   public readonly eventsApi: AppSyncConstruct;
   public readonly mediaBucket: S3Construct;
   public readonly functions: Record<string, LambdaConstruct> = {};
+  /** The whatsapp-configuration parameter (phone number id, WABA, auto reply). */
+  public readonly parameters: SsmParametersConstruct;
+
+  private readonly prefix: string;
+  private readonly whatsapp: WhatsAppConfig;
+  private readonly layerFactory: LayerFactory;
+  private readonly apiFactory: ApiFactory;
+  private readonly logging: { logRetention: RetentionDays; removalPolicy: RemovalPolicy };
+  private readonly statements: Record<'send' | 'getMedia' | 'postMedia' | 'templates' | 'manageTemplates', iam.PolicyStatement>;
 
   constructor(scope: Construct, id: string, props: WhatsAppFactoryProps) {
     super(scope, id);
@@ -161,6 +172,10 @@ export class WhatsAppFactory extends Construct {
     const { envName, projectName, isProd } = params;
     const { account, partition, region } = Stack.of(this);
     const prefix = `${projectName}-${envName}`;
+    this.prefix = prefix;
+    this.whatsapp = whatsapp;
+    this.layerFactory = layerFactory;
+    this.apiFactory = apiFactory;
 
     this.conversationsTable = new DynamoConstruct(this, 'ConversationsTable', {
       params,
@@ -196,7 +211,7 @@ export class WhatsAppFactory extends Construct {
     });
 
     // The keys are the ones src/layer/.../common/whatsapp/config.py reads.
-    const parameters = new SsmParametersConstruct(this, 'Parameters', {
+    const parameters = (this.parameters = new SsmParametersConstruct(this, 'Parameters', {
       params,
       parameterConfigs: [
         {
@@ -214,7 +229,7 @@ export class WhatsAppFactory extends Construct {
           description: 'WhatsApp configuration: phone number id, WABA id, default prefix, auto reply',
         },
       ],
-    });
+    }));
 
     this.eventsApi = new AppSyncConstruct(this, 'EventsApi', {
       params,
@@ -287,7 +302,7 @@ export class WhatsAppFactory extends Construct {
       })
     );
 
-    const logging = {
+    this.logging = {
       logRetention: RetentionDays.ONE_MONTH,
       removalPolicy: isProd ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
     };
@@ -322,49 +337,16 @@ export class WhatsAppFactory extends Construct {
       resources: [`arn:${partition}:social-messaging:${region}:${account}:waba/*`],
     });
 
+    this.statements = {
+      send: sendStatement,
+      getMedia: getMediaStatement,
+      postMedia: postMediaStatement,
+      templates: templatesStatement,
+      manageTemplates: manageTemplatesStatement,
+    };
+
     for (const definition of FUNCTIONS) {
-      const fn = new LambdaConstruct(this, `${definition.name}-lambda`, {
-        functionName: `${prefix}-whatsapp-${definition.name}`,
-        description: definition.description,
-        code: Code.fromAsset(`src/lambda/whatsapp/${definition.name}`),
-        handler: 'index.handler',
-        runtime: PYTHON_RUNTIME,
-        layers: [layerFactory.pythonCommonLayer.layer],
-        timeout: Duration.seconds(definition.timeoutSeconds ?? 30),
-        environment: {
-          WHATSAPP_CONVERSATIONS_TABLE_NAME: this.conversationsTable.tableName,
-          WHATSAPP_MESSAGES_TABLE_NAME: this.messagesTable.tableName,
-          WHATSAPP_CONFIGURATION_PARAMETER_NAME: parameters.getParameterName(CONFIGURATION_KEY),
-          WHATSAPP_ADMIN_GROUP: whatsapp.adminGroup,
-          APPSYNC_GRAPHQL_URL: this.eventsApi.graphqlUrl,
-          ...(definition.media
-            ? {
-                WHATSAPP_MEDIA_BUCKET_NAME: this.mediaBucket.bucketName,
-                MEDIA_URL_TTL_SECONDS: String(whatsapp.mediaUrlTtlSeconds ?? DEFAULT_MEDIA_URL_TTL_SECONDS),
-              }
-            : {}),
-        },
-        logging,
-      });
-      this.functions[definition.name] = fn;
-
-      if (definition.tables === 'write') {
-        this.conversationsTable.table.grantReadWriteData(fn.function);
-        this.messagesTable.table.grantReadWriteData(fn.function);
-      } else {
-        this.conversationsTable.table.grantReadData(fn.function);
-        this.messagesTable.table.grantReadData(fn.function);
-      }
-      parameters.grantRead(fn.function, CONFIGURATION_KEY);
-      this.eventsApi.grantMutation(fn.function, PUBLISH_EVENT_FIELD);
-      if (definition.sends) fn.function.addToRolePolicy(sendStatement);
-      if (definition.readsTemplates) fn.function.addToRolePolicy(templatesStatement);
-      if (definition.managesTemplates) fn.function.addToRolePolicy(manageTemplatesStatement);
-      this.grantMedia(fn, definition.media, getMediaStatement, postMediaStatement);
-
-      for (const route of definition.routes ?? []) {
-        apiFactory.restApi.addRoute({ path: route.path, method: route.method, lambda: fn.function });
-      }
+      this.addFunction(definition);
     }
 
     // SNS invokes the ws-handler asynchronously: a raised error makes Lambda
@@ -431,6 +413,59 @@ export class WhatsAppFactory extends Construct {
       description: 'Inbound WhatsApp notifications that failed after the retries',
       exportName: `${prefix}-WhatsAppDeadLetterQueueUrl`,
     });
+  }
+
+  /**
+   * One more Lambda of the module, named `<prefix>-whatsapp-<name>`, with the
+   * same environment and grants as the built-in ones plus `environment`. Other
+   * modules (the AI agent's worker) use it to live next to the inbox code.
+   */
+  public addFunction(definition: WhatsAppFunction, environment: Record<string, string> = {}): LambdaConstruct {
+    const { whatsapp } = this;
+    const fn = new LambdaConstruct(this, `${definition.name}-lambda`, {
+      functionName: `${this.prefix}-whatsapp-${definition.name}`,
+      description: definition.description,
+      code: Code.fromAsset(`src/lambda/whatsapp/${definition.name}`),
+      handler: 'index.handler',
+      runtime: PYTHON_RUNTIME,
+      layers: [this.layerFactory.pythonCommonLayer.layer],
+      timeout: Duration.seconds(definition.timeoutSeconds ?? 30),
+      environment: {
+        WHATSAPP_CONVERSATIONS_TABLE_NAME: this.conversationsTable.tableName,
+        WHATSAPP_MESSAGES_TABLE_NAME: this.messagesTable.tableName,
+        WHATSAPP_CONFIGURATION_PARAMETER_NAME: this.parameters.getParameterName(CONFIGURATION_KEY),
+        WHATSAPP_ADMIN_GROUP: whatsapp.adminGroup,
+        APPSYNC_GRAPHQL_URL: this.eventsApi.graphqlUrl,
+        ...(definition.media
+          ? {
+              WHATSAPP_MEDIA_BUCKET_NAME: this.mediaBucket.bucketName,
+              MEDIA_URL_TTL_SECONDS: String(whatsapp.mediaUrlTtlSeconds ?? DEFAULT_MEDIA_URL_TTL_SECONDS),
+            }
+          : {}),
+        ...environment,
+      },
+      logging: this.logging,
+    });
+    this.functions[definition.name] = fn;
+
+    if (definition.tables === 'write') {
+      this.conversationsTable.table.grantReadWriteData(fn.function);
+      this.messagesTable.table.grantReadWriteData(fn.function);
+    } else {
+      this.conversationsTable.table.grantReadData(fn.function);
+      this.messagesTable.table.grantReadData(fn.function);
+    }
+    this.parameters.grantRead(fn.function, CONFIGURATION_KEY);
+    this.eventsApi.grantMutation(fn.function, PUBLISH_EVENT_FIELD);
+    if (definition.sends) fn.function.addToRolePolicy(this.statements.send);
+    if (definition.readsTemplates) fn.function.addToRolePolicy(this.statements.templates);
+    if (definition.managesTemplates) fn.function.addToRolePolicy(this.statements.manageTemplates);
+    this.grantMedia(fn, definition.media, this.statements.getMedia, this.statements.postMedia);
+
+    for (const route of definition.routes ?? []) {
+      this.apiFactory.restApi.addRoute({ path: route.path, method: route.method, lambda: fn.function });
+    }
+    return fn;
   }
 
   /**

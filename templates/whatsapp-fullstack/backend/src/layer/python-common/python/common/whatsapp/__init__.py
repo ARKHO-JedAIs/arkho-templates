@@ -17,4 +17,5 @@ Split by concern so each function imports only what it uses:
   template header samples
 * ``realtime``  - publishing events to AppSync
 * ``http``      - request parsing shared by the API handlers
+* ``agent``     - the AI agent's queue, rate limit, sessions and handoff
 """

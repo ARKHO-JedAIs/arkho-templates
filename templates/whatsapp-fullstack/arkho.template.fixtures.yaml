@@ -1,9 +1,10 @@
 # Deterministic answers for `arkho-cli template validate --full`.
 # Author-facing tooling only - never copied into a generated project.
 #
-# The WIDEST shape: backend and frontend, WhatsApp ids set, Cognito auth and the
-# optional user-management screen. Narrower answers only remove files, so they
-# cannot introduce a token this run would miss.
+# The WIDEST shape: backend and frontend, WhatsApp ids set, the AgentCore agent
+# with every memory strategy, Cognito auth and the optional user-management
+# screen. Narrower answers only remove files, so they cannot introduce a token
+# this run would miss.
 schemaVersion: 1
 
 answers:
@@ -18,6 +19,12 @@ answers:
   default_phone_prefix: "56"
   auto_reply_message: Gracias por escribirnos, en breve te respondemos.
   media_retention_days: "90"
+
+  agent_runtime: agentcore
+  agent_model: us.anthropic.claude-sonnet-4-6
+  agent_business_description: Tienda de muebles en Santiago; despachos a todo Chile y retiro en tienda.
+  agent_memory: facts_summaries
+  agent_rate_limit_per_hour: "30"
 
   package_manager: npm
   brand_color: "#E30613"

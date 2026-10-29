@@ -263,6 +263,9 @@ function eventText(message: ChatMessage): string {
   const event = message.event;
   if (event?.kind === 'human_takeover') return `${event.by || 'Una persona'} tomó la conversación`;
   if (event?.kind === 'assistant_resumed') return 'El Agente IA retomó la conversación';
+  if (event?.kind === 'agent_handoff') return 'El Agente IA pasó la conversación a una persona';
+  if (event?.kind === 'agent_failed')
+    return 'El Agente IA no pudo responder: atiende tú esta conversación';
   return message.text || 'Aviso';
 }
 

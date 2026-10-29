@@ -11,7 +11,9 @@ The WABA publishes every webhook notification to the ws-handler SNS topic
 4. announces both on AppSync so the front shows them live,
 5. marks it as read,
 6. answers it, unless a person took the conversation over from the web or the
-   message is not customer content (``AUTO_REPLY_TYPES``).
+   message is not customer content (``AUTO_REPLY_TYPES``): with the AI agent
+   deployed and switched on, the message is queued for agent-worker (which
+   replies on its own); otherwise the fixed automatic reply is sent.
 
 A reaction is not a message: it is attached to the message it reacts to (an
 empty emoji removes it). Delivery statuses of what we sent are recorded on the
@@ -24,8 +26,9 @@ recognised by its WhatsApp id and skipped.
 
 Seams for an agent:
 
-* ``answer`` returns the configured automatic reply (or nothing); replace it
-  with a call to your model or agent runtime.
+* ``answer`` decides the reply: it hands the message to the AI agent
+  (``common.whatsapp.agent``, AGENT_RUNTIME agentcore or lambda) or returns the
+  configured automatic reply (or nothing).
 * ``after_media_stored`` runs once a file is in the bucket; transcribe voice
   notes there (Amazon Transcribe over ``media["key"]``, as midoc does) if an
   agent must read them. Not included: it needs its own IAM, timeout and cost.
@@ -34,7 +37,7 @@ import json
 from traceback import format_exc
 
 from common import get_logger
-from common.whatsapp import config, media, messaging, realtime, store
+from common.whatsapp import agent, config, media, messaging, realtime, store
 
 logger = get_logger(__name__)
 
@@ -356,11 +359,43 @@ def after_media_stored(item: dict) -> None:
     """Hook for work over a stored file, e.g. transcribing a voice note. No-op."""
 
 
-def answer(conversation: dict, text: str) -> str:
-    """The automatic reply to ``text``; empty means do not reply.
+def hand_to_agent(message: dict, origination_phone_number_id: str) -> str:
+    """Queues ``message`` for agent-worker, within the customer's hourly limit.
 
-    Replace this with your agent (Bedrock, AgentCore, ...) when you add one.
+    Returns what to send right now: nothing, or once per hour the notice that
+    the customer is writing faster than the agent may answer.
     """
+    phone = message["phone"]
+    if not agent.take_turn(phone):
+        logger.info("Agent rate limit reached for %s", phone[-4:])
+        return agent.RATE_LIMITED_TEXT if agent.claim_rate_notice(phone) else ""
+    agent.enqueue(
+        {
+            "phone": phone,
+            "message_id": message["message_id"],
+            "text": message["text"],
+            "user_name": message["name"],
+            "session_id": agent.session_id(phone),
+            "actor_id": agent.actor_id(phone),
+            "origination_phone_number_id": origination_phone_number_id,
+        }
+    )
+    return ""
+
+
+def answer(conversation: dict, message: dict, origination_phone_number_id: str) -> str:
+    """The reply to send now; empty means do not reply (or the agent will).
+
+    With the AI agent deployed and switched on, the message goes to the agent;
+    otherwise, or when it cannot be queued, the configured automatic reply
+    answers.
+    """
+    if agent.configured() and agent.enabled():
+        try:
+            return hand_to_agent(message, origination_phone_number_id)
+        except Exception:  # noqa: BLE001
+            logger.error("Could not hand the message to the agent")
+            logger.error(format_exc())
     return config.auto_reply_message()
 
 
@@ -418,7 +453,7 @@ def handle_message(message: dict, origination_phone_number_id: str) -> None:
     # The message is stored: from here on a failure must not fail the
     # invocation, or the retry would skip it as a duplicate and never answer.
     try:
-        reply = answer(conversation, message["text"])
+        reply = answer(conversation, message, origination_phone_number_id)
         if not reply:
             return
         message_id = messaging.send_text(phone, reply, origination_phone_number_id)

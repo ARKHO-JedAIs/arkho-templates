@@ -97,6 +97,21 @@ Auto-reply: only the types marked "auto-reply" below trigger `answer`
 (`AUTO_REPLY_TYPES` in ws-handler). Every stored inbound message except
 `system` opens the 24 hour window.
 
+With the AI agent deployed (`AGENT_RUNTIME` agentcore or lambda) and switched
+on (`enabled` in the agent-prompt parameter), `answer` queues the same types on
+the `agent-jobs` FIFO queue instead of sending the fixed reply:
+`{phone, message_id, text, user_name, session_id, actor_id,
+origination_phone_number_id}`, where `text` is the stored readable `message`
+(media arrives as its placeholder plus caption, e.g. `[Audio]`, until a
+transcription is added in `after_media_stored`). `agent-worker` invokes the
+agent and sends its reply as an outbound text with `sent_by: agent`; when it
+hands the conversation to a person it stores an internal notice with
+`payload.kind` `agent_handoff` (third off-topic turn in 24 hours) or
+`agent_failed` (the agent could not answer) and publishes `CONTROL_CHANGED`
+and `CONVERSATION_EVENT` like a takeover from the web. Over
+`AGENT_RATE_LIMIT_PER_HOUR` per customer the agent is not called and one
+notice per hour is sent instead (`sent_by: assistant`).
+
 | `type` | Key fields | Media | Template today | Recommended handling |
 | --- | --- | --- | --- | --- |
 | `text` | `text.body` | no | handled: `type: text`, `message` = body; `reply_to`, `referral` kept; auto-reply | - |

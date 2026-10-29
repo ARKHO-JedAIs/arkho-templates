@@ -29,6 +29,8 @@ def install_aws_stubs() -> None:
     auth.SigV4Auth = mock.MagicMock()
     awsrequest = types.ModuleType("botocore.awsrequest")
     awsrequest.AWSRequest = mock.MagicMock()
+    botocore_config = types.ModuleType("botocore.config")
+    botocore_config.Config = mock.MagicMock()
     exceptions = types.ModuleType("botocore.exceptions")
     exceptions.ClientError = type("ClientError", (Exception,), {})
     sys.modules.update(
@@ -39,6 +41,7 @@ def install_aws_stubs() -> None:
             "botocore": botocore,
             "botocore.auth": auth,
             "botocore.awsrequest": awsrequest,
+            "botocore.config": botocore_config,
             "botocore.exceptions": exceptions,
         }
     )
@@ -47,7 +50,7 @@ def install_aws_stubs() -> None:
 install_aws_stubs()
 sys.path.insert(0, str(ROOT / "src" / "layer" / "python-common" / "python"))
 
-from common.whatsapp import config, http, media, messaging, realtime, store  # noqa: E402
+from common.whatsapp import agent, config, http, media, messaging, realtime, store  # noqa: E402
 
 spec = importlib.util.spec_from_file_location(
     "ws_handler", ROOT / "src" / "lambda" / "whatsapp" / "ws-handler" / "index.py"
