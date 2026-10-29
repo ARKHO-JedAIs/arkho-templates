@@ -48,24 +48,27 @@ describe('sortSections', () => {
 // asserts that any exist: a project generated with neither chat nor users admin
 // is a valid build with an empty registry.
 describe('the section registry', () => {
-  it('gives every section an absolute path', () => {
-    for (const section of sections) {
-      expect(section.path.startsWith('/')).toBe(true);
+  // Every routed page: each section's own, plus its extra `routes`.
+  const pages = sections.flatMap(section => [section, ...(section.routes ?? [])]);
+
+  it('gives every section and extra page an absolute path', () => {
+    for (const page of pages) {
+      expect(page.path.startsWith('/')).toBe(true);
     }
   });
 
-  // Two sections on the same path collide in the router with no build error and
+  // Two pages on the same path collide in the router with no build error and
   // a confusing runtime result. This is the only place that catches it.
   it('has no duplicate paths', () => {
-    const paths = sections.map(s => s.path);
+    const paths = pages.map(page => page.path);
     expect(new Set(paths).size).toBe(paths.length);
   });
 
   // Guards the code-splitting invariant: `load` must stay a function, because a
   // section that imports its page statically silently rebuilds the monolith.
-  it('exposes load as a function on every section', () => {
-    for (const section of sections) {
-      expect(typeof section.load).toBe('function');
+  it('exposes load as a function on every section and extra page', () => {
+    for (const page of pages) {
+      expect(typeof page.load).toBe('function');
     }
   });
 });

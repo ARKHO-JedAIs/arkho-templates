@@ -1,4 +1,12 @@
-import { ExternalLink, Phone, Reply } from 'lucide-react';
+import {
+  Copy,
+  ExternalLink,
+  FileText,
+  Image as ImageIcon,
+  Phone,
+  Reply,
+  Video,
+} from 'lucide-react';
 import { templateSegments } from '@/features/whatsapp/services/mappers';
 import type { TemplateButton, WhatsAppTemplate } from '@/features/whatsapp/types';
 import { cn } from '@/lib/utils';
@@ -36,7 +44,27 @@ const BUTTON_ICON: Record<string, typeof Reply> = {
   QUICK_REPLY: Reply,
   URL: ExternalLink,
   PHONE_NUMBER: Phone,
+  COPY_CODE: Copy,
 };
+
+/** A media header the template will carry; the file itself is chosen when sending. */
+export type PreviewMedia = 'IMAGE' | 'VIDEO' | 'DOCUMENT';
+
+const MEDIA: Record<PreviewMedia, { icon: typeof Reply; label: string }> = {
+  IMAGE: { icon: ImageIcon, label: 'Imagen' },
+  VIDEO: { icon: Video, label: 'Video' },
+  DOCUMENT: { icon: FileText, label: 'Documento' },
+};
+
+function MediaPlaceholder({ media }: { media: PreviewMedia }) {
+  const { icon: Icon, label } = MEDIA[media];
+  return (
+    <div className='mb-2 flex aspect-[16/9] flex-col items-center justify-center gap-1 rounded-md bg-muted text-foreground-secondary'>
+      <Icon className='h-6 w-6' aria-hidden />
+      <span className='text-xs font-medium'>{label}</span>
+    </div>
+  );
+}
 
 function PreviewButton({ button }: { button: TemplateButton }) {
   const Icon = BUTTON_ICON[button.type] ?? Reply;
@@ -48,12 +76,22 @@ function PreviewButton({ button }: { button: TemplateButton }) {
   );
 }
 
-/** The template as the contact would see it in WhatsApp, with its variables highlighted. */
-export function TemplatePreview({ template }: { template: WhatsAppTemplate }) {
+/**
+ * The template as the contact would see it in WhatsApp, with its variables
+ * highlighted. `media` draws a placeholder for an image, video or document header.
+ */
+export function TemplatePreview({
+  template,
+  media,
+}: {
+  template: WhatsAppTemplate;
+  media?: PreviewMedia;
+}) {
   return (
     <div className='chat-wallpaper rounded-xl border border-border p-4'>
       <div className='max-w-[19rem]'>
         <div className='rounded-lg rounded-tl-none bg-card px-3 py-2 text-sm leading-relaxed text-foreground shadow-sm'>
+          {media ? <MediaPlaceholder media={media} /> : null}
           {template.header ? (
             <p className='mb-1 font-bold'>
               <RichText text={template.header} />

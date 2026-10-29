@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from '@tanstack/react-router';
+import { Link, useNavigate } from '@tanstack/react-router';
 import { FileText, Loader2, Plus, RefreshCw, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   WhatsAppAuthError,
   fetchTemplates,
@@ -13,6 +12,7 @@ import type { WhatsAppTemplate } from '@/features/whatsapp/types';
 import { cn } from '@/lib/utils';
 import { QualityLabel, StatusBadge } from './components/StatusBadge';
 import { TemplateDetailSheet } from './components/TemplateDetailSheet';
+import { TEMPLATE_PATHS } from './paths';
 import {
   STATUS_META,
   STATUS_ORDER,
@@ -31,7 +31,8 @@ const FILTERS: { value: StatusFilter; label: string }[] = [
 
 /**
  * The account's WhatsApp message templates and where each one stands in Meta's
- * review. Read-only for now: templates are created and edited in Meta.
+ * review. "Agregar plantilla" opens the creator (a frontend preview for now);
+ * editing still happens in Meta.
  */
 export function TemplatesPage() {
   const navigate = useNavigate();
@@ -98,24 +99,12 @@ export function TemplatesPage() {
           >
             <RefreshCw className={cn('h-[18px] w-[18px]', loading && 'animate-spin')} aria-hidden />
           </Button>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              {/* aria-disabled, not disabled: a disabled button gets no pointer
-                  or focus events, so its tooltip could never be read. */}
-              <Button
-                aria-disabled='true'
-                aria-describedby='templates-create-soon'
-                onClick={event => event.preventDefault()}
-                className='h-11 cursor-not-allowed rounded-[10px] bg-btn-default-disabled font-semibold text-btn-default-disabled-text hover:bg-btn-default-disabled active:bg-btn-default-disabled'
-              >
-                <Plus className='h-4 w-4' aria-hidden />
-                Agregar plantilla
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent id='templates-create-soon' side='bottom'>
-              Próximamente: crear plantillas desde aquí
-            </TooltipContent>
-          </Tooltip>
+          <Button asChild className='h-11 rounded-[10px] font-semibold'>
+            <Link to={TEMPLATE_PATHS.create}>
+              <Plus className='h-4 w-4' aria-hidden />
+              Agregar plantilla
+            </Link>
+          </Button>
         </div>
       </div>
 

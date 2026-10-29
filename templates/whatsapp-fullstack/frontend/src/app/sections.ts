@@ -7,6 +7,17 @@ import type { ComponentType, FunctionComponent } from 'react';
 export type SectionIcon = ComponentType<{ className?: string }>;
 
 /**
+ * A page of a section that has no sidebar entry of its own, such as a creation
+ * form reached from the section's main page. It shares the section's guard.
+ */
+export interface SectionRoute {
+  /** Absolute path, e.g. `/settings/templates/new`. Must be unique across the app. */
+  path: string;
+  /** Loads the page lazily, exactly like `AppSection.load`. */
+  load: () => Promise<{ default: FunctionComponent }>;
+}
+
+/**
  * One optional area of the app: a route, its sidebar entry, and who may see it.
  *
  * A section declares itself by exporting `section` from
@@ -38,6 +49,11 @@ export interface AppSection {
    * then collapses to `never`.
    */
   load: () => Promise<{ default: FunctionComponent }>;
+  /**
+   * Extra pages without a sidebar entry. Prefix them with `path` so the
+   * section's sidebar link stays highlighted on them.
+   */
+  routes?: SectionRoute[];
   /** Restrict both the route and the sidebar entry to admins. */
   requiresAdmin?: boolean;
   /** Sidebar ordering; lower comes first. Defaults to 100. */

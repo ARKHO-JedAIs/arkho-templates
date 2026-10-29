@@ -38,13 +38,16 @@ const homeRoute = createRoute({
 
 // One route per discovered section. Adding a section is creating its folder;
 // removing one is deleting it. Neither touches this file.
-const sectionRoutes = sections.map(section =>
-  createRoute({
-    getParentRoute: () => appRoute,
-    path: section.path,
-    component: lazyRouteComponent(section.load),
-    beforeLoad: section.requiresAdmin ? requireAdmin : requireAuth,
-  })
+// A section's extra pages (`routes`) are siblings with the same guard.
+const sectionRoutes = sections.flatMap(section =>
+  [{ path: section.path, load: section.load }, ...(section.routes ?? [])].map(page =>
+    createRoute({
+      getParentRoute: () => appRoute,
+      path: page.path,
+      component: lazyRouteComponent(page.load),
+      beforeLoad: section.requiresAdmin ? requireAdmin : requireAuth,
+    })
+  )
 );
 
 const routeTree = rootRoute.addChildren([

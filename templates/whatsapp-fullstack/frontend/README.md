@@ -89,6 +89,9 @@ removing one is deleting it** — neither touches the router. That is why a
 project generated without the user-management screen has no admin code, no
 admin route and no dangling import, rather than a hidden feature flag.
 
+A section can also declare `routes`: extra pages with no sidebar entry (such
+as `/settings/templates/new`), registered with the section's guard.
+
 Sections that set the same `group` (e.g. `group: 'Configuración'`) render in
 the sidebar as one collapsible entry with a sub-item each; it opens by itself
 when one of its routes is active. Admin filtering runs per section, so a group
@@ -132,6 +135,12 @@ Under `VITE_AUTH_PROVIDER=mock` the section runs on in-memory demo data
 lists every message template from `GET /whatsapp/templates` with its Meta
 review status, quality, a WhatsApp-like preview and its variables. The send
 dialog in the inbox offers only the `APPROVED` ones.
+
+"Agregar plantilla" opens `/settings/templates/new`, a frontend-only preview of
+creating a template: the form, a live preview and Meta's rules checked as you
+type (`templateRules.ts` holds the limits, `validateTemplate.ts` checks them).
+There is no create endpoint yet: under mock auth "Enviar a revisión" adds the
+template to the demo list as `PENDING`; otherwise the button stays disabled.
 
 ## Theming
 

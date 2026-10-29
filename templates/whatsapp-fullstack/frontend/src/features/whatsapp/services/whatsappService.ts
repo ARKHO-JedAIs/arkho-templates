@@ -4,6 +4,7 @@ import type {
   ChatMessage,
   ControlMode,
   Conversation,
+  CreateTemplateInput,
   SendTemplateInput,
   WhatsAppTemplate,
 } from '../types';
@@ -80,6 +81,19 @@ export async function fetchTemplates(): Promise<WhatsAppTemplate[]> {
         'No se pudieron cargar las plantillas'
       );
   return (data ?? []).flatMap(item => toTemplate(item) ?? []);
+}
+
+/**
+ * Creating templates is a preview for now: it works on the demo data only,
+ * because the backend has no create endpoint yet.
+ */
+export const canCreateTemplates = usingDemoData;
+
+export async function createTemplate(input: CreateTemplateInput): Promise<WhatsAppTemplate | null> {
+  if (!canCreateTemplates) {
+    throw new Error('Crear plantillas requiere el backend de creación (próximo paso).');
+  }
+  return toTemplate(await mockWhatsApp.createTemplate(input));
 }
 
 export async function sendTemplate(input: SendTemplateInput): Promise<ChatMessage | null> {

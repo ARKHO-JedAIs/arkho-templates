@@ -1,4 +1,10 @@
-import type { ChatMessage, ControlMode, Conversation, SendTemplateInput } from '../types';
+import type {
+  ChatMessage,
+  ControlMode,
+  Conversation,
+  CreateTemplateInput,
+  SendTemplateInput,
+} from '../types';
 import { publishDemoEvent } from '../realtime';
 
 /**
@@ -151,7 +157,7 @@ const messages = new Map<string, ChatMessage[]>([
  * This file is excluded from the generator's token substitution, which is why
  * WhatsApp's double-brace variables can be written here literally.
  */
-const templates = [
+const templates: Record<string, unknown>[] = [
   {
     name: 'recordatorio_cita',
     language: 'es',
@@ -371,6 +377,25 @@ export const mockWhatsApp = {
   },
 
   templates: (): Promise<unknown[]> => delay(templates),
+
+  /** A new template goes straight to review, as it would in Meta. Gone on reload. */
+  createTemplate: (input: CreateTemplateInput) => {
+    const taken = templates.some(
+      template => template.name === input.name && template.language === input.language
+    );
+    if (taken) {
+      return Promise.reject(new Error('Ya existe una plantilla con ese nombre en ese idioma.'));
+    }
+    const template = {
+      ...input,
+      status: 'PENDING',
+      qualityScore: 'UNKNOWN',
+      metaTemplateId: null,
+      variables: input.variableNames.length,
+    };
+    templates.unshift(template);
+    return delay(template);
+  },
 
   sendTemplate: (input: SendTemplateInput) => {
     const message: ChatMessage = {

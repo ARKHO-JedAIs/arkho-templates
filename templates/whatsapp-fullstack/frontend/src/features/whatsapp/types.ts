@@ -80,3 +80,19 @@ export interface SendTemplateInput {
   language: string;
   parameters: string[];
 }
+
+/**
+ * A new template as the creator submits it, in the shape `GET /whatsapp/templates`
+ * returns, so the demo list can hold it as is. There is no create endpoint yet.
+ */
+export interface CreateTemplateInput {
+  name: string;
+  language: string;
+  category: string;
+  header: string | null;
+  body: string;
+  footer: string | null;
+  buttons: TemplateButton[];
+  variableNames: string[];
+  parameterFormat: 'POSITIONAL' | 'NAMED';
+}
