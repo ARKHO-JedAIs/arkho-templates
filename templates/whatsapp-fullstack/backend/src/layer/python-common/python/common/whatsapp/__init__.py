@@ -9,8 +9,12 @@ Split by concern so each function imports only what it uses:
 
 * ``config``    - the WhatsApp configuration parameter (ids, prefix, auto reply)
 * ``store``     - the conversations and messages tables
-* ``messaging`` - sending text, media and templates, listing templates
-* ``media``     - the media bucket: downloads, uploads and presigned URLs
+* ``messaging`` - sending text, media and templates; listing, creating,
+  editing and deleting templates
+* ``templates`` - checking a template against Meta's rules and building its
+  definition
+* ``media``     - the media bucket: downloads, uploads, presigned URLs and
+  template header samples
 * ``realtime``  - publishing events to AppSync
 * ``http``      - request parsing shared by the API handlers
 """

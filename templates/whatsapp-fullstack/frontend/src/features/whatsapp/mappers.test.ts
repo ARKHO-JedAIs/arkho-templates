@@ -2,17 +2,20 @@ import { describe, expect, it } from 'vitest';
 import {
   AVATAR_TONES,
   avatarTone,
+  fillTemplate,
   filterConversations,
   initials,
   isSendable,
   isWindowOpen,
   mergeMessages,
+  templateNeeds,
   templateParts,
   templateSegments,
   templateVariableNames,
   toChatMessage,
   toConversation,
   toTemplate,
+  totalUnread,
   upsertConversation,
   windowHoursLeft,
 } from './services/mappers';
@@ -195,6 +198,47 @@ describe('filterConversations', () => {
     expect(phones('', 'closed')).toEqual(['56922222222']);
     expect(phones('maria', 'closed')).toEqual([]);
   });
+
+  it('keeps only the conversations with unread messages', () => {
+    const unread = [
+      toConversation({ phone: '1', unreadCount: 2 })!,
+      toConversation({ phone: '2', unread_count: 0 })!,
+    ];
+    expect(filterConversations(unread, '', 'unread', now).map(item => item.phone)).toEqual(['1']);
+  });
+});
+
+describe('unread counters', () => {
+  it('reads the API field, or the stored one from a realtime payload', () => {
+    expect(toConversation({ phone: '1', unreadCount: 3 })!.unreadCount).toBe(3);
+    expect(toConversation({ phone: '1', unread_count: '4' })!.unreadCount).toBe(4);
+    expect(toConversation({ phone: '1' })!.unreadCount).toBe(0);
+    expect(toConversation({ phone: '1', unreadCount: -2 })!.unreadCount).toBe(0);
+  });
+
+  it('adds up the inbox for the tab title', () => {
+    const list = [
+      toConversation({ phone: '1', unreadCount: 2 })!,
+      toConversation({ phone: '2', unreadCount: 5 })!,
+      toConversation({ phone: '3' })!,
+    ];
+    expect(totalUnread(list)).toBe(7);
+  });
+});
+
+describe('inbox notices', () => {
+  it('maps a takeover notice', () => {
+    const message = toChatMessage({
+      phone: '1',
+      date: '2026-10-01T10:06:00.000+00:00',
+      direction: 'internal',
+      type: 'event',
+      message: 'ana@example.com tomó la conversación',
+      payload: { kind: 'human_takeover', by: 'ana@example.com' },
+    })!;
+    expect(message.kind).toBe('event');
+    expect(message.event).toEqual({ kind: 'human_takeover', by: 'ana@example.com' });
+  });
 });
 
 describe('templateParts', () => {
@@ -252,7 +296,48 @@ describe('toTemplate', () => {
       variables: 2,
       variableNames: ['nombre', 'numero'],
       parameterFormat: 'NAMED',
+      headerFormat: 'TEXT',
+      headerVariableNames: [],
+      headerHandle: null,
+      examples: {},
     });
+  });
+
+  it('keeps what sending and editing need: header format, button URLs and examples', () => {
+    const template = toTemplate({
+      name: 'envio',
+      body: `Hola ${v('1')}`,
+      headerFormat: 'image',
+      headerHandle: '4::aW1n',
+      buttons: [
+        { type: 'URL', text: 'Seguir', url: `https://example.com/p/${v('1')}` },
+        { type: 'COPY_CODE', text: '', example: 'DESC10' },
+      ],
+      examples: { 'body:1': 'Ana', 'button:0': 'A-1', bad: 3 },
+    })!;
+    expect(template.headerFormat).toBe('IMAGE');
+    expect(template.headerHandle).toBe('4::aW1n');
+    expect(template.buttons).toEqual([
+      { type: 'URL', text: 'Seguir', url: `https://example.com/p/${v('1')}` },
+      { type: 'COPY_CODE', text: '', example: 'DESC10' },
+    ]);
+    expect(template.examples).toEqual({ 'body:1': 'Ana', 'button:0': 'A-1' });
+    expect(templateNeeds(template)).toEqual({
+      headerVariable: null,
+      headerMedia: 'IMAGE',
+      urlButtons: [{ index: 0, text: 'Seguir', base: 'https://example.com/p/' }],
+    });
+  });
+
+  it('asks for the text header variable', () => {
+    const template = toTemplate({
+      name: 'pedido',
+      header: `Pedido ${v('1')}`,
+      body: 'Gracias',
+    })!;
+    expect(templateNeeds(template).headerVariable).toBe('1');
+    expect(fillTemplate(template.header!, { 1: 'A-1' })).toBe('Pedido A-1');
+    expect(fillTemplate(template.header!, {})).toBe(`Pedido ${v('1')}`);
   });
 
   it('fills what an older backend left out', () => {

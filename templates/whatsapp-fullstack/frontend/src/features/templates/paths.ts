@@ -5,7 +5,13 @@
  * the cycle leaves the lazy page `undefined` ("Element type is invalid ... Lazy").
  * Typed as `string`: the router's typed paths only know the static routes.
  */
-export const TEMPLATE_PATHS: { list: string; create: string } = {
+export const TEMPLATE_PATHS: { list: string; create: string; edit: string } = {
   list: '/settings/templates',
   create: '/settings/templates/new',
+  // The router's path syntax: `$metaTemplateId` is a parameter.
+  edit: '/settings/templates/$metaTemplateId/edit',
 };
+
+/** The edit page of one template. */
+export const templateEditPath = (metaTemplateId: string) =>
+  TEMPLATE_PATHS.edit.replace('$metaTemplateId', encodeURIComponent(metaTemplateId));

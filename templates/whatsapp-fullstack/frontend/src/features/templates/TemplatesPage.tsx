@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { FileText, Loader2, Plus, RefreshCw, Search } from 'lucide-react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
   WhatsAppAuthError,
+  deleteTemplate,
   fetchTemplates,
   usingDemoData,
 } from '@/features/whatsapp/services/whatsappService';
@@ -12,13 +14,16 @@ import type { WhatsAppTemplate } from '@/features/whatsapp/types';
 import { cn } from '@/lib/utils';
 import { QualityLabel, StatusBadge } from './components/StatusBadge';
 import { TemplateDetailSheet } from './components/TemplateDetailSheet';
-import { TEMPLATE_PATHS } from './paths';
+import { TEMPLATE_PATHS, templateEditPath } from './paths';
 import {
+  REVIEW_POLL_MS,
   STATUS_META,
   STATUS_ORDER,
   categoryLabel,
   countByStatus,
   filterTemplates,
+  hasPending,
+  reviewOutcomes,
   type StatusFilter,
 } from './templateStatus';
 
@@ -31,8 +36,10 @@ const FILTERS: { value: StatusFilter; label: string }[] = [
 
 /**
  * The account's WhatsApp message templates and where each one stands in Meta's
- * review. "Agregar plantilla" opens the creator (a frontend preview for now);
- * editing still happens in Meta.
+ * review. "Agregar plantilla" opens the creator; a template's sheet edits or
+ * deletes it. While any template is in review the list refreshes itself every
+ * 45 seconds (not while the tab is hidden) and says when one is approved or
+ * rejected.
  */
 export function TemplatesPage() {
   const navigate = useNavigate();
@@ -43,25 +50,79 @@ export function TemplatesPage() {
   const [status, setStatus] = useState<StatusFilter>('all');
   const [selected, setSelected] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  // The last list shown, to tell which templates left review on a refresh.
+  const shown = useRef<WhatsAppTemplate[] | null>(null);
+
+  const load = useCallback(
+    async (quiet = false) => {
+      if (!quiet) {
+        setLoading(true);
+        setError(null);
+      }
+      try {
+        const next = await fetchTemplates();
+        if (shown.current) {
+          for (const outcome of reviewOutcomes(shown.current, next)) {
+            if (outcome.status === 'APPROVED') {
+              toast.success(`Tu plantilla ${outcome.name} fue aprobada`, {
+                description: 'Ya se puede enviar desde las conversaciones.',
+              });
+            } else {
+              toast.error(`Tu plantilla ${outcome.name} fue rechazada`, {
+                description: 'Revisa el motivo en el Administrador de WhatsApp y edítala.',
+              });
+            }
+          }
+        }
+        shown.current = next;
+        setTemplates(next);
+      } catch (err) {
+        if (err instanceof WhatsAppAuthError) {
+          void navigate({ to: '/login' });
+          return;
+        }
+        // A failed background refresh keeps the list; the next one may work.
+        if (!quiet) {
+          setError(err instanceof Error ? err.message : 'No se pudieron cargar las plantillas.');
+        }
+      } finally {
+        if (!quiet) setLoading(false);
+      }
+    },
+    [navigate]
+  );
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const polling = hasPending(templates);
+  useEffect(() => {
+    if (!polling) return;
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void load(true);
+    }, REVIEW_POLL_MS);
+    return () => window.clearInterval(timer);
+  }, [polling, load]);
+
+  const remove = async (template: WhatsAppTemplate) => {
     try {
-      setTemplates(await fetchTemplates());
+      await deleteTemplate(template.name, template.metaTemplateId);
+      toast.success(`Plantilla ${template.name} eliminada`);
+      setSelected(null);
+      setTemplates(list => list.filter(item => templateKey(item) !== templateKey(template)));
+      shown.current = (shown.current ?? []).filter(
+        item => templateKey(item) !== templateKey(template)
+      );
     } catch (err) {
       if (err instanceof WhatsAppAuthError) {
         void navigate({ to: '/login' });
         return;
       }
-      setError(err instanceof Error ? err.message : 'No se pudieron cargar las plantillas.');
-    } finally {
-      setLoading(false);
+      toast.error(err instanceof Error ? err.message : 'No se pudo eliminar la plantilla.');
+      throw err;
     }
-  }, [navigate]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
+  };
 
   const counts = useMemo(() => countByStatus(templates), [templates]);
   const visible = useMemo(
@@ -81,9 +142,10 @@ export function TemplatesPage() {
             Plantillas
           </h1>
           <p className='mt-1 text-sm text-foreground-secondary'>
-            Las plantillas se aprueban en Meta; aquí ves su estado y cómo se ven. Solo las aprobadas
-            se pueden enviar, y son la única forma de escribirle a un contacto después de 24 horas
-            sin respuesta.
+            Créalas y edítalas aquí; Meta las revisa antes de aprobarlas. Solo las aprobadas se
+            pueden enviar, y son la única forma de escribirle a un contacto después de 24 horas sin
+            respuesta.
+            {polling ? ' Hay plantillas en revisión: la lista se actualiza sola.' : ''}
             {usingDemoData ? ' Datos de demostración.' : ''}
           </p>
         </div>
@@ -170,7 +232,7 @@ export function TemplatesPage() {
         ) : visible.length === 0 ? (
           <p className='px-4 py-12 text-center text-sm text-foreground-secondary'>
             {templates.length === 0
-              ? 'Esta cuenta aún no tiene plantillas. Créalas en el Administrador de WhatsApp de Meta.'
+              ? 'Esta cuenta aún no tiene plantillas. Crea la primera con «Agregar plantilla».'
               : 'Ninguna plantilla coincide con la búsqueda o el filtro.'}
           </p>
         ) : (
@@ -252,6 +314,11 @@ export function TemplatesPage() {
         onOpenChange={open => {
           if (!open) setSelected(null);
         }}
+        onEdit={template => {
+          if (template.metaTemplateId)
+            void navigate({ to: templateEditPath(template.metaTemplateId) });
+        }}
+        onDelete={remove}
       />
     </div>
   );

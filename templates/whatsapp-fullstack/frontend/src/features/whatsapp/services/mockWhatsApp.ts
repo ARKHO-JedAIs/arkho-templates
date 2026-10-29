@@ -2,9 +2,9 @@ import type {
   ChatMessage,
   ControlMode,
   Conversation,
-  CreateTemplateInput,
   MediaKind,
   SendTemplateInput,
+  TemplateRequest,
 } from '../types';
 import { publishDemoEvent } from '../realtime';
 import { checkAttachment } from './attachments';
@@ -223,6 +223,7 @@ const conversations = new Map<string, Conversation>([
       lastInboundAt: minutesAgo(5),
       mode: 'assistant',
       takenByName: null,
+      unreadCount: 1,
     },
   ],
   [
@@ -236,6 +237,7 @@ const conversations = new Map<string, Conversation>([
       lastInboundAt: minutesAgo(22),
       mode: 'human',
       takenByName: 'demo@example.com',
+      unreadCount: 0,
     },
   ],
   [
@@ -249,6 +251,7 @@ const conversations = new Map<string, Conversation>([
       lastInboundAt: minutesAgo(80),
       mode: 'human',
       takenByName: 'demo@example.com',
+      unreadCount: 3,
     },
   ],
   [
@@ -262,6 +265,7 @@ const conversations = new Map<string, Conversation>([
       lastInboundAt: minutesAgo(60 * 48),
       mode: 'assistant',
       takenByName: null,
+      unreadCount: 0,
     },
   ],
 ]);
@@ -492,6 +496,7 @@ function append(phone: string, message: ChatMessage) {
       message.direction === 'in' ? message.timestamp : (current?.lastInboundAt ?? null),
     mode: current?.mode ?? 'assistant',
     takenByName: current?.takenByName ?? null,
+    unreadCount: (current?.unreadCount ?? 0) + (message.direction === 'in' ? 1 : 0),
   };
   conversations.set(phone, conversation);
   publishDemoEvent('inbox', 'CONVERSATION_UPDATED', toPayload(conversation));
@@ -509,7 +514,91 @@ function toPayload(conversation: Conversation) {
     last_inbound_at: conversation.lastInboundAt,
     mode: conversation.mode,
     taken_by_name: conversation.takenByName,
+    unreadCount: conversation.unreadCount,
   };
+}
+
+const fold = (value: string) =>
+  value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+
+/** The backend's search: folded name or phone digits, contained anywhere. */
+function matches(conversation: Conversation, search: string): boolean {
+  const term = /^[\d\s+\-().]+$/.test(search) ? search.replace(/\D/g, '') : fold(search.trim());
+  return `${fold(conversation.name)} ${conversation.phone}`.includes(term);
+}
+
+/** A notice of the inbox itself, stored in the thread but not in the summary. */
+function notice(phone: string, kind: 'human_takeover' | 'assistant_resumed', by: string) {
+  const text =
+    kind === 'human_takeover'
+      ? `${by} tomó la conversación`
+      : 'El Agente IA retomó la conversación';
+  const message: ChatMessage = {
+    id: nextId(),
+    direction: 'out',
+    kind: 'event',
+    text,
+    timestamp: new Date().toISOString(),
+    event: { kind, by },
+  };
+  messages.set(phone, [...(messages.get(phone) ?? []), message]);
+  publishDemoEvent(phone, 'CONVERSATION_EVENT', {
+    phone,
+    date: message.timestamp,
+    message_id: message.id,
+    direction: 'internal',
+    type: 'event',
+    message: text,
+    payload: { kind, by },
+  });
+}
+
+const variablesOf = (text: string) => [
+  ...new Set([...text.matchAll(/\{\{\s*([\w.]+)\s*\}\}/g)].map(match => match[1]!)),
+];
+
+/** A template request in the shape `GET /whatsapp/templates` lists it. */
+function listed(input: TemplateRequest, metaTemplateId: string, status: string) {
+  const header = input.header;
+  const headerText = header?.format === 'TEXT' ? header.text : null;
+  return {
+    name: input.name,
+    language: input.language,
+    category: input.category ?? 'UTILITY',
+    status,
+    qualityScore: 'UNKNOWN',
+    metaTemplateId,
+    header: headerText,
+    headerFormat: header?.format ?? null,
+    headerVariableNames: headerText ? variablesOf(headerText) : [],
+    headerHandle: header && header.format !== 'TEXT' ? header.handle : null,
+    body: input.body,
+    footer: input.footer,
+    buttons: input.buttons.map(button => ({
+      type: button.type,
+      text: button.text,
+      ...(button.url ? { url: button.url } : {}),
+      ...(button.phone ? { phoneNumber: button.phone } : {}),
+      ...(button.code ? { example: button.code } : {}),
+    })),
+    variables: variablesOf(input.body).length,
+    variableNames: variablesOf(input.body),
+    parameterFormat: input.parameterFormat,
+    examples: input.examples,
+  };
+}
+
+/** Meta's review, simulated: what is sent to review is approved a minute later. */
+const REVIEW_MS = 60_000;
+
+function review(metaTemplateId: string) {
+  window.setTimeout(() => {
+    const template = templates.find(item => item.metaTemplateId === metaTemplateId);
+    if (template && template.status === 'PENDING') template.status = 'APPROVED';
+  }, REVIEW_MS);
 }
 
 function messagePayload(phone: string, message: ChatMessage) {
@@ -558,12 +647,21 @@ const delay = <T>(value: T) =>
   new Promise<T>(resolve => window.setTimeout(() => resolve(value), 150));
 
 export const mockWhatsApp = {
-  conversations: () =>
+  conversations: (search?: string) =>
     delay(
-      [...conversations.values()].sort((a, b) =>
-        (b.lastMessageAt ?? '').localeCompare(a.lastMessageAt ?? '')
-      )
+      [...conversations.values()]
+        .filter(conversation => !search || matches(conversation, search))
+        .sort((a, b) => (b.lastMessageAt ?? '').localeCompare(a.lastMessageAt ?? ''))
     ),
+
+  markRead: (phone: string) => {
+    const current = conversations.get(phone);
+    if (!current) return delay(null);
+    const conversation: Conversation = { ...current, unreadCount: 0 };
+    conversations.set(phone, conversation);
+    publishDemoEvent('inbox', 'CONVERSATION_UPDATED', toPayload(conversation));
+    return delay(conversation);
+  },
 
   // The demo history fits in one page: there is never anything older.
   messages: (phone: string, before?: string) =>
@@ -632,22 +730,57 @@ export const mockWhatsApp = {
   templates: (): Promise<unknown[]> => delay(templates),
 
   /** A new template goes straight to review, as it would in Meta. Gone on reload. */
-  createTemplate: (input: CreateTemplateInput) => {
+  createTemplate: (input: TemplateRequest) => {
     const taken = templates.some(
       template => template.name === input.name && template.language === input.language
     );
     if (taken) {
       return Promise.reject(new Error('Ya existe una plantilla con ese nombre en ese idioma.'));
     }
-    const template = {
-      ...input,
-      status: 'PENDING',
-      qualityScore: 'UNKNOWN',
-      metaTemplateId: null,
-      variables: input.variableNames.length,
-    };
-    templates.unshift(template);
-    return delay(template);
+    const metaTemplateId = String(Date.now());
+    templates.unshift(listed(input, metaTemplateId, 'PENDING'));
+    review(metaTemplateId);
+    return delay({ metaTemplateId, status: 'PENDING' });
+  },
+
+  /** An edit replaces the template and sends it to review again. */
+  updateTemplate: (metaTemplateId: string, input: TemplateRequest) => {
+    const index = templates.findIndex(template => template.metaTemplateId === metaTemplateId);
+    if (index < 0) return Promise.reject(new Error('La plantilla ya no existe.'));
+    const current = templates[index]!;
+    templates[index] = listed(
+      {
+        ...input,
+        name: String(current.name),
+        language: String(current.language),
+        category: input.category ?? String(current.category),
+      },
+      metaTemplateId,
+      'PENDING'
+    );
+    review(metaTemplateId);
+    return delay(undefined);
+  },
+
+  deleteTemplate: (name: string, metaTemplateId: string | null) => {
+    for (let index = templates.length - 1; index >= 0; index -= 1) {
+      const template = templates[index]!;
+      if (
+        template.name === name &&
+        (!metaTemplateId || template.metaTemplateId === metaTemplateId)
+      ) {
+        templates.splice(index, 1);
+      }
+    }
+    return delay(undefined);
+  },
+
+  uploadTemplateHeader: async (file: File, onProgress?: (fraction: number) => void) => {
+    for (const step of [0.5, 1]) {
+      await new Promise(resolve => window.setTimeout(resolve, 150));
+      onProgress?.(step);
+    }
+    return `demo-handle-${file.name}`;
   },
 
   sendTemplate: (input: SendTemplateInput) => {
@@ -655,9 +788,17 @@ export const mockWhatsApp = {
       id: nextId(),
       direction: 'out',
       kind: 'template',
-      text:
-        `${input.templateName} (${input.language})` +
-        (input.parameters.length ? `: ${input.parameters.join(', ')}` : ''),
+      text: (() => {
+        const values = [
+          ...(input.headerText ? [input.headerText] : []),
+          ...input.parameters,
+          ...(input.buttons ?? []).map(button => button.text),
+        ];
+        return (
+          `${input.templateName} (${input.language})` +
+          (values.length ? `: ${values.join(', ')}` : '')
+        );
+      })(),
       timestamp: new Date().toISOString(),
       sentBy: 'demo@example.com',
       status: 'sent',
@@ -678,6 +819,9 @@ export const mockWhatsApp = {
     };
     conversations.set(phone, conversation);
     publishDemoEvent('inbox', 'CONVERSATION_UPDATED', toPayload(conversation));
+    if (current.mode !== mode) {
+      notice(phone, mode === 'human' ? 'human_takeover' : 'assistant_resumed', 'demo@example.com');
+    }
     return delay(conversation);
   },
 };

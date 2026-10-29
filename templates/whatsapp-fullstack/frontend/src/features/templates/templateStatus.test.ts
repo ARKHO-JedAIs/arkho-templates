@@ -6,6 +6,8 @@ import {
   STATUS_ORDER,
   countByStatus,
   filterTemplates,
+  hasPending,
+  reviewOutcomes,
   statusMeta,
   variableToken,
 } from './templateStatus';
@@ -72,5 +74,32 @@ describe('statusMeta', () => {
 describe('variableToken', () => {
   it('writes the variable the way WhatsApp does', () => {
     expect(variableToken('1')).toBe('{'.repeat(2) + '1' + '}'.repeat(2));
+  });
+});
+
+describe('review polling', () => {
+  it('polls only while something is in review', () => {
+    expect(hasPending(list)).toBe(true);
+    expect(hasPending(list.filter(item => item.status !== 'PENDING'))).toBe(false);
+  });
+
+  it('reports the templates that left review approved or rejected', () => {
+    const before = [
+      template('a', 'PENDING'),
+      template('b', 'PENDING'),
+      template('c', 'PENDING'),
+      template('d', 'APPROVED'),
+    ];
+    const after = [
+      template('a', 'APPROVED'),
+      template('b', 'REJECTED'),
+      template('c', 'PENDING'),
+      template('d', 'APPROVED'),
+      template('e', 'APPROVED'),
+    ];
+    expect(reviewOutcomes(before, after).map(outcome => [outcome.name, outcome.status])).toEqual([
+      ['a', 'APPROVED'],
+      ['b', 'REJECTED'],
+    ]);
   });
 });

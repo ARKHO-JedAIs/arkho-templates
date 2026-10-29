@@ -69,12 +69,14 @@ $util.toJson($ctx.result)
 interface WhatsAppFunction {
   name: string;
   description: string;
-  route?: { path: string; method: string };
+  routes?: { path: string; method: string }[];
   tables: 'read' | 'write';
   sends?: boolean;
   readsTemplates?: boolean;
+  /** Creates, edits and deletes templates (and their header samples). */
+  managesTemplates?: boolean;
   /** What the function does in the media bucket. */
-  media?: 'download' | 'presign-read' | 'presign-upload' | 'send';
+  media?: 'download' | 'presign-read' | 'presign-upload' | 'send' | 'read-upload';
   timeoutSeconds?: number;
 }
 
@@ -83,18 +85,33 @@ export const DEFAULT_MEDIA_URL_TTL_SECONDS = 900;
 const INBOUND_MEDIA_PREFIX = 'media/';
 const OUTBOUND_MEDIA_PREFIX = 'outbound/';
 
-// One Lambda per folder under src/lambda/whatsapp. `route` exposes it on the
+// One Lambda per folder under src/lambda/whatsapp. `routes` expose it on the
 // REST API behind the authorizer; ws-handler has none, SNS invokes it.
 const FUNCTIONS: WhatsAppFunction[] = [
   // A video download runs inside the invocation, hence the longer timeout.
   { name: 'ws-handler', description: 'Receives WhatsApp messages and statuses from End User Messaging Social (SNS)', tables: 'write', sends: true, media: 'download', timeoutSeconds: 90 },
-  { name: 'get-conversations', description: 'Lists the WhatsApp conversations', route: { path: '/whatsapp/conversations', method: 'GET' }, tables: 'read' },
-  { name: 'get-messages', description: 'Returns one WhatsApp conversation', route: { path: '/whatsapp/messages', method: 'GET' }, tables: 'read', media: 'presign-read' },
-  { name: 'send-message', description: 'Sends a WhatsApp text or media message from the web', route: { path: '/whatsapp/messages', method: 'POST' }, tables: 'write', sends: true, media: 'send' },
-  { name: 'media-upload-url', description: 'Presigns the upload of a file to send through WhatsApp', route: { path: '/whatsapp/media/upload-url', method: 'POST' }, tables: 'read', media: 'presign-upload' },
-  { name: 'get-templates', description: 'Lists the WhatsApp templates with their status', route: { path: '/whatsapp/templates', method: 'GET' }, tables: 'read', readsTemplates: true },
-  { name: 'send-template', description: 'Sends an approved WhatsApp template', route: { path: '/whatsapp/templates/send', method: 'POST' }, tables: 'write', sends: true, readsTemplates: true },
-  { name: 'put-control', description: 'Hands a conversation to a person or back to the automatic replies', route: { path: '/whatsapp/control', method: 'PUT' }, tables: 'write' },
+  { name: 'get-conversations', description: 'Lists or searches the WhatsApp conversations', routes: [{ path: '/whatsapp/conversations', method: 'GET' }], tables: 'read' },
+  { name: 'mark-read', description: 'Resets the unread counter of a WhatsApp conversation', routes: [{ path: '/whatsapp/conversations/{phone}/read', method: 'PUT' }], tables: 'write' },
+  { name: 'get-messages', description: 'Returns one WhatsApp conversation', routes: [{ path: '/whatsapp/messages', method: 'GET' }], tables: 'read', media: 'presign-read' },
+  { name: 'send-message', description: 'Sends a WhatsApp text or media message from the web', routes: [{ path: '/whatsapp/messages', method: 'POST' }], tables: 'write', sends: true, media: 'send' },
+  { name: 'media-upload-url', description: 'Presigns the upload of a file to send through WhatsApp', routes: [{ path: '/whatsapp/media/upload-url', method: 'POST' }], tables: 'read', media: 'presign-upload' },
+  { name: 'get-templates', description: 'Lists the WhatsApp templates with their status', routes: [{ path: '/whatsapp/templates', method: 'GET' }], tables: 'read', readsTemplates: true },
+  // A template with an image, video or document header carries a file.
+  { name: 'send-template', description: 'Sends an approved WhatsApp template', routes: [{ path: '/whatsapp/templates/send', method: 'POST' }], tables: 'write', sends: true, readsTemplates: true, media: 'send' },
+  {
+    name: 'templates-admin',
+    description: 'Creates, edits and deletes WhatsApp templates and uploads their header samples',
+    routes: [
+      { path: '/whatsapp/templates', method: 'POST' },
+      { path: '/whatsapp/templates', method: 'DELETE' },
+      { path: '/whatsapp/templates/{metaTemplateId}', method: 'PUT' },
+      { path: '/whatsapp/templates/media', method: 'POST' },
+    ],
+    tables: 'read',
+    managesTemplates: true,
+    media: 'read-upload',
+  },
+  { name: 'put-control', description: 'Hands a conversation to a person or back to the automatic replies', routes: [{ path: '/whatsapp/control', method: 'PUT' }], tables: 'write' },
 ];
 
 /**
@@ -293,6 +310,17 @@ export class WhatsAppFactory extends Construct {
       actions: ['social-messaging:ListWhatsAppMessageTemplates', 'social-messaging:GetWhatsAppMessageTemplate'],
       resources: [`arn:${partition}:social-messaging:${region}:${account}:waba/*`],
     });
+    // Service Authorization Reference: these four take only the waba resource
+    // type and list no dependent actions.
+    const manageTemplatesStatement = new iam.PolicyStatement({
+      actions: [
+        'social-messaging:CreateWhatsAppMessageTemplate',
+        'social-messaging:UpdateWhatsAppMessageTemplate',
+        'social-messaging:DeleteWhatsAppMessageTemplate',
+        'social-messaging:CreateWhatsAppMessageTemplateMedia',
+      ],
+      resources: [`arn:${partition}:social-messaging:${region}:${account}:waba/*`],
+    });
 
     for (const definition of FUNCTIONS) {
       const fn = new LambdaConstruct(this, `${definition.name}-lambda`, {
@@ -331,14 +359,11 @@ export class WhatsAppFactory extends Construct {
       this.eventsApi.grantMutation(fn.function, PUBLISH_EVENT_FIELD);
       if (definition.sends) fn.function.addToRolePolicy(sendStatement);
       if (definition.readsTemplates) fn.function.addToRolePolicy(templatesStatement);
+      if (definition.managesTemplates) fn.function.addToRolePolicy(manageTemplatesStatement);
       this.grantMedia(fn, definition.media, getMediaStatement, postMediaStatement);
 
-      if (definition.route) {
-        apiFactory.restApi.addRoute({
-          path: definition.route.path,
-          method: definition.route.method,
-          lambda: fn.function,
-        });
+      for (const route of definition.routes ?? []) {
+        apiFactory.restApi.addRoute({ path: route.path, method: route.method, lambda: fn.function });
       }
     }
 
@@ -411,8 +436,10 @@ export class WhatsAppFactory extends Construct {
   /**
    * Least privilege per function: ws-handler downloads into media/ (list,
    * write, copy and delete the original; read sent files), get-messages only
-   * signs reads, media-upload-url only signs uploads to outbound/, and
-   * send-message checks an upload and hands it to WhatsApp.
+   * signs reads, media-upload-url only signs uploads to outbound/,
+   * send-message and send-template check an upload and hand it to WhatsApp,
+   * and templates-admin only checks an upload before Meta takes it as a
+   * template header sample.
    */
   private grantMedia(
     fn: LambdaConstruct,
@@ -446,6 +473,8 @@ export class WhatsAppFactory extends Construct {
       role.addToRolePolicy(new iam.PolicyStatement({ actions: ['s3:GetObject'], resources: [inbound, outbound] }));
     } else if (access === 'presign-upload') {
       role.addToRolePolicy(new iam.PolicyStatement({ actions: ['s3:PutObject'], resources: [outbound] }));
+    } else if (access === 'read-upload') {
+      role.addToRolePolicy(new iam.PolicyStatement({ actions: ['s3:GetObject'], resources: [outbound] }));
     } else {
       role.addToRolePolicy(postMediaStatement);
       role.addToRolePolicy(new iam.PolicyStatement({ actions: ['s3:GetObject'], resources: [outbound] }));

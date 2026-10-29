@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { ArrowLeft, MessagesSquare, Plus, RefreshCw, Sparkles, UserRound } from 'lucide-react';
 import { toast } from 'sonner';
@@ -13,8 +13,9 @@ import { TemplateDialog } from './components/TemplateDialog';
 import { useConversation } from './hooks/useConversation';
 import { useConversations } from './hooks/useConversations';
 import type { LiveState } from './realtime';
-import { isWindowOpen, windowHoursLeft } from './services/mappers';
+import { isWindowOpen, totalUnread, windowHoursLeft } from './services/mappers';
 import {
+  markConversationRead,
   sendMedia,
   sendMessage,
   sendTemplate,
@@ -34,6 +35,9 @@ const pill = 'inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1
 
 /** How often the 24 hour windows are re-checked while the page is open. */
 const CLOCK_MS = 60_000;
+
+/** The tab title without the "(N) " unread prefix this page adds. */
+const withoutCounter = (title: string) => title.replace(/^\(\d+\) /, '');
 
 export function WhatsAppPage() {
   const navigate = useNavigate();
@@ -59,6 +63,41 @@ export function WhatsAppPage() {
   const conversation = inbox.conversations.find(item => item.phone === selected) ?? null;
   const windowOpen = isWindowOpen(conversation, now);
   const hoursLeft = windowHoursLeft(conversation, now);
+
+  // The open conversation is being read: on opening it, and whenever a new
+  // message raises its counter while it stays open.
+  const { apply } = inbox;
+  const unread = conversation?.unreadCount ?? 0;
+  const reading = useRef<string | null>(null);
+  useEffect(() => {
+    if (!conversation || unread === 0 || reading.current === conversation.phone) return;
+    const phone = conversation.phone;
+    reading.current = phone;
+    apply({ ...conversation, unreadCount: 0 });
+    markConversationRead(phone)
+      .then(updated => {
+        if (updated) apply(updated);
+      })
+      .catch(() => {
+        // The badge comes back with the next inbox update; nothing to tell the user.
+      })
+      .finally(() => {
+        if (reading.current === phone) reading.current = null;
+      });
+  }, [conversation, unread, apply]);
+
+  // "(3) " in the tab title while the page is open: unread messages at a glance.
+  const total = totalUnread(inbox.conversations);
+  useEffect(() => {
+    const base = withoutCounter(document.title);
+    document.title = total > 0 ? `(${total}) ${base}` : base;
+  }, [total]);
+  useEffect(
+    () => () => {
+      document.title = withoutCounter(document.title);
+    },
+    []
+  );
 
   const send = async (text: string) => {
     if (!selected) return;

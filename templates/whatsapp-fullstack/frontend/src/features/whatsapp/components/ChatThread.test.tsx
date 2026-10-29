@@ -76,6 +76,18 @@ describe('ChatThread message types', () => {
     expect(screen.getByText('Tipo de mensaje no soportado')).toBeInTheDocument();
   });
 
+  it('draws takeover notices centered, with who and when', () => {
+    const notice = (seconds: number, kind: string, by: string) =>
+      message(seconds, { direction: 'internal', type: 'event', payload: { kind, by } });
+    render(
+      <ChatThread
+        messages={[notice(20, 'human_takeover', 'Ana'), notice(30, 'assistant_resumed', 'Ana')]}
+      />
+    );
+    expect(screen.getByText(/^Ana tomó la conversación · /)).toBeInTheDocument();
+    expect(screen.getByText(/^El Agente IA retomó la conversación · /)).toBeInTheDocument();
+  });
+
   it('asks for fresh URLs once when a file fails to load', () => {
     const onMediaExpired = vi.fn();
     render(<ChatThread messages={[messages[2]!]} onMediaExpired={onMediaExpired} />);

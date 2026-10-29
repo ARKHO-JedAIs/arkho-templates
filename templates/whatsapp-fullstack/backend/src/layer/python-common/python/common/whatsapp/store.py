@@ -1,27 +1,45 @@
 """The conversations and messages tables.
 
 Conversations: one item per contact, keyed by ``phone`` (E.164 digits, no
-"+"). It carries the inbox summary (last message, when the contact last wrote)
-and who answers it: ``mode`` is ``assistant`` (automatic replies) unless a
-person took it over from the web (``human``).
+"+"). It carries the inbox summary (last message, when the contact last wrote,
+``unread_count``), ``search_key`` (the folded name and the phone, for the
+inbox search) and who answers it: ``mode`` is ``assistant`` (automatic
+replies) unless a person took it over from the web (``human``).
 
 Messages: the exchange itself, keyed by ``phone`` + ``date`` (ISO-8601 UTC with
 milliseconds, so two messages in the same second do not overwrite each other).
+Besides what the contact and we send, ``direction: internal`` items are notices
+of the inbox itself (``type: event``, e.g. a person took the conversation):
+never sent to WhatsApp and never part of the inbox summary.
 """
 import os
+import re
+import unicodedata
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import boto3
 from boto3.dynamodb.conditions import Key
+from botocore.exceptions import ClientError
 
 CONVERSATIONS_TABLE_NAME = os.environ.get("WHATSAPP_CONVERSATIONS_TABLE_NAME", "")
 MESSAGES_TABLE_NAME = os.environ.get("WHATSAPP_MESSAGES_TABLE_NAME", "")
 
 INBOUND = "inbound"
 OUTBOUND = "outbound"
+INTERNAL = "internal"
 ASSISTANT_MODE = "assistant"
 HUMAN_MODE = "human"
+
+# The ``type`` of an internal notice and its ``payload.kind`` values.
+EVENT_TYPE = "event"
+HUMAN_TAKEOVER = "human_takeover"
+ASSISTANT_RESUMED = "assistant_resumed"
+
+SEARCH_RESULTS_LIMIT = 50
+SEARCH_MIN_LENGTH = 2
+# A scan reads the whole table page by page; this caps one search's cost.
+SEARCH_MAX_PAGES = 20
 
 # WhatsApp only accepts free-form messages within 24 hours of the contact's
 # last message; outside it, only an approved template can be sent.
@@ -74,6 +92,82 @@ def list_conversations(limit: int = 500) -> list[dict]:
             break
         kwargs["ExclusiveStartKey"] = response["LastEvaluatedKey"]
     return items[:limit]
+
+
+def fold(text: str) -> str:
+    """Lowercase without accents: ``"José Peña"`` -> ``"jose pena"``."""
+    decomposed = unicodedata.normalize("NFD", str(text or ""))
+    return "".join(char for char in decomposed if not unicodedata.combining(char)).lower().strip()
+
+
+def search_key(name: str, phone: str) -> str:
+    return f"{fold(name)} {phone}".strip()
+
+
+def search_term(raw: str) -> str:
+    """What a search looks for in ``search_key``: the phone digits when it is
+    only a number (``"+56 9 1234"`` -> ``"5691234"``), else the folded text."""
+    text = str(raw or "").strip()
+    if re.fullmatch(r"[\d\s+\-().]+", text):
+        return re.sub(r"\D", "", text)
+    return fold(text)
+
+
+def search_conversations(raw: str, limit: int = SEARCH_RESULTS_LIMIT) -> list[dict]:
+    """Conversations whose name or phone contains the search, most recent first.
+
+    A scan with a filter on ``search_key``: fine for an inbox of thousands of
+    contacts; searching inside the messages needs a search engine instead.
+    """
+    table = _require(conversations_table, "WHATSAPP_CONVERSATIONS_TABLE_NAME")
+    term = search_term(raw)
+    if len(term) < SEARCH_MIN_LENGTH:
+        return []
+    items: list[dict] = []
+    kwargs: dict = {
+        "FilterExpression": "contains(#search_key, :term)",
+        "ExpressionAttributeNames": {"#search_key": "search_key"},
+        "ExpressionAttributeValues": {":term": term},
+    }
+    for _ in range(SEARCH_MAX_PAGES):
+        response = table.scan(**kwargs)
+        items.extend(response.get("Items", []))
+        if len(items) >= limit or "LastEvaluatedKey" not in response:
+            break
+        kwargs["ExclusiveStartKey"] = response["LastEvaluatedKey"]
+    items.sort(key=lambda item: str(item.get("last_message_at", "")), reverse=True)
+    return items[:limit]
+
+
+def conversation_view(item: dict | None) -> dict:
+    """A conversation as the web gets it: ``unreadCount`` as a number, no internals."""
+    if not item:
+        return {}
+    view = {key: value for key, value in item.items() if key not in ("search_key", "inbox")}
+    try:
+        view["unreadCount"] = max(int(item.get("unread_count") or 0), 0)
+    except (TypeError, ValueError):
+        view["unreadCount"] = 0
+    return view
+
+
+def mark_read(phone: str) -> dict | None:
+    """Resets the unread counter; None when there is no such conversation."""
+    table = _require(conversations_table, "WHATSAPP_CONVERSATIONS_TABLE_NAME")
+    try:
+        response = table.update_item(
+            Key={"phone": phone},
+            UpdateExpression="SET #unread = :zero",
+            ConditionExpression="attribute_exists(phone)",
+            ExpressionAttributeNames={"#unread": "unread_count"},
+            ExpressionAttributeValues={":zero": 0},
+            ReturnValues="ALL_NEW",
+        )
+    except ClientError as error:
+        if (getattr(error, "response", None) or {}).get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+            return None
+        raise
+    return response.get("Attributes", {})
 
 
 def find_message_key(message_id: str) -> dict | None:
@@ -202,13 +296,24 @@ def list_messages(phone: str, before: str | None = None) -> list[dict]:
     return list(reversed(response.get("Items", [])))
 
 
-def touch_conversation(message: dict, name: str = "", opens_window: bool = True) -> dict:
+def save_notice(phone: str, kind: str, by: str, text: str) -> dict:
+    """Stores an internal notice of the inbox (``type: event``) and returns it.
+
+    It does not touch the conversation: a notice is neither the last message
+    nor unread, and it never reopens the 24 hour window.
+    """
+    return save_message(phone, INTERNAL, EVENT_TYPE, text, payload={"kind": kind, "by": by})
+
+
+def touch_conversation(message: dict, name: str = "", opens_window: bool = True, counts_unread: bool = False) -> dict:
     """Updates the inbox summary with ``message`` and returns the conversation.
 
     New contacts start answered by the assistant. The name is the WhatsApp
     profile name, only known from what the contact sends. An inbound message
     that is not the contact writing (a system notice) passes ``opens_window``
-    False, so it does not reopen the 24 hour window.
+    False, so it does not reopen the 24 hour window. ``counts_unread`` adds one
+    to ``unread_count`` atomically (customer content only); the web resets it
+    when someone opens the conversation.
     """
     table = _require(conversations_table, "WHATSAPP_CONVERSATIONS_TABLE_NAME")
     names = {
@@ -240,10 +345,20 @@ def touch_conversation(message: dict, name: str = "", opens_window: bool = True)
             names["#last_inbound_message_id"] = "last_inbound_message_id"
             values[":last_inbound_message_id"] = message["message_id"]
             expression += ", #last_inbound_message_id = :last_inbound_message_id"
+    names["#search_key"] = "search_key"
     if name:
         names["#name"] = "name"
         values[":name"] = name
-        expression += ", #name = :name"
+        values[":search_key"] = search_key(name, message["phone"])
+        expression += ", #name = :name, #search_key = :search_key"
+    else:
+        # Keep the key a known name already wrote; a new contact gets its phone.
+        values[":search_key"] = search_key("", message["phone"])
+        expression += ", #search_key = if_not_exists(#search_key, :search_key)"
+    if counts_unread:
+        names["#unread"] = "unread_count"
+        values[":one"] = 1
+        expression += " ADD #unread :one"
     response = table.update_item(
         Key={"phone": message["phone"]},
         UpdateExpression=expression,

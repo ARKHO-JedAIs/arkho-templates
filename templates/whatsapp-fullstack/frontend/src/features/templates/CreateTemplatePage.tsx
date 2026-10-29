@@ -1,20 +1,24 @@
-import { useMemo, useRef, useState, type ReactNode } from 'react';
-import { Link, useNavigate } from '@tanstack/react-router';
-import { ArrowLeft, FilePlus2, Loader2, Upload } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Link, useNavigate, useParams } from '@tanstack/react-router';
+import { ArrowLeft, FilePen, FilePlus2, Loader2, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
+  TemplateRulesError,
   WhatsAppAuthError,
-  canCreateTemplates,
   createTemplate,
+  fetchTemplates,
+  updateTemplate,
+  uploadTemplateHeader,
+  usingDemoData,
 } from '@/features/whatsapp/services/whatsappService';
 import type { WhatsAppTemplate } from '@/features/whatsapp/types';
 import { cn } from '@/lib/utils';
 import { TEMPLATE_PATHS } from './paths';
+import { draftFromTemplate, requestSize, toTemplateRequest } from './templateRequest';
 import { ButtonsEditor, Counter } from './components/ButtonsEditor';
 import { TemplateConditions } from './components/TemplateConditions';
 import { TemplatePreview } from './components/TemplatePreview';
@@ -26,6 +30,7 @@ import {
   LANGUAGE_OPTIONS,
   TEMPLATE_LIMITS as L,
   formatNumber,
+  type HeaderFormat,
   type ParameterFormat,
 } from './templateRules';
 import { variableToken } from './templateStatus';
@@ -36,7 +41,6 @@ import {
   emptyDraft,
   exampleKey,
   fillExamples,
-  findTokens,
   nextPositional,
   normalizeName,
   normalizeVariableName,
@@ -70,6 +74,7 @@ function TextField({
   max,
   hint,
   required,
+  disabled,
   onChange,
   onBlur,
 }: {
@@ -79,6 +84,7 @@ function TextField({
   max: number;
   hint?: ReactNode;
   required?: boolean;
+  disabled?: boolean;
   onChange: (value: string) => void;
   onBlur?: () => void;
 }) {
@@ -97,6 +103,7 @@ function TextField({
         id={id}
         value={value}
         required={required}
+        disabled={disabled}
         onChange={event => onChange(event.target.value)}
         onBlur={onBlur}
         aria-describedby={`${id}-count${hint ? ` ${id}-hint` : ''}`}
@@ -155,37 +162,131 @@ function RadioPills<T extends string>({
   );
 }
 
+/** What Meta takes as the sample file of a media header, by header format. */
+const HEADER_SAMPLE: Record<
+  Exclude<HeaderFormat, 'NONE' | 'TEXT'>,
+  { accept: string; mimeTypes: string[]; maxBytes: number; hint: string }
+> = {
+  IMAGE: {
+    accept: 'image/jpeg,image/png,.jpg,.jpeg,.png',
+    mimeTypes: ['image/jpeg', 'image/png'],
+    maxBytes: 5 * 1024 * 1024,
+    hint: 'JPG o PNG, hasta 5 MB.',
+  },
+  VIDEO: {
+    accept: 'video/mp4,.mp4',
+    mimeTypes: ['video/mp4'],
+    maxBytes: 16 * 1024 * 1024,
+    hint: 'MP4, hasta 16 MB.',
+  },
+  DOCUMENT: {
+    accept: 'application/pdf,.pdf',
+    mimeTypes: ['application/pdf'],
+    maxBytes: 100 * 1024 * 1024,
+    hint: 'PDF, hasta 100 MB.',
+  },
+};
+
 /**
- * Creating a WhatsApp template, as a frontend-only preview: the form, a live
- * preview and Meta's rules checked as you type. Under mock auth it adds the
- * template to the demo list in review; with a real backend, submitting waits
- * for the create endpoint.
+ * Creating or editing a WhatsApp template: the form, a live preview and Meta's
+ * rules checked as you type, then `POST /whatsapp/templates` (or `PUT` on the
+ * template's id when editing) sends it to Meta's review. The same page serves
+ * `/settings/templates/new` and `/settings/templates/$metaTemplateId/edit`;
+ * under mock auth it works on the demo list.
  */
 export function CreateTemplatePage() {
   const navigate = useNavigate();
+  const params: { metaTemplateId?: string } = useParams({ strict: false });
+  const editingId = params.metaTemplateId ?? null;
   const [draft, setDraft] = useState<TemplateDraft>(emptyDraft);
+  const [original, setOriginal] = useState<WhatsAppTemplate | null>(null);
+  const [loadingOriginal, setLoadingOriginal] = useState(Boolean(editingId));
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [accepted, setAccepted] = useState(false);
   const [variableName, setVariableName] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [uploading, setUploading] = useState<number | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [serverRules, setServerRules] = useState<string[]>([]);
   const bodyRef = useRef<HTMLTextAreaElement>(null);
+  const editing = editingId !== null;
 
-  const update = (patch: Partial<TemplateDraft>) => setDraft(current => ({ ...current, ...patch }));
+  useEffect(() => {
+    if (!editingId) return;
+    let cancelled = false;
+    setLoadingOriginal(true);
+    fetchTemplates()
+      .then(all => {
+        if (cancelled) return;
+        const found = all.find(template => template.metaTemplateId === editingId) ?? null;
+        setOriginal(found);
+        if (found) setDraft(draftFromTemplate(found));
+        else setLoadError('No encontramos esa plantilla. Puede que se haya eliminado.');
+      })
+      .catch(err => {
+        if (cancelled) return;
+        if (err instanceof WhatsAppAuthError) {
+          void navigate({ to: '/login' });
+          return;
+        }
+        setLoadError(err instanceof Error ? err.message : 'No se pudo cargar la plantilla.');
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingOriginal(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [editingId, navigate]);
 
+  const update = (patch: Partial<TemplateDraft>) => {
+    setServerRules([]);
+    setDraft(current => ({ ...current, ...patch }));
+  };
+
+  const request = useMemo(
+    () => toTemplateRequest(draft, editing ? original?.category : undefined),
+    [draft, editing, original]
+  );
+  const sizeLimit = editing ? L.editComponentsMaxChars : L.createDefinitionMaxBytes;
+  const size = useMemo(() => requestSize(request), [request]);
   const validation = useMemo(() => validateTemplate(draft), [draft]);
   const variables = useMemo(() => detectVariables(draft), [draft]);
   const checklist: RuleResult[] = useMemo(
     () => [
       ...validation.results,
       {
+        id: 'definition-size',
+        level: 'error',
+        ok: size <= sizeLimit,
+        label: editing
+          ? `La edición ocupa hasta ${formatNumber(sizeLimit)} caracteres`
+          : `La plantilla ocupa hasta ${formatNumber(sizeLimit)} bytes`,
+        ...(size <= sizeLimit ? {} : { detail: `Ocupa unos ${formatNumber(size)}.` }),
+      },
+      ...serverRules.map((id): RuleResult => ({
+        id: `server-${id}`,
+        level: 'error',
+        ok: false,
+        label: `WhatsApp rechazó la regla «${id}»`,
+        detail: 'Corrígela y vuelve a enviar.',
+      })),
+      {
         id: 'conditions-accepted',
         level: 'error',
         ok: accepted,
-        label: 'Leíste las condiciones para crear plantillas',
+        label: editing
+          ? 'Leíste las condiciones para editar plantillas'
+          : 'Leíste las condiciones para crear plantillas',
       },
     ],
-    [validation, accepted]
+    [validation, accepted, size, sizeLimit, editing, serverRules]
   );
-  const ready = validation.valid && accepted;
+  const ready =
+    checklist.every(result => result.level !== 'error' || result.ok) &&
+    uploading === null &&
+    (!editing || original !== null);
+  const categoryLocked = editing && original?.status === 'APPROVED';
   const named = draft.parameterFormat === 'NAMED';
   const normalizedName = normalizeName(draft.name);
 
@@ -203,6 +304,10 @@ export function CreateTemplatePage() {
         draft.headerFormat === 'TEXT' && draft.headerText.trim()
           ? fill(draft.headerText, 'header')
           : null,
+      headerFormat: draft.headerFormat === 'NONE' ? null : draft.headerFormat,
+      headerVariableNames: [],
+      headerHandle: null,
+      examples: {},
       body: draft.body.trim() ? fill(draft.body, 'body') : 'El cuerpo del mensaje aparecerá aquí.',
       footer: draft.footer.trim() || null,
       buttons: draft.buttons.map(button => ({
@@ -229,31 +334,57 @@ export function CreateTemplatePage() {
     });
   };
 
+  /** Uploads the header's sample file to Meta right away: the template needs its handle. */
+  const uploadSample = async (file: File | undefined) => {
+    setUploadError(null);
+    if (!file || draft.headerFormat === 'NONE' || draft.headerFormat === 'TEXT') return;
+    const rules = HEADER_SAMPLE[draft.headerFormat];
+    const mimeType = file.type.split(';')[0]!.trim().toLowerCase();
+    if (!rules.mimeTypes.includes(mimeType)) {
+      setUploadError(`Tipo de archivo no admitido: ${rules.hint}`);
+      return;
+    }
+    if (file.size <= 0 || file.size > rules.maxBytes) {
+      setUploadError(`El archivo está vacío o es muy grande: ${rules.hint}`);
+      return;
+    }
+    setUploading(0);
+    try {
+      const handle = await uploadTemplateHeader(file, mimeType, fraction => setUploading(fraction));
+      update({ headerHandle: handle, headerFileName: file.name });
+    } catch (err) {
+      if (err instanceof WhatsAppAuthError) {
+        void navigate({ to: '/login' });
+        return;
+      }
+      setUploadError(err instanceof Error ? err.message : 'No se pudo subir el archivo.');
+    } finally {
+      setUploading(null);
+    }
+  };
+
   const submit = async () => {
-    if (!ready || !canCreateTemplates || submitting) return;
+    if (!ready || submitting) return;
     setSubmitting(true);
     try {
-      const bodyNames = [...new Set(findTokens(draft.body).map(token => token.name))];
-      await createTemplate({
-        name: draft.name,
-        language: draft.language,
-        category: draft.category,
-        header: draft.headerFormat === 'TEXT' ? draft.headerText : null,
-        body: draft.body,
-        footer: draft.footer.trim() || null,
-        buttons: draft.buttons.map(button => ({ type: button.type, text: button.text })),
-        variableNames: bodyNames,
-        parameterFormat: draft.parameterFormat,
-      });
-      toast.success('Plantilla enviada a revisión', {
-        description: `${draft.name} (${draft.language}). Meta suele responder en menos de ${L.reviewHours} horas.`,
-      });
+      if (editingId) {
+        await updateTemplate(editingId, request);
+        toast.success('Edición enviada a revisión', {
+          description: `${draft.name} (${draft.language}). Meta vuelve a revisarla antes de que se pueda enviar.`,
+        });
+      } else {
+        await createTemplate(request);
+        toast.success('Plantilla enviada a revisión', {
+          description: `${draft.name} (${draft.language}). Meta suele responder en menos de ${L.reviewHours} horas.`,
+        });
+      }
       void navigate({ to: LIST_PATH });
     } catch (err) {
       if (err instanceof WhatsAppAuthError) {
         void navigate({ to: '/login' });
         return;
       }
+      if (err instanceof TemplateRulesError) setServerRules(err.rules);
       toast.error(err instanceof Error ? err.message : 'No se pudo enviar la plantilla.');
     } finally {
       setSubmitting(false);
@@ -261,6 +392,35 @@ export function CreateTemplatePage() {
   };
 
   const pending = checklist.filter(result => result.level === 'error' && !result.ok).length;
+
+  if (editing && (loadingOriginal || !original)) {
+    return (
+      <div className='flex flex-col gap-4'>
+        <Link
+          to={LIST_PATH}
+          className='inline-flex w-fit items-center gap-1.5 rounded-sm text-sm font-medium text-foreground-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+        >
+          <ArrowLeft className='h-4 w-4' aria-hidden />
+          Plantillas
+        </Link>
+        {loadingOriginal ? (
+          <p className='flex items-center gap-2 text-sm text-foreground-secondary'>
+            <Loader2 className='h-4 w-4 animate-spin' aria-hidden />
+            Cargando la plantilla…
+          </p>
+        ) : (
+          <p className='text-sm text-destructive-strong'>
+            {loadError ?? 'No encontramos esa plantilla.'}
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  const sample =
+    draft.headerFormat === 'NONE' || draft.headerFormat === 'TEXT'
+      ? null
+      : HEADER_SAMPLE[draft.headerFormat];
 
   return (
     <div className='flex flex-col gap-5'>
@@ -274,15 +434,19 @@ export function CreateTemplatePage() {
         </Link>
         <h1 className='mt-2 flex items-center gap-2.5 text-2xl font-bold leading-tight text-foreground'>
           <span className='flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-primary-light text-primary'>
-            <FilePlus2 className='h-5 w-5' aria-hidden />
+            {editing ? (
+              <FilePen className='h-5 w-5' aria-hidden />
+            ) : (
+              <FilePlus2 className='h-5 w-5' aria-hidden />
+            )}
           </span>
-          Nueva plantilla
+          {editing ? `Editar ${draft.name}` : 'Nueva plantilla'}
         </h1>
         <p className='mt-1 max-w-2xl text-sm text-foreground-secondary'>
-          Escribe la plantilla y revisa cómo se verá. Meta la revisa antes de que se pueda enviar.
-          {canCreateTemplates
-            ? ' Datos de demostración: se agrega solo a la lista de prueba.'
-            : ' Vista previa: aún no se puede enviar a Meta desde aquí.'}
+          {editing
+            ? 'Cambia lo que necesites: la edición reemplaza la plantilla y Meta la vuelve a revisar.'
+            : 'Escribe la plantilla y revisa cómo se verá. Meta la revisa antes de que se pueda enviar.'}
+          {usingDemoData ? ' Datos de demostración: solo cambia la lista de prueba.' : ''}
         </p>
       </div>
 
@@ -295,13 +459,18 @@ export function CreateTemplatePage() {
             void submit();
           }}
         >
-          <TemplateConditions accepted={accepted} onAcceptedChange={setAccepted} />
+          <TemplateConditions
+            accepted={accepted}
+            onAcceptedChange={setAccepted}
+            editing={editing}
+          />
 
           <Block title='Datos generales'>
             <TextField
               id='template-name'
               label='Nombre'
               required
+              disabled={editing}
               value={draft.name}
               max={L.nameMax}
               onChange={name => update({ name })}
@@ -309,7 +478,9 @@ export function CreateTemplatePage() {
                 if (normalizedName !== draft.name) update({ name: normalizedName });
               }}
               hint={
-                normalizedName && normalizedName !== draft.name ? (
+                editing ? (
+                  'El nombre no se puede cambiar.'
+                ) : normalizedName && normalizedName !== draft.name ? (
                   <>
                     Solo minúsculas, números y _. Se guardará como{' '}
                     <code className='rounded bg-muted px-1 font-mono text-foreground'>
@@ -326,8 +497,9 @@ export function CreateTemplatePage() {
             <fieldset className='flex flex-col gap-2'>
               <legend className='mb-1.5 text-sm font-medium text-foreground'>Categoría</legend>
               <p className='-mt-1 text-xs text-foreground-secondary'>
-                Define el precio de cada envío. Meta puede cambiarla si no coincide con el
-                contenido.
+                {categoryLocked
+                  ? 'Meta no permite cambiar la categoría de una plantilla aprobada.'
+                  : 'Define el precio de cada envío. Meta puede cambiarla si no coincide con el contenido.'}
               </p>
               <div className='grid gap-2 sm:grid-cols-3'>
                 {CATEGORY_OPTIONS.map(option => {
@@ -348,6 +520,7 @@ export function CreateTemplatePage() {
                           name='template-category'
                           value={option.value}
                           checked={checked}
+                          disabled={categoryLocked}
                           onChange={() => update({ category: option.value })}
                           className='h-4 w-4 accent-secondary'
                         />
@@ -367,6 +540,7 @@ export function CreateTemplatePage() {
                   id='template-language'
                   className={selectClass}
                   value={draft.language}
+                  disabled={editing}
                   onChange={event => update({ language: event.target.value })}
                   aria-describedby='template-language-hint'
                 >
@@ -398,7 +572,9 @@ export function CreateTemplatePage() {
               name='template-header'
               legend='Tipo de encabezado'
               value={draft.headerFormat}
-              onChange={headerFormat => update({ headerFormat })}
+              onChange={headerFormat =>
+                update({ headerFormat, headerHandle: '', headerFileName: '' })
+              }
               options={HEADER_OPTIONS}
             />
             {draft.headerFormat === 'TEXT' ? (
@@ -412,17 +588,37 @@ export function CreateTemplatePage() {
                 hint={`Máximo ${L.headerVariablesMax} variable, por ejemplo ${variableToken(named ? 'numero_pedido' : '1')}.`}
               />
             ) : null}
-            {draft.headerFormat === 'IMAGE' ||
-            draft.headerFormat === 'VIDEO' ||
-            draft.headerFormat === 'DOCUMENT' ? (
-              <div
-                aria-disabled='true'
-                className='flex flex-col items-center gap-1.5 rounded-xl border border-dashed border-border bg-muted px-4 py-6 text-center'
-              >
-                <Upload className='h-5 w-5 text-foreground-secondary' aria-hidden />
-                <p className='text-sm font-medium text-foreground'>Archivo de ejemplo</p>
-                <p className='text-xs text-foreground-secondary'>
-                  La carga de archivos se habilita con el backend
+            {sample ? (
+              <div className='flex flex-col gap-1.5 rounded-xl border border-dashed border-border bg-muted px-4 py-4'>
+                <Label htmlFor='template-header-file' className='flex items-center gap-2'>
+                  <Upload className='h-4 w-4 text-foreground-secondary' aria-hidden />
+                  Archivo de ejemplo
+                </Label>
+                <Input
+                  id='template-header-file'
+                  type='file'
+                  accept={sample.accept}
+                  disabled={uploading !== null}
+                  onChange={event => void uploadSample(event.target.files?.[0])}
+                  aria-describedby='template-header-file-hint'
+                  aria-invalid={Boolean(uploadError)}
+                  className='bg-background'
+                />
+                <p
+                  id='template-header-file-hint'
+                  className={cn(
+                    'text-xs',
+                    uploadError ? 'text-destructive-strong' : 'text-foreground-secondary'
+                  )}
+                  aria-live='polite'
+                >
+                  {uploading !== null
+                    ? `Subiendo… ${Math.round(uploading * 100)} %`
+                    : uploadError
+                      ? uploadError
+                      : draft.headerHandle
+                        ? `Listo: ${draft.headerFileName || 'archivo subido'}. Al enviar cada mensaje eliges el archivo real.`
+                        : `Meta revisa la plantilla con este archivo. ${sample.hint}`}
                 </p>
               </div>
             ) : null}
@@ -547,35 +743,14 @@ export function CreateTemplatePage() {
             <Button asChild variant='outline' className='h-11 rounded-[10px]'>
               <Link to={LIST_PATH}>Cancelar</Link>
             </Button>
-            {canCreateTemplates ? (
-              <Button
-                type='submit'
-                disabled={!ready || submitting}
-                className='h-11 rounded-[10px] font-semibold'
-              >
-                {submitting ? <Loader2 className='h-4 w-4 animate-spin' aria-hidden /> : null}
-                Enviar a revisión
-              </Button>
-            ) : (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  {/* aria-disabled, not disabled: a disabled button gets no pointer
-                      or focus events, so its tooltip could never be read. */}
-                  <Button
-                    type='button'
-                    aria-disabled='true'
-                    aria-describedby='template-submit-backend'
-                    onClick={event => event.preventDefault()}
-                    className='h-11 cursor-not-allowed rounded-[10px] bg-btn-default-disabled font-semibold text-btn-default-disabled-text hover:bg-btn-default-disabled active:bg-btn-default-disabled'
-                  >
-                    Enviar a revisión
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent id='template-submit-backend' side='top'>
-                  Requiere el backend de creación (próximo paso)
-                </TooltipContent>
-              </Tooltip>
-            )}
+            <Button
+              type='submit'
+              disabled={!ready || submitting}
+              className='h-11 rounded-[10px] font-semibold'
+            >
+              {submitting ? <Loader2 className='h-4 w-4 animate-spin' aria-hidden /> : null}
+              {editing ? 'Guardar y enviar a revisión' : 'Enviar a revisión'}
+            </Button>
           </div>
         </form>
 

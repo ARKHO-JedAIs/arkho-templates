@@ -1,14 +1,21 @@
 import { useState } from 'react';
-import { ChevronDown, ScrollText } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ScrollText } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
-import { TEMPLATE_CONDITIONS, TEMPLATE_RECOMMENDATIONS } from '../templateRules';
+import {
+  EDIT_CONDITIONS,
+  EDIT_WARNINGS,
+  TEMPLATE_CONDITIONS,
+  TEMPLATE_RECOMMENDATIONS,
+} from '../templateRules';
 
 interface TemplateConditionsProps {
   accepted: boolean;
   onAcceptedChange: (accepted: boolean) => void;
+  /** Editing adds Meta's edit rules and the unverified edit warnings. */
+  editing?: boolean;
 }
 
 /**
@@ -16,7 +23,11 @@ interface TemplateConditionsProps {
  * validator's own source), and the checkbox that confirms they were read. The
  * checkbox stays visible when the list is collapsed.
  */
-export function TemplateConditions({ accepted, onAcceptedChange }: TemplateConditionsProps) {
+export function TemplateConditions({
+  accepted,
+  onAcceptedChange,
+  editing = false,
+}: TemplateConditionsProps) {
   const [open, setOpen] = useState(true);
   return (
     <section
@@ -30,7 +41,7 @@ export function TemplateConditions({ accepted, onAcceptedChange }: TemplateCondi
           </span>
           <span className='flex-1'>
             <span id='template-conditions-title' className='block font-semibold text-foreground'>
-              Condiciones para crear plantillas
+              {editing ? 'Condiciones para editar plantillas' : 'Condiciones para crear plantillas'}
             </span>
             <span className='block text-xs text-foreground-secondary'>
               {open ? 'Ocultar' : 'Mostrar'} las reglas de Meta
@@ -45,7 +56,32 @@ export function TemplateConditions({ accepted, onAcceptedChange }: TemplateCondi
           />
         </CollapsibleTrigger>
         <CollapsibleContent className='border-t border-border px-4 py-3 text-sm text-foreground'>
-          <ul className='flex list-disc flex-col gap-1.5 pl-5'>
+          {editing ? (
+            <>
+              <h3 className='font-semibold text-foreground'>Al editar</h3>
+              <ul className='mb-4 mt-1.5 flex list-disc flex-col gap-1.5 pl-5'>
+                {EDIT_CONDITIONS.map(condition => (
+                  <li key={condition}>{condition}</li>
+                ))}
+              </ul>
+              <ul className='mb-4 flex flex-col gap-1.5'>
+                {EDIT_WARNINGS.map(warning => (
+                  <li
+                    key={warning}
+                    className='flex items-start gap-2 rounded-lg bg-warning-light px-3 py-2 text-warning-strong'
+                  >
+                    <AlertTriangle className='mt-0.5 h-4 w-4 shrink-0' aria-hidden />
+                    <span>
+                      <span className='sr-only'>Advertencia: </span>
+                      {warning}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <h3 className='font-semibold text-foreground'>Reglas de la plantilla</h3>
+            </>
+          ) : null}
+          <ul className={cn('flex list-disc flex-col gap-1.5 pl-5', editing && 'mt-1.5')}>
             {TEMPLATE_CONDITIONS.map(condition => (
               <li key={condition}>{condition}</li>
             ))}

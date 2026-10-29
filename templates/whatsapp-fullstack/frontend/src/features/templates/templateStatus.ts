@@ -132,6 +132,40 @@ export function countByStatus(list: readonly WhatsAppTemplate[]): Record<StatusF
   return counts;
 }
 
+/** While any template is in review, the list is fetched again this often. */
+export const REVIEW_POLL_MS = 45_000;
+
+/** Whether the list should keep polling: something is still in Meta's review. */
+export const hasPending = (list: readonly WhatsAppTemplate[]) =>
+  list.some(template => template.status === 'PENDING');
+
+/** A template that left review, for the "approved" / "rejected" toast. */
+export interface ReviewOutcome {
+  name: string;
+  language: string;
+  status: 'APPROVED' | 'REJECTED';
+}
+
+/** The templates that went from in review to approved or rejected between two fetches. */
+export function reviewOutcomes(
+  before: readonly WhatsAppTemplate[],
+  after: readonly WhatsAppTemplate[]
+): ReviewOutcome[] {
+  const key = (template: WhatsAppTemplate) => `${template.name}|${template.language}`;
+  const pending = new Set(before.filter(t => t.status === 'PENDING').map(key));
+  return after.flatMap((template): ReviewOutcome[] => {
+    const status = template.status;
+    if (!pending.has(key(template)) || (status !== 'APPROVED' && status !== 'REJECTED')) return [];
+    return [
+      {
+        name: template.name,
+        language: template.language,
+        status: status === 'APPROVED' ? 'APPROVED' : 'REJECTED',
+      },
+    ];
+  });
+}
+
 /**
  * A WhatsApp variable as it is written in the template, built at runtime: the
  * generator's token engine would treat the literal double braces as one of its

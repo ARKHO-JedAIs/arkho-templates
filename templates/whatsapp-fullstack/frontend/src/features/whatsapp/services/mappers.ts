@@ -11,6 +11,7 @@ import type {
   OrderPayload,
   Referral,
   ReplyPayload,
+  TemplateHeaderFormat,
   TemplateQuality,
   WhatsAppTemplate,
 } from '../types';
@@ -34,6 +35,7 @@ export function toConversation(item: unknown): Conversation | null {
     lastInboundAt: orNull(raw.last_inbound_at),
     mode: raw.mode === 'human' ? 'human' : 'assistant',
     takenByName: orNull(raw.taken_by_name),
+    unreadCount: Math.max(0, Math.trunc(toNumber(raw.unreadCount ?? raw.unread_count) ?? 0)),
   };
 }
 
@@ -57,6 +59,7 @@ const KINDS: readonly MessageKind[] = [
   'system',
   'request_welcome',
   'unsupported',
+  'event',
 ];
 
 export const MEDIA_KINDS: readonly MediaKind[] = ['image', 'audio', 'video', 'document', 'sticker'];
@@ -197,6 +200,7 @@ export function toChatMessage(item: unknown): ChatMessage | null {
     ...(reply ? { reply } : {}),
     ...(kind === 'nfm_reply' ? { flow: toFlow(payload) } : {}),
     ...(kind === 'order' ? { order: toOrder(payload) } : {}),
+    ...(kind === 'event' ? { event: { kind: text(payload.kind), by: text(payload.by) } } : {}),
     ...(reaction ? { reaction } : {}),
     ...(text(raw.reply_to) ? { replyTo: text(raw.reply_to) } : {}),
     ...(referral ? { referral } : {}),
@@ -282,7 +286,11 @@ export function avatarTone(phone: string): number {
 }
 
 /** The inbox's quick filters. */
-export type InboxFilter = 'all' | 'human' | 'closed';
+export type InboxFilter = 'all' | 'unread' | 'human' | 'closed';
+
+/** Every unread message of the inbox: the tab title's counter. */
+export const totalUnread = (list: readonly Conversation[]) =>
+  list.reduce((sum, conversation) => sum + conversation.unreadCount, 0);
 
 const fold = (value: string) =>
   value
@@ -304,6 +312,7 @@ export function filterConversations(
   const words = fold(query.trim());
   const digits = query.replace(/\D/g, '');
   return list.filter(conversation => {
+    if (filter === 'unread' && conversation.unreadCount === 0) return false;
     if (filter === 'human' && conversation.mode !== 'human') return false;
     if (filter === 'closed' && isWindowOpen(conversation, now)) return false;
     if (!words) return true;
@@ -374,9 +383,25 @@ export function toTemplate(item: unknown): WhatsAppTemplate | null {
     ? raw.buttons.flatMap(button => {
         if (!button || typeof button !== 'object') return [];
         const entry = button as Record<string, unknown>;
-        return text(entry.text) ? [{ type: text(entry.type), text: text(entry.text) }] : [];
+        const type = text(entry.type).toUpperCase();
+        if (!text(entry.text) && type !== 'COPY_CODE') return [];
+        return [
+          {
+            type,
+            text: text(entry.text),
+            ...(text(entry.url) ? { url: text(entry.url) } : {}),
+            ...(text(entry.phoneNumber) ? { phoneNumber: text(entry.phoneNumber) } : {}),
+            ...(text(entry.example) ? { example: text(entry.example) } : {}),
+          },
+        ];
       })
     : [];
+  const headerFormat = text(raw.headerFormat).toUpperCase();
+  const examples = Object.fromEntries(
+    Object.entries(record(raw.examples)).flatMap(([key, value]) =>
+      typeof value === 'string' ? [[key, value]] : []
+    )
+  );
   return {
     name,
     language: text(raw.language),
@@ -395,8 +420,48 @@ export function toTemplate(item: unknown): WhatsAppTemplate | null {
       (!raw.parameterFormat && names.some(variable => !/^\d+$/.test(variable)))
         ? 'NAMED'
         : 'POSITIONAL',
+    headerFormat: HEADER_FORMATS.includes(headerFormat as TemplateHeaderFormat)
+      ? (headerFormat as TemplateHeaderFormat)
+      : raw.header
+        ? 'TEXT'
+        : null,
+    headerVariableNames: Array.isArray(raw.headerVariableNames)
+      ? raw.headerVariableNames.map(value => String(value).trim()).filter(Boolean)
+      : templateVariableNames(text(raw.header)),
+    headerHandle: orNull(raw.headerHandle),
+    examples,
   };
 }
 
+const HEADER_FORMATS: readonly TemplateHeaderFormat[] = ['TEXT', 'IMAGE', 'VIDEO', 'DOCUMENT'];
+
 /** Only approved templates can be sent; Meta rejects the rest. */
 export const isSendable = (template: WhatsAppTemplate) => template.status === 'APPROVED';
+
+/** What sending a template asks for besides the body variables. */
+export interface TemplateNeeds {
+  /** The text header's variable, when it has one. */
+  headerVariable: string | null;
+  /** The kind of file a media header needs. */
+  headerMedia: 'IMAGE' | 'VIDEO' | 'DOCUMENT' | null;
+  /** URL buttons whose address ends with a variable: their index and base URL. */
+  urlButtons: { index: number; text: string; base: string }[];
+}
+
+export function templateNeeds(template: WhatsAppTemplate): TemplateNeeds {
+  const format = template.headerFormat;
+  return {
+    headerVariable: format === 'TEXT' ? (template.headerVariableNames[0] ?? null) : null,
+    headerMedia: format === 'IMAGE' || format === 'VIDEO' || format === 'DOCUMENT' ? format : null,
+    urlButtons: template.buttons.flatMap((button, index) => {
+      if (button.type !== 'URL' || !button.url) return [];
+      const [match] = [...button.url.matchAll(VARIABLE)];
+      return match ? [{ index, text: button.text, base: button.url.slice(0, match.index) }] : [];
+    }),
+  };
+}
+
+/** A template text with each variable replaced by its value, when it has one. */
+export function fillTemplate(textValue: string, values: Record<string, string>): string {
+  return textValue.replace(VARIABLE, (whole, name: string) => values[name]?.trim() || whole);
+}

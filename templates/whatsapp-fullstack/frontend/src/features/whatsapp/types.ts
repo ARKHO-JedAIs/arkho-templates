@@ -14,6 +14,8 @@ export interface Conversation {
   lastInboundAt: string | null;
   mode: ControlMode;
   takenByName: string | null;
+  /** Customer messages nobody has read yet; reset when someone opens the conversation. */
+  unreadCount: number;
 }
 
 /** Where a message we sent is, as WhatsApp reports it. */
@@ -37,7 +39,16 @@ export type MessageKind =
   | 'order'
   | 'system'
   | 'request_welcome'
-  | 'unsupported';
+  | 'unsupported'
+  /** An internal notice of the inbox (a person took the conversation...). */
+  | 'event';
+
+/** What an internal notice (`kind: 'event'`) says happened. */
+export interface InboxEvent {
+  kind: 'human_takeover' | 'assistant_resumed' | (string & {});
+  /** Who did it: a username or an email. */
+  by: string;
+}
 
 export type MediaKind = 'image' | 'audio' | 'video' | 'document' | 'sticker';
 
@@ -111,6 +122,8 @@ export interface ChatMessage {
   reply?: ReplyPayload;
   flow?: FlowReply;
   order?: OrderPayload;
+  /** `kind: 'event'` only. */
+  event?: InboxEvent;
   /** The contact's reaction to this message. */
   reaction?: string;
   /** The id of the message this one answers or quotes. */
@@ -142,6 +155,12 @@ export interface TemplateButton {
   /** `QUICK_REPLY`, `URL`, `PHONE_NUMBER`... */
   type: string;
   text: string;
+  /** URL buttons; may end with a variable filled when sending. */
+  url?: string;
+  /** Phone buttons. */
+  phoneNumber?: string;
+  /** Copy-code buttons: the sample code. */
+  example?: string;
 }
 
 /** One message template of the WhatsApp Business account (`GET /whatsapp/templates`). */
@@ -164,6 +183,14 @@ export interface WhatsAppTemplate {
   variableNames: string[];
   /** `POSITIONAL`: numbered variables, filled in order. `NAMED`: by name. */
   parameterFormat: 'POSITIONAL' | 'NAMED';
+  /** `null` without header. */
+  headerFormat: TemplateHeaderFormat | null;
+  /** The variable of a text header (at most one). */
+  headerVariableNames: string[];
+  /** Meta's handle of the sample file of a media header, for editing. */
+  headerHandle: string | null;
+  /** The sample values Meta reviewed, keyed like `TemplateRequest.examples`. */
+  examples: Record<string, string>;
 }
 
 /** A file uploaded to the media bucket, ready to send (`POST /whatsapp/messages`). */
@@ -178,21 +205,36 @@ export interface SendTemplateInput {
   phone: string;
   templateName: string;
   language: string;
+  /** The body variables, in order. */
   parameters: string[];
+  /** The header variable, when the template's text header has one. */
+  headerText?: string;
+  /** The header file, when the template has an image, video or document header. */
+  headerFile?: { file: File; mimeType: string };
+  /** The suffix of each URL button whose address ends with a variable. */
+  buttons?: { index: number; text: string }[];
 }
 
+/** The header kinds a template can have. */
+export type TemplateHeaderFormat = 'TEXT' | 'IMAGE' | 'VIDEO' | 'DOCUMENT';
+
 /**
- * A new template as the creator submits it, in the shape `GET /whatsapp/templates`
- * returns, so the demo list can hold it as is. There is no create endpoint yet.
+ * A template as `POST /whatsapp/templates` and `PUT /whatsapp/templates/{id}`
+ * take it (`common/whatsapp/templates.py`). `examples` are keyed
+ * `header:<variable>`, `body:<variable>` and `button:<index>`.
  */
-export interface CreateTemplateInput {
+export interface TemplateRequest {
   name: string;
   language: string;
-  category: string;
-  header: string | null;
+  /** Omitted on an edit that keeps the category. */
+  category?: string;
+  parameterFormat: 'POSITIONAL' | 'NAMED';
+  header:
+    | { format: 'TEXT'; text: string }
+    | { format: 'IMAGE' | 'VIDEO' | 'DOCUMENT'; handle: string }
+    | null;
   body: string;
   footer: string | null;
-  buttons: TemplateButton[];
-  variableNames: string[];
-  parameterFormat: 'POSITIONAL' | 'NAMED';
+  buttons: { type: string; text: string; url?: string; phone?: string; code?: string }[];
+  examples: Record<string, string>;
 }

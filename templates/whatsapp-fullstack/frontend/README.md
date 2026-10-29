@@ -153,16 +153,44 @@ outside `src/lib/auth` that imports `aws-amplify`.
 Under `VITE_AUTH_PROVIDER=mock` the section runs on in-memory demo data
 (`services/mockWhatsApp.ts`) instead of the API, so it works with no backend.
 
+Inbox details:
+
+- **Unread** - each row shows a badge in the brand colour with the number of
+  unread customer messages (read by screen readers as "N mensajes sin leer")
+  and a bold time; the "Sin leer" chip keeps only those. Opening a
+  conversation, and every new message while it stays open, calls
+  `PUT /whatsapp/conversations/{phone}/read`. While the page is open the tab
+  title starts with "(N) ", the inbox's total.
+- **Search** - 2+ characters ask the backend (`?search=`, debounced 300 ms,
+  `hooks/useConversationSearch.ts`) over every conversation; shorter text
+  filters the loaded list. The chips apply to both. Messages are not searched.
+- **Notices** - taking the conversation or handing it back to the agent is
+  stored as a notice (`kind: 'event'`) and drawn centered: "Ana tomó la
+  conversación · 10:06".
+- **Templates** - the send dialog asks for exactly what the template needs:
+  body variables, the header variable or file (uploaded through the presigned
+  URL when sending), and the end of each URL button that ends with a variable,
+  with a preview.
+
 `src/features/templates` (Configuración > Plantillas, `/settings/templates`)
 lists every message template from `GET /whatsapp/templates` with its Meta
 review status, quality, a WhatsApp-like preview and its variables. The send
-dialog in the inbox offers only the `APPROVED` ones.
+dialog in the inbox offers only the `APPROVED` ones. While any template is in
+review the list refreshes every 45 seconds (not while the tab is hidden) and
+toasts "Tu plantilla X fue aprobada" / "rechazada".
 
-"Agregar plantilla" opens `/settings/templates/new`, a frontend-only preview of
-creating a template: the form, a live preview and Meta's rules checked as you
-type (`templateRules.ts` holds the limits, `validateTemplate.ts` checks them).
-There is no create endpoint yet: under mock auth "Enviar a revisión" adds the
-template to the demo list as `PENDING`; otherwise the button stays disabled.
+"Agregar plantilla" opens `/settings/templates/new`: the form, a live preview
+and Meta's rules checked as you type (`templateRules.ts` holds the limits,
+`validateTemplate.ts` checks them, `templateRequest.ts` turns the draft into
+the backend request). "Enviar a revisión" calls `POST /whatsapp/templates`; an
+image, video or document header uploads its sample file first
+(`POST /whatsapp/templates/media`). The detail sheet's "Editar" opens the same
+page at `/settings/templates/$metaTemplateId/edit` (prefilled; name and
+language locked; Meta's edit limits in the conditions panel, with the rules
+the template could not verify shown as warnings) and "Eliminar" asks for
+confirmation first: an approved template's name cannot be reused for 30 days.
+Under mock auth all of it works on the demo list, and a template in review is
+approved a minute later.
 
 ## Theming
 

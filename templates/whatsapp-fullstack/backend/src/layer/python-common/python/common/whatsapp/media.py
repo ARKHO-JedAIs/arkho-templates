@@ -252,3 +252,30 @@ def exposed(item: dict | None) -> dict | None:
         except Exception:  # noqa: BLE001
             media["error"] = "url_unavailable"
     return {**item, "media": media}
+
+
+# What Meta accepts as the sample file of a template's media header.
+TEMPLATE_HEADER_MIME_TYPES = {
+    "IMAGE": {"image/jpeg", "image/png"},
+    "VIDEO": {"video/mp4"},
+    "DOCUMENT": {"application/pdf"},
+}
+
+
+def template_header_format(mime_type: str) -> str:
+    """``IMAGE``, ``VIDEO`` or ``DOCUMENT`` for a template header sample; MediaRejected otherwise."""
+    mime = base_mime(mime_type)
+    for header_format, mime_types in TEMPLATE_HEADER_MIME_TYPES.items():
+        if mime in mime_types:
+            return header_format
+    raise MediaRejected("A template header takes a JPEG or PNG image, an MP4 video or a PDF document")
+
+
+def template_header_handle(key: str) -> str:
+    """Hands an uploaded sample file to Meta for a template's media header: the
+    handle the template's ``example.header_handle`` refers to."""
+    response = social_messaging.create_whatsapp_message_template_media(
+        id=config.waba_id(),
+        sourceS3File={"bucketName": _bucket(), "key": key},
+    )
+    return str(response.get("metaHeaderHandle", ""))

@@ -11,8 +11,9 @@ import { isMockAuth } from '@/lib/auth/session';
  *
  * Channels: a contact's phone carries its conversation (`MESSAGE_RECEIVED`,
  * `MESSAGE_SENT`, `TEMPLATE_SENT`, `MESSAGE_STATUS`, `MESSAGE_UPDATED`,
- * `CONTROL_CHANGED`) and `inbox` carries the
- * conversation list (`CONVERSATION_UPDATED`). The payload is the stored item.
+ * `CONTROL_CHANGED`, `CONVERSATION_EVENT`) and `inbox` carries the
+ * conversation list (`CONVERSATION_UPDATED`, with `unreadCount`). The payload
+ * is the stored item.
  *
  * Under mock auth the demo data publishes on an in-memory bus instead, so the
  * page behaves the same with no backend.

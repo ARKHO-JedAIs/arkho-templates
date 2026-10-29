@@ -114,7 +114,8 @@ same realtime path AppSync uses, so the whole screen can be exercised.
 
 6. **Try it** - write to the business number from your phone: the conversation
    shows up live. Reply from the web within 24 hours, or send a template
-   (templates are created and approved in WhatsApp Manager).
+   (create it from Configuración > Plantillas; Meta reviews it before it can
+   be sent).
 
 ## Sign in with Microsoft or Google
 
@@ -186,13 +187,48 @@ Every route requires the `WHATSAPP_ADMIN_GROUP` group (403 otherwise), unless
 
 | Method | Path | Body / query | Returns `data` |
 |---|---|---|---|
-| GET | `/whatsapp/conversations` | | conversations, most recent first |
+| GET | `/whatsapp/conversations` | `[?search=<text>]` | conversations, most recent first, each with `unreadCount`; with `search` (2+ characters) only those whose name (case and accents ignored) or phone digits contain it, up to 50 |
+| PUT | `/whatsapp/conversations/{phone}/read` | | the conversation with `unreadCount: 0` (also announced on `inbox`); 404 if unknown |
 | GET | `/whatsapp/messages` | `?phone=<digits>[&before=<iso>]` | `{ conversation, messages, window_open }`; files as presigned `media.url` |
 | POST | `/whatsapp/messages` | `{ phone, message }` or `{ phone, media: { key, mimeType, filename?, caption? } }` | the stored message; 409 `WINDOW_CLOSED` after 24 h; 422 `MEDIA_REJECTED` |
-| POST | `/whatsapp/media/upload-url` | `{ phone, filename, mimeType, size }` | `{ upload_url, key, type, headers, expires_in }`: a presigned PUT checked against WhatsApp's type/size limits |
-| GET | `/whatsapp/templates` | | every template with its status, components and variables (only APPROVED ones can be sent) |
-| POST | `/whatsapp/templates/send` | `{ phone, template_name, language, parameters? }` | the stored message |
-| PUT | `/whatsapp/control` | `{ phone, mode: "human" \| "assistant" }` | the conversation |
+| POST | `/whatsapp/media/upload-url` | `{ phone?, filename, mimeType, size }` | `{ upload_url, key, type, headers, expires_in }`: a presigned PUT checked against WhatsApp's type/size limits (`phone` is left out for a template header sample) |
+| GET | `/whatsapp/templates` | | every template with its status, components, variables, `headerFormat`, button URLs and the reviewed `examples` (only APPROVED ones can be sent) |
+| POST | `/whatsapp/templates` | a template request (see below) | `{ metaTemplateId, status, category, name, language }` (201); 422 `TEMPLATE_INVALID` with `error.details.rules` |
+| PUT | `/whatsapp/templates/{metaTemplateId}` | the same request (`category` only when it changes) | `{ metaTemplateId, status: "PENDING" }`: the components are replaced and Meta reviews it again |
+| DELETE | `/whatsapp/templates` | `?name=<name>[&metaTemplateId=<id>]` | with the id, that language version; without it, every language of the name |
+| POST | `/whatsapp/templates/media` | `{ key, mimeType }` of a file uploaded through `upload-url` | `{ handle, format }`: the sample of an IMAGE (JPEG/PNG), VIDEO (MP4) or DOCUMENT (PDF) header |
+| POST | `/whatsapp/templates/send` | `{ phone, template_name, language, parameters?, header?: { text? , media?: { key, mimeType, filename? } }, buttons?: [{ index, text }] }` | the stored message; 422 when a part the template needs is missing or one it does not take is sent |
+| PUT | `/whatsapp/control` | `{ phone, mode: "human" \| "assistant" }` | the conversation; a real change also stores and announces a notice (`type: event`) |
+
+A template request (`templates-admin`, one function behind the four template
+write routes) is the creator's draft:
+
+```json
+{
+  "name": "confirmacion_pedido", "language": "es", "category": "UTILITY",
+  "parameterFormat": "POSITIONAL",
+  "header": { "format": "TEXT", "text": "..." },
+  "body": "...", "footer": "...",
+  "buttons": [{ "type": "URL", "text": "Seguir", "url": "https://example.com/" }],
+  "examples": { "header:1": "A-1", "body:1": "Ana", "button:0": "A-1" }
+}
+```
+
+`header` may also be `{ "format": "IMAGE" | "VIDEO" | "DOCUMENT", "handle": "<from /templates/media>" }`
+or `null`. The backend checks it with the same rules and limits as the web's
+creator (`common/whatsapp/templates.py` mirrors `validateTemplate.ts` and
+`templateRules.ts`), builds Meta's definition and calls
+`CreateWhatsAppMessageTemplate` / `UpdateWhatsAppMessageTemplate` (components
+up to 3,000 characters). AWS and Meta errors become 4xx: invalid parameters 422
+`META_REJECTED`, Meta access denied 403 `META_ACCESS_DENIED`, throttling 429
+`THROTTLED`, not found 404. Every template change logs one JSON audit line
+(`"audit": "whatsapp-templates"`).
+
+Inbox search scans the conversations table with a filter on `search_key` (the
+folded name and the phone, written on every new message): fine for thousands
+of contacts. Conversations stored before this version get their `search_key`
+with their next message. Searching inside the messages is out of scope: it
+needs a search engine (Amazon OpenSearch Service) fed from the messages table.
 
 With `USERS_API_ENABLED=true`, the Usuarios screen's API (one `admin-users`
 function over Cognito, roles = the `admin` and `member` groups):
@@ -214,8 +250,10 @@ calls themselves.
 
 Realtime (AppSync `onEvent(id)`): `id=<phone>` carries `MESSAGE_RECEIVED`,
 `MESSAGE_SENT`, `TEMPLATE_SENT`, `MESSAGE_STATUS` (sent, delivered, read,
-failed, deleted, warning), `MESSAGE_UPDATED` (a reaction) and
-`CONTROL_CHANGED`; `id=inbox` carries `CONVERSATION_UPDATED`. The payload is
+failed, deleted, warning), `MESSAGE_UPDATED` (a reaction), `CONTROL_CHANGED`
+and `CONVERSATION_EVENT` (an internal notice: `direction: internal`,
+`type: event`, `payload: { kind: human_takeover | assistant_resumed, by }`);
+`id=inbox` carries `CONVERSATION_UPDATED` with `unreadCount`. The payload is
 the stored item, with a presigned `media.url` instead of the file's key. Every
 inbound WhatsApp message type and how it is stored is mapped in
 `docs/WHATSAPP_EVENTS.md`. Only the admin group can subscribe when one is set.
@@ -229,10 +267,11 @@ next: [docs/WHATSAPP_EVENTS.md](docs/WHATSAPP_EVENTS.md).
   their caption, not downloaded.
 - An AI agent: plug it into `answer()` in `backend/src/lambda/whatsapp/ws-handler`.
 - Message rate limits per contact.
-- Inbox: unread counters, search and filters, and the hours left in the 24 h
-  window, computed by the backend.
-- Quick replies (saved texts inserted with one click) and a new-message alert
-  (tab title counter and sound).
+- Inbox: search inside the messages (Amazon OpenSearch Service), and the hours
+  left in the 24 h window computed by the backend.
+- Quick replies (saved texts inserted with one click) and a new-message sound.
+- Pushing template review results: the templates page polls every 45 s while
+  one is in review; the `message_template_status_update` webhook is not wired.
 - A `deploy` script that wraps `cdk deploy --profile` for the SSO profile.
 - Filling `frontend/.env` from the stack outputs after a deploy (API URL,
   AppSync URL, Cognito ids) instead of asking for them at generation.
@@ -242,4 +281,9 @@ To verify on the first deploy (built from midoc's working setup, not yet run
 against AWS from this template): the Python 3.12 Lambda runtime ships a boto3
 with the `socialmessaging` client, and the delivery statuses match the sent
 messages (the message id End User Messaging Social returns is the one its
-status notifications carry - an unmatched status is logged and ignored).
+status notifications carry - an unmatched status is logged and ignored). The
+template write calls (`create_whatsapp_message_template`, `update_...`,
+`delete_...`, `create_whatsapp_message_template_media`) are recent: if the
+runtime's boto3 lacks them, bundle a newer boto3 in the `python-common` layer.
+The details of the template definition the AWS documentation does not state
+are listed in `docs/WHATSAPP_EVENTS.md` (section 5).

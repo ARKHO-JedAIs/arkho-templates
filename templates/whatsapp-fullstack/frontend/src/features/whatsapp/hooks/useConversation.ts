@@ -6,12 +6,14 @@ import type { ChatMessage } from '../types';
 
 // MESSAGE_STATUS and MESSAGE_UPDATED (a reaction) carry the whole stored
 // message, so merging it by id is what updates a message already on screen.
+// CONVERSATION_EVENT is an internal notice (a person took the conversation).
 const MESSAGE_EVENTS = new Set([
   'MESSAGE_RECEIVED',
   'MESSAGE_SENT',
   'TEMPLATE_SENT',
   'MESSAGE_STATUS',
   'MESSAGE_UPDATED',
+  'CONVERSATION_EVENT',
 ]);
 
 /** The backend's page size: a shorter page means there is nothing older. */

@@ -9,10 +9,12 @@ Channels (the subscription's ``id``):
 
 * the contact's phone - MESSAGE_RECEIVED, MESSAGE_SENT, TEMPLATE_SENT,
   MESSAGE_STATUS (sent / delivered / read / failed / deleted / warning),
-  MESSAGE_UPDATED (a reaction added or removed) and CONTROL_CHANGED, with the
-  stored item as payload (``media.key`` swapped for a presigned URL)
-* ``inbox`` - CONVERSATION_UPDATED with the conversation summary, so the list
-  of conversations reorders itself without polling
+  MESSAGE_UPDATED (a reaction added or removed), CONTROL_CHANGED and
+  CONVERSATION_EVENT (an internal notice, e.g. a person took the
+  conversation), with the stored item as payload (``media.key`` swapped for a
+  presigned URL)
+* ``inbox`` - CONVERSATION_UPDATED with the conversation summary (including
+  ``unreadCount``), so the list of conversations reorders itself without polling
 """
 import json
 import logging
@@ -23,6 +25,8 @@ from urllib.request import Request, urlopen
 import boto3
 from botocore.auth import SigV4Auth
 from botocore.awsrequest import AWSRequest
+
+from . import store
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +40,7 @@ TEMPLATE_SENT = "TEMPLATE_SENT"
 CONTROL_CHANGED = "CONTROL_CHANGED"
 MESSAGE_STATUS = "MESSAGE_STATUS"
 MESSAGE_UPDATED = "MESSAGE_UPDATED"
+CONVERSATION_EVENT = "CONVERSATION_EVENT"
 CONVERSATION_UPDATED = "CONVERSATION_UPDATED"
 
 PUBLISH_EVENT = """
@@ -96,4 +101,9 @@ def announce_message(event_type: str, item: dict, conversation: dict | None = No
     """A stored message on its contact's channel, and the new summary on the inbox."""
     publish(item["phone"], event_type, payload=item, message=item.get("message"))
     if conversation:
-        publish(INBOX_CHANNEL, CONVERSATION_UPDATED, payload=conversation)
+        announce_conversation(conversation)
+
+
+def announce_conversation(conversation: dict) -> None:
+    """The conversation summary on the inbox channel, as the web reads it."""
+    publish(INBOX_CHANNEL, CONVERSATION_UPDATED, payload=store.conversation_view(conversation))

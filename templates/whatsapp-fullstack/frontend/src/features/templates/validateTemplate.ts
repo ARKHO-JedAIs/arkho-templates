@@ -32,6 +32,10 @@ export interface TemplateDraft {
   parameterFormat: ParameterFormat;
   headerFormat: HeaderFormat;
   headerText: string;
+  /** Meta's handle of the uploaded sample file of a media header. */
+  headerHandle: string;
+  /** The sample file's name, to show which one was uploaded. */
+  headerFileName: string;
   body: string;
   footer: string;
   buttons: DraftButton[];
@@ -46,6 +50,8 @@ export const emptyDraft = (): TemplateDraft => ({
   parameterFormat: 'POSITIONAL',
   headerFormat: 'NONE',
   headerText: '',
+  headerHandle: '',
+  headerFileName: '',
   body: '',
   footer: '',
   buttons: [],
@@ -267,6 +273,13 @@ export function validateTemplate(draft: TemplateDraft): ValidationResult {
         named ? formatHint : `Por posición, la variable del encabezado es ${variableToken('1')}.`
       );
     }
+  } else if (draft.headerFormat !== 'NONE') {
+    error(
+      'header-media-handle',
+      draft.headerHandle.trim() !== '',
+      'El encabezado tiene su archivo de ejemplo',
+      'Sube el archivo que Meta revisará con la plantilla.'
+    );
   }
 
   // Body.

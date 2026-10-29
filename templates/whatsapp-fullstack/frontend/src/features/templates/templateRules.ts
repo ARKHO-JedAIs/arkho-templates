@@ -21,13 +21,19 @@ export const TEMPLATE_LIMITS = {
   urlMax: 2000,
   urlVariablesMax: 1,
   phoneMax: 20,
-  copyCodeExampleMax: 15,
+  copyCodeExampleMax: 20,
   templatesPerAccountUnverified: 250,
   templatesPerAccountVerified: 6000,
   templatesPerHour: 100,
   reviewHours: 24,
-  deletedNameWeeks: 4,
+  deletedNameDays: 30,
   archiveAfterMonths: 12,
+  /** End User Messaging Social: the whole definition on create, the components on edit. */
+  createDefinitionMaxBytes: 6000,
+  editComponentsMaxChars: 3000,
+  /** Meta: an approved template can be edited this often. */
+  approvedEditsPer30Days: 10,
+  approvedEditsPer24Hours: 1,
   /**
    * A heuristic, not a published number: Meta rejects bodies with "too many
    * variables for the message length" without saying where the line is. Below
@@ -119,6 +125,27 @@ export const TEMPLATE_RECOMMENDATIONS: readonly string[] = [
   'No empieces ni termines el cuerpo con una variable.',
   'No pongas dos variables seguidas sin texto entre ellas.',
   'No abuses de las variables en textos cortos.',
-  `El nombre de una plantilla eliminada puede no reutilizarse por unas ${L.deletedNameWeeks} semanas.`,
+  `Si eliminas una plantilla aprobada, no puedes crear otra con el mismo nombre por ${L.deletedNameDays} días.`,
   `Las plantillas sin uso por ${L.archiveAfterMonths} meses se archivan.`,
+];
+
+/**
+ * Meta's rules for editing a template ("Template management", verified): what
+ * the conditions panel lists while editing.
+ */
+export const EDIT_CONDITIONS: readonly string[] = [
+  'Solo se pueden editar plantillas aprobadas, rechazadas o pausadas.',
+  `Una plantilla aprobada se puede editar hasta ${L.approvedEditsPer30Days} veces en 30 días, y ${L.approvedEditsPer24Hours} vez cada 24 horas. Las rechazadas o pausadas, sin límite.`,
+  'El nombre y el idioma no se pueden cambiar; tampoco la categoría de una plantilla aprobada.',
+  'La edición reemplaza todos los componentes y la plantilla vuelve a revisión.',
+  `Los componentes editados no pueden superar ${n(L.editComponentsMaxChars)} caracteres.`,
+];
+
+/**
+ * What the template could not confirm in Meta's or AWS's documentation:
+ * shown as warnings, not as rules.
+ */
+export const EDIT_WARNINGS: readonly string[] = [
+  'Mientras Meta revisa la edición, la plantilla puede no poder enviarse.',
+  'Cambiar el formato de variables (por posición o con nombre) de una plantilla existente puede ser rechazado.',
 ];

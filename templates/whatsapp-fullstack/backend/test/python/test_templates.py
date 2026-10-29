@@ -168,8 +168,44 @@ class ListTemplatesTest(TemplatesTestCase):
         self.assertEqual(template["footer"], "Responde STOP para salir")
         self.assertEqual(
             template["buttons"],
-            [{"type": "QUICK_REPLY", "text": "Confirmar"}, {"type": "URL", "text": "Ver cita"}],
+            [{"type": "QUICK_REPLY", "text": "Confirmar"}, {"type": "URL", "text": "Ver cita", "url": "https://example.com"}],
         )
+        self.assertEqual(template["headerFormat"], "TEXT")
+        self.assertEqual(template["headerVariableNames"], [])
+
+    def test_describes_what_sending_needs_and_the_examples(self):
+        definition = {
+            "parameter_format": "POSITIONAL",
+            "components": [
+                {"type": "HEADER", "format": "TEXT", "text": f"Pedido {var('1')}", "example": {"header_text": ["A-1"]}},
+                {"type": "BODY", "text": f"Hola {var('1')}, llega el {var('2')}", "example": {"body_text": [["Ana", "lunes"]]}},
+                {
+                    "type": "BUTTONS",
+                    "buttons": [
+                        {"type": "URL", "text": "Seguir", "url": f"https://example.com/p/{var('1')}", "example": ["A-1"]},
+                        {"type": "PHONE_NUMBER", "text": "Llamar", "phone_number": "+56911111111"},
+                    ],
+                },
+            ],
+        }
+        self.use([summary("order")], {"meta-order-es_PE": definition})
+        [template] = messaging.list_templates()
+        self.assertEqual(template["headerVariableNames"], ["1"])
+        self.assertEqual(template["examples"], {"header:1": "A-1", "body:1": "Ana", "body:2": "lunes", "button:0": "A-1"})
+        self.assertEqual(template["buttons"][1]["phoneNumber"], "+56911111111")
+        self.assertEqual(messaging.dynamic_url_buttons(template), [0])
+
+    def test_a_media_header_keeps_its_format_and_handle(self):
+        definition = {
+            "components": [
+                {"type": "HEADER", "format": "IMAGE", "example": {"header_handle": ["4::aW1n"]}},
+                {"type": "BODY", "text": "Mira"},
+            ]
+        }
+        self.use([summary("photo")], {"meta-photo-es_PE": definition})
+        [template] = messaging.list_templates()
+        self.assertEqual(template["headerFormat"], "IMAGE")
+        self.assertEqual(template["headerHandle"], "4::aW1n")
 
     def test_a_template_without_text_parts_gets_nulls(self):
         definition = {"components": [{"type": "HEADER", "format": "IMAGE"}, {"type": "BODY", "text": "Mira"}]}
@@ -261,6 +297,115 @@ class SendTemplateTest(TemplatesTestCase):
                 {"type": "text", "parameter_name": "order_id", "text": "A-12"},
             ],
         )
+
+    def send_with(self, name: str, **fields) -> tuple[int, dict]:
+        event = {
+            "requestContext": {"authorizer": {"username": "ana"}},
+            "body": json.dumps({"phone": "+56911111111", "template_name": name, "language": "es_PE", **fields}),
+        }
+        response = send_template.handler(event, None)
+        return response["statusCode"], json.loads(response["body"])
+
+    def order_template(self, header: dict) -> FakeSocialMessaging:
+        definition = {
+            "components": [
+                header,
+                {"type": "BODY", "text": f"Hola {var('1')}"},
+                {
+                    "type": "BUTTONS",
+                    "buttons": [
+                        {"type": "QUICK_REPLY", "text": "Ok"},
+                        {"type": "URL", "text": "Seguir", "url": f"https://example.com/p/{var('1')}"},
+                    ],
+                },
+            ]
+        }
+        return self.use([summary("order")], {"meta-order-es_PE": definition})
+
+    def test_fills_the_header_variable_and_the_url_suffix(self):
+        fake = self.order_template({"type": "HEADER", "format": "TEXT", "text": f"Pedido {var('1')}"})
+        status, body = self.send_with(
+            "order", parameters=["Ana"], header={"text": "A-1"}, buttons=[{"index": 1, "text": "A-1"}]
+        )
+        self.assertEqual(status, 200, body)
+        self.assertEqual(
+            fake.sent_payload()["template"]["components"],
+            [
+                {"type": "header", "parameters": [{"type": "text", "text": "A-1"}]},
+                {"type": "body", "parameters": [{"type": "text", "text": "Ana"}]},
+                {"type": "button", "sub_type": "url", "index": "1", "parameters": [{"type": "text", "text": "A-1"}]},
+            ],
+        )
+        self.assertEqual(self.saved.call_args.args[3], "order (es_PE): A-1, Ana, A-1")
+
+    def test_requires_exactly_the_parts_the_template_needs(self):
+        fake = self.order_template({"type": "HEADER", "format": "TEXT", "text": f"Pedido {var('1')}"})
+        for fields in (
+            {"parameters": ["Ana"], "buttons": [{"index": 1, "text": "A-1"}]},
+            {"parameters": ["Ana"], "header": {"text": "A-1"}},
+            {"parameters": ["Ana"], "header": {"text": "A-1"}, "buttons": [{"index": 0, "text": "x"}, {"index": 1, "text": "y"}]},
+        ):
+            status, body = self.send_with("order", **fields)
+            self.assertEqual(status, 422, fields)
+            self.assertEqual(body["error"]["code"], "VALIDATION_ERROR")
+        fake.send_whatsapp_message.assert_not_called()
+
+    def test_sends_a_media_header_by_its_whatsapp_id(self):
+        fake = self.order_template({"type": "HEADER", "format": "DOCUMENT"})
+        key = "outbound/0123456789abcdef0123456789abcdef0123.pdf"
+        with mock.patch.object(
+            support.media, "uploaded_object", return_value={"mimeType": "application/pdf", "size": 2048}
+        ), mock.patch.object(support.media, "post_to_whatsapp", return_value="media-1") as post:
+            status, body = self.send_with(
+                "order",
+                parameters=["Ana"],
+                header={"media": {"key": key, "mimeType": "application/pdf", "filename": "boleta.pdf"}},
+                buttons=[{"index": 1, "text": "A-1"}],
+            )
+        self.assertEqual(status, 200, body)
+        post.assert_called_once_with(key)
+        self.assertEqual(
+            fake.sent_payload()["template"]["components"][0],
+            {"type": "header", "parameters": [{"type": "document", "document": {"id": "media-1", "filename": "boleta.pdf"}}]},
+        )
+
+    def test_rejects_a_header_file_of_another_type(self):
+        fake = self.order_template({"type": "HEADER", "format": "IMAGE"})
+        with mock.patch.object(support.media, "uploaded_object", return_value={"mimeType": "application/pdf", "size": 10}):
+            status, body = self.send_with(
+                "order",
+                parameters=["Ana"],
+                header={"media": {"key": "outbound/x.pdf", "mimeType": "application/pdf"}},
+                buttons=[{"index": 1, "text": "A-1"}],
+            )
+        self.assertEqual(status, 422)
+        self.assertEqual(body["error"]["code"], "MEDIA_REJECTED")
+        fake.send_whatsapp_message.assert_not_called()
+
+    def test_a_named_header_variable_is_tagged(self):
+        definition = {
+            "parameter_format": "NAMED",
+            "components": [
+                {"type": "HEADER", "format": "TEXT", "text": f"Pedido {var('order_id')}"},
+                {"type": "BODY", "text": "Gracias"},
+            ],
+        }
+        fake = self.use([summary("named")], {"meta-named-es_PE": definition})
+        status, _ = self.send_with("named", header={"text": "A-1"})
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            fake.sent_payload()["template"]["components"],
+            [{"type": "header", "parameters": [{"type": "text", "text": "A-1", "parameter_name": "order_id"}]}],
+        )
+
+    def test_maps_a_throttled_send_to_429(self):
+        fake = self.use([summary("plain")], {"meta-plain-es_PE": body_only("Hola")})
+        error = messaging.ClientError("throttled")
+        error.response = {"Error": {"Code": "ThrottledRequestException", "Message": "slow down"}}
+        fake.send_whatsapp_message.side_effect = error
+        status, body = self.send_with("plain")
+        self.assertEqual(status, 429)
+        self.assertEqual(body["error"]["code"], "THROTTLED")
 
 
 if __name__ == "__main__":

@@ -233,7 +233,9 @@ export function ChatThread({
                   {day.label}
                 </p>
                 {day.messages.map(message =>
-                  message.kind === 'system' || message.kind === 'request_welcome' ? (
+                  message.kind === 'system' ||
+                  message.kind === 'request_welcome' ||
+                  message.kind === 'event' ? (
                     <Notice key={message.id} message={message} />
                   ) : (
                     <Bubble
@@ -256,8 +258,25 @@ export function ChatThread({
   );
 }
 
+/** The text of an inbox notice: who took the conversation, or that the agent resumed. */
+function eventText(message: ChatMessage): string {
+  const event = message.event;
+  if (event?.kind === 'human_takeover') return `${event.by || 'Una persona'} tomó la conversación`;
+  if (event?.kind === 'assistant_resumed') return 'El Agente IA retomó la conversación';
+  return message.text || 'Aviso';
+}
+
 /** What is not a message from someone: centered, like WhatsApp's own notices. */
 function Notice({ message }: { message: ChatMessage }) {
+  if (message.kind === 'event') {
+    const Icon = message.event?.kind === 'assistant_resumed' ? Sparkles : UserRound;
+    return (
+      <p className='mx-auto my-1 flex max-w-[85%] items-center gap-1.5 rounded-lg bg-card px-3 py-1.5 text-center text-xs text-foreground-secondary shadow-sm'>
+        <Icon className='h-3.5 w-3.5 shrink-0' aria-hidden />
+        {eventText(message)} · {time.format(new Date(message.timestamp))}
+      </p>
+    );
+  }
   return (
     <p className='mx-auto my-1 flex max-w-[85%] items-center gap-1.5 rounded-lg bg-card px-3 py-1.5 text-center text-xs text-foreground-secondary shadow-sm'>
       <Info className='h-3.5 w-3.5 shrink-0' aria-hidden />

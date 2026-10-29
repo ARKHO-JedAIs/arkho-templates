@@ -9,8 +9,12 @@ export const section: AppSection = {
   icon: FileText,
   group: 'Configuración',
   load: () => import('./TemplatesPage'),
-  // The creator: reached from the list's "Agregar plantilla", no sidebar entry.
-  routes: [{ path: TEMPLATE_PATHS.create, load: () => import('./CreateTemplatePage') }],
+  // The creator: reached from the list's "Agregar plantilla" or a template's
+  // "Editar" (same page, prefilled), no sidebar entry.
+  routes: [
+    { path: TEMPLATE_PATHS.create, load: () => import('./CreateTemplatePage') },
+    { path: TEMPLATE_PATHS.edit, load: () => import('./CreateTemplatePage') },
+  ],
   // Same answer as the users screen: with roles, configuration is for admins.
   requiresAdmin: {{ use_roles }},
   order: 80,

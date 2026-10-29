@@ -232,18 +232,91 @@ Limits (Meta "Message templates - components" page):
 | URL buttons | up to 2, label 25 characters, URL 2000 characters, 1 variable appended at the end of the URL |
 | Phone number button | 1, label 25 characters, number 20 characters |
 | Copy code button | 1, example up to 20 characters |
+| Footer, text header | 60 characters (verified on Meta's components page) |
 
 What this template does today:
 
 - `GET /whatsapp/templates` returns every template with `status`,
-  `qualityScore`, `header` (text headers only, `null` for media), `body`,
-  `footer`, `buttons`, `variables` (distinct body variables), `variableNames`
-  and `parameterFormat`.
-- `POST /whatsapp/templates/send` only fills **body** variables: it rejects a
-  non-APPROVED template (409 `TEMPLATE_NOT_APPROVED`), checks the parameter
-  count, and tags each value with `parameter_name` when the template is NAMED.
-  Header variables, media headers and button parameters are not sent yet, so a
-  template that needs them is rejected by Meta (502).
+  `qualityScore`, `header` (text headers only, `null` for media),
+  `headerFormat` (`TEXT` / `IMAGE` / `VIDEO` / `DOCUMENT` / `null`),
+  `headerVariableNames`, `headerHandle` (the sample of a media header), `body`,
+  `footer`, `buttons` (`type`, `text`, plus `url`, `phoneNumber` or the copy
+  code `example`), `variables` (distinct body variables), `variableNames`,
+  `parameterFormat` and `examples` (the reviewed sample values, keyed
+  `header:<variable>`, `body:<variable>`, `button:<index>`).
+- `POST /whatsapp/templates/send` fills every part the template needs and
+  only those: body variables (`parameters`, in order, tagged with
+  `parameter_name` when NAMED), the text header variable (`header.text`,
+  tagged too when NAMED), the media header (`header.media`, a file uploaded
+  through `upload-url`: checked against the header format, handed to WhatsApp
+  with `PostWhatsAppMessageMedia` and sent as `{"type": "image", "image":
+  {"id": ...}}`, the document with its `filename`) and the suffix of each URL
+  button whose address ends with a variable (`buttons: [{index, text}]`, sent
+  as `sub_type: url`). A missing or extra part is 422; a non-APPROVED
+  template is 409 `TEMPLATE_NOT_APPROVED`. Quick reply payloads and copy code
+  values are not sent (Meta uses the template's own).
+
+### Creating, editing and deleting templates
+
+`templates-admin` (one Lambda behind four routes, so the write permissions
+live on one role) serves `POST /whatsapp/templates`,
+`PUT /whatsapp/templates/{metaTemplateId}`, `DELETE /whatsapp/templates` and
+`POST /whatsapp/templates/media`. `common/whatsapp/templates.py` checks the
+request with the web creator's rules (same ids: `name-format`, `body-length`,
+`header-media-handle`, `examples-complete`, ...; 422 `TEMPLATE_INVALID`
+lists them in `error.details.rules`) and builds Meta's definition:
+
+| Part | Built as |
+| --- | --- |
+| text header | `{"type": "HEADER", "format": "TEXT", "text", "example": {"header_text": ["..."]}}` (NAMED: `header_text_named_params`) |
+| media header | `{"type": "HEADER", "format": "IMAGE", "example": {"header_handle": ["<handle>"]}}` |
+| body | `{"type": "BODY", "text", "example": {"body_text": [["...", "..."]]}}` (NAMED: `body_text_named_params: [{param_name, example}]`) |
+| footer | `{"type": "FOOTER", "text"}` |
+| buttons | `QUICK_REPLY {text}`, `URL {text, url, example: ["<suffix>"]}`, `PHONE_NUMBER {text, phone_number}`, `COPY_CODE {example}` |
+| create | `{name, language, category, parameter_format, components}` as `templateDefinition` (up to 6,000 bytes) |
+| edit | `templateComponents` (up to 3,000 characters), `parameterFormat` lower case, `templateCategory` only when it changes |
+| delete | `templateName` plus `metaTemplateId` (one language); without the id every language of the name |
+| header sample | `CreateWhatsAppMessageTemplateMedia(id, sourceS3File)` over an `outbound/` upload -> `metaHeaderHandle` |
+
+Meta's edit rules (developers.facebook.com, "Template management"): only
+APPROVED, REJECTED or PAUSED templates can be edited; an approved one up to 10
+times in 30 days and once per 24 hours; the category of an approved template
+cannot change; the edit replaces every component. Deleting by name deletes
+every language; an approved template's name cannot be reused for 30 days.
+
+Verified in the AWS documentation: the request and response of
+`CreateWhatsAppMessageTemplate`, `UpdateWhatsAppMessageTemplate`,
+`DeleteWhatsAppMessageTemplate` (the boto3 parameter is `deleteAllLanguages`,
+query `deleteAllTemplates`; there is no language parameter) and
+`CreateWhatsAppMessageTemplateMedia` (returns `metaHeaderHandle`), their
+errors, and their IAM resource type (`waba`, no dependent actions, Service
+Authorization Reference). **To verify on the first deploy**: whether Meta
+accepts `parameter_format` in upper case inside `templateDefinition` (Meta's
+components page does not show it; the AWS update call documents lower case);
+whether a URL button's `example` is the suffix (Meta's current components page)
+or the whole URL (older Meta examples); whether
+`CreateWhatsAppMessageTemplateMedia` reads the bucket with the caller's role
+(granted `s3:GetObject` on `outbound/*`) or as the service principal (the
+bucket policy allows both).
+
+The templates page polls `GET /whatsapp/templates` every 45 seconds while a
+template is PENDING (paused while the tab is hidden) and toasts when one is
+approved or rejected; wiring `message_template_status_update` (section 4)
+would make that push instead of poll.
+
+## 5b. Inbox: unread counters, search and notices
+
+| Feature | Where | What |
+| --- | --- | --- |
+| Unread counter | `store.touch_conversation(counts_unread=True)` from ws-handler | `ADD unread_count :one` in the same update as the summary (atomic), only for `AUTO_REPLY_TYPES` (customer content: not reactions, `system`, `request_welcome`, `unsupported`, statuses) |
+| Reset | `PUT /whatsapp/conversations/{phone}/read` (mark-read) | `SET unread_count = 0` conditioned on the conversation existing; announced as `CONVERSATION_UPDATED` |
+| Exposed as | `store.conversation_view` | `unreadCount` (number) in get-conversations and every `CONVERSATION_UPDATED`; `search_key` and `inbox` are hidden |
+| Search | `GET /whatsapp/conversations?search=` | `Scan` with `contains(search_key, :term)`, paginated (up to 20 pages, 50 results), sorted by recency; the term is the phone digits when the search is only a number, else the folded text |
+| Search key | `touch_conversation` | `"<name lowercase without accents> <phone>"`; a message without a name keeps the existing key (`if_not_exists`) |
+| Takeover notice | put-control | when the mode really changes: a message `direction: internal`, `type: event`, `payload: {kind: human_takeover \| assistant_resumed, by}` published as `CONVERSATION_EVENT`; never sent to WhatsApp, never counted as unread, never part of the inbox summary and never opens the window |
+
+Searching inside the messages is out of scope: it needs a search engine
+(Amazon OpenSearch Service) fed from the messages table.
 
 ## 6. Media
 
@@ -274,9 +347,13 @@ IAM (least privilege, all on `phone-number-id/*` of the account):
 ws-handler gets `social-messaging:GetWhatsAppMessageMedia`, `s3:ListBucket`
 (prefix `media/`) and `s3:PutObject` / `GetObject` / `DeleteObject` on
 `media/*` (plus `GetObject` on `outbound/*` to re-sign sent files);
-send-message gets `social-messaging:PostWhatsAppMessageMedia` and
-`s3:GetObject` on `outbound/*`; media-upload-url only `s3:PutObject` on
-`outbound/*`; get-messages only `s3:GetObject` on both prefixes.
+send-message and send-template (media headers) get
+`social-messaging:PostWhatsAppMessageMedia` and `s3:GetObject` on
+`outbound/*`; media-upload-url only `s3:PutObject` on `outbound/*`;
+get-messages only `s3:GetObject` on both prefixes; templates-admin only
+`s3:GetObject` on `outbound/*` plus `CreateWhatsAppMessageTemplate`,
+`UpdateWhatsAppMessageTemplate`, `DeleteWhatsAppMessageTemplate` and
+`CreateWhatsAppMessageTemplateMedia` on `waba/*` (no other function has them).
 
 Verified in the AWS documentation: the request/response of
 `GetWhatsAppMessageMedia` (`fileSize` in KB), that the destination `key` is a
@@ -333,6 +410,12 @@ empty media, outbound files are supported, and transcription is left as a hook.
 - https://docs.aws.amazon.com/social-messaging/latest/userguide/send-message-media.html
 - https://docs.aws.amazon.com/social-messaging/latest/userguide/supported-media-types.html
 - https://docs.aws.amazon.com/social-messaging/latest/APIReference/API_GetWhatsAppMessageMedia.html
+- https://docs.aws.amazon.com/social-messaging/latest/APIReference/API_CreateWhatsAppMessageTemplate.html
+- https://docs.aws.amazon.com/social-messaging/latest/APIReference/API_UpdateWhatsAppMessageTemplate.html
+- https://docs.aws.amazon.com/social-messaging/latest/APIReference/API_DeleteWhatsAppMessageTemplate.html
+- https://docs.aws.amazon.com/social-messaging/latest/APIReference/API_CreateWhatsAppMessageTemplateMedia.html
+- https://developers.facebook.com/documentation/business-messaging/whatsapp/templates/template-management
+- https://developers.facebook.com/documentation/business-messaging/whatsapp/templates/components
 - https://docs.aws.amazon.com/service-authorization/latest/reference/list_socialmessaging.html
 - https://developers.facebook.com/docs/whatsapp/cloud-api/reference/media#supported-media-types
 - https://developers.facebook.com/docs/whatsapp/cloud-api/webhooks/components

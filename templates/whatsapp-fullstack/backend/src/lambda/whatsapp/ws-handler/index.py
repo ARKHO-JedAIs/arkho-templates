@@ -6,7 +6,8 @@ The WABA publishes every webhook notification to the ws-handler SNS topic
 1. normalizes it (``normalize``): a ``type``, a readable ``message`` and a
    ``payload`` per type, plus ``reply_to`` and ``referral`` when present,
 2. downloads its file, if it has one, into the media bucket,
-3. stores it and updates the inbox summary (DynamoDB),
+3. stores it and updates the inbox summary (DynamoDB), counting it as unread
+   when it is customer content (``AUTO_REPLY_TYPES``),
 4. announces both on AppSync so the front shows them live,
 5. marks it as read,
 6. answers it, unless a person took the conversation over from the web or the
@@ -53,8 +54,9 @@ PLACEHOLDERS = {
     "unsupported": "[Tipo de mensaje no soportado]",
 }
 
-# Customer content the automatic reply answers. Reactions, system notices,
-# request_welcome and unsupported messages never trigger it.
+# Customer content the automatic reply answers, and the messages that count as
+# unread. Reactions, system notices, request_welcome and unsupported messages
+# do neither.
 AUTO_REPLY_TYPES = {
     "text",
     "image",
@@ -389,7 +391,10 @@ def handle_message(message: dict, origination_phone_number_id: str) -> None:
         referral=message.get("referral"),
     )
     conversation = store.touch_conversation(
-        saved, name=message["name"], opens_window=message["type"] not in NO_WINDOW_TYPES
+        saved,
+        name=message["name"],
+        opens_window=message["type"] not in NO_WINDOW_TYPES,
+        counts_unread=message["type"] in AUTO_REPLY_TYPES,
     )
     realtime.announce_message(realtime.MESSAGE_RECEIVED, media.exposed(saved), conversation)
     if stored_media and stored_media.get("key"):

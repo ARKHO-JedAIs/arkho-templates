@@ -13,6 +13,8 @@ const FUNCTIONS = [
   'send-template',
   'put-control',
   'media-upload-url',
+  'mark-read',
+  'templates-admin',
 ];
 
 /** The IAM policies with a statement matching `statement`, by logical id. */
@@ -201,6 +203,45 @@ describe('WhatsAppFactory', () => {
     template.hasResourceProperties('AWS::ApiGateway::Resource', { PathPart: 'media' });
     template.hasResourceProperties('AWS::ApiGateway::Resource', { PathPart: 'upload-url' });
   });
+
+  it('exposes the read, template admin and template media routes', () => {
+    const template = getTemplate();
+    for (const pathPart of ['{phone}', 'read', '{metaTemplateId}']) {
+      template.hasResourceProperties('AWS::ApiGateway::Resource', { PathPart: pathPart });
+    }
+    const methods = template.findResources('AWS::ApiGateway::Method', {
+      Properties: { AuthorizationType: 'CUSTOM', HttpMethod: 'DELETE' },
+    });
+    expect(Object.keys(methods).length).toBeGreaterThanOrEqual(1);
+    // `media` exists twice: /whatsapp/media and /whatsapp/templates/media.
+    const media = template.findResources('AWS::ApiGateway::Resource', { Properties: { PathPart: 'media' } });
+    expect(Object.keys(media)).toHaveLength(2);
+  });
+
+  it('lets only templates-admin create, edit and delete templates, on the WABA', () => {
+    const template = getTemplate();
+    const found = policiesWith(template, {
+      Action: Match.arrayWith([
+        'social-messaging:CreateWhatsAppMessageTemplate',
+        'social-messaging:UpdateWhatsAppMessageTemplate',
+        'social-messaging:DeleteWhatsAppMessageTemplate',
+        'social-messaging:CreateWhatsAppMessageTemplateMedia',
+      ]),
+    });
+    const policies = Object.keys(found);
+    expect(policies).toHaveLength(1);
+    expect(policies[0]).toContain(policyOf('templates-admin'));
+    // Scoped to the WABA resource type, the only one these actions take.
+    const statements = (
+      found[policies[0]!] as {
+        Properties: { PolicyDocument: { Statement: { Action: unknown; Resource: unknown }[] } };
+      }
+    ).Properties.PolicyDocument.Statement;
+    const manage = statements.find(item =>
+      JSON.stringify(item.Action).includes('CreateWhatsAppMessageTemplate')
+    );
+    expect(JSON.stringify(manage?.Resource)).toContain(':waba/*');
+  });
 });
 
 describe('WhatsApp media bucket', () => {
@@ -262,7 +303,7 @@ describe('WhatsApp media bucket', () => {
 
   it('passes the bucket and the URL lifetime only to the functions that use media', () => {
     const template = getTemplate();
-    for (const name of ['ws-handler', 'get-messages', 'send-message', 'media-upload-url']) {
+    for (const name of ['ws-handler', 'get-messages', 'send-message', 'media-upload-url', 'send-template', 'templates-admin']) {
       template.hasResourceProperties('AWS::Lambda::Function', {
         FunctionName: `${PREFIX}-whatsapp-${name}`,
         Environment: {
@@ -283,14 +324,15 @@ describe('WhatsApp media bucket', () => {
     });
   });
 
-  it('lets only ws-handler download and only send-message upload to WhatsApp', () => {
+  it('lets only ws-handler download and only the sending functions upload to WhatsApp', () => {
     const template = getTemplate();
     const download = Object.keys(policiesWith(template, { Action: 'social-messaging:GetWhatsAppMessageMedia' }));
     const upload = Object.keys(policiesWith(template, { Action: 'social-messaging:PostWhatsAppMessageMedia' }));
     expect(download).toHaveLength(1);
     expect(download[0]).toContain(policyOf('ws-handler'));
-    expect(upload).toHaveLength(1);
-    expect(upload[0]).toContain(policyOf('send-message'));
+    expect(upload).toHaveLength(2);
+    expect(upload.some(id => id.startsWith(policyOf('send-message')))).toBe(true);
+    expect(upload.some(id => id.startsWith(policyOf('send-template')))).toBe(true);
   });
 
   it('scopes the bucket permissions per function', () => {
@@ -315,5 +357,9 @@ describe('WhatsApp media bucket', () => {
     expect(allowed('send-message', 's3:PutObject')).toBe(false);
     expect(allowed('send-message', 's3:ListBucket')).toBe(false);
     expect(allowed('get-templates', 's3:GetObject')).toBe(false);
+    expect(allowed('send-template', 's3:GetObject')).toBe(true);
+    expect(allowed('templates-admin', 's3:GetObject')).toBe(true);
+    expect(allowed('templates-admin', 's3:PutObject')).toBe(false);
+    expect(allowed('mark-read', 's3:GetObject')).toBe(false);
   });
 });

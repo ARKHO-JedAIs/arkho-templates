@@ -194,7 +194,11 @@ describe('validateTemplate', () => {
     });
 
     it('ignores the header text when the header is media', () => {
-      const media = valid({ headerFormat: 'IMAGE', headerText: `${v('1')} ${v('2')}` });
+      const media = valid({
+        headerFormat: 'IMAGE',
+        headerHandle: '4::aW1n',
+        headerText: `${v('1')} ${v('2')}`,
+      });
       expect(failing(media)).toEqual([]);
     });
   });
@@ -355,5 +359,15 @@ describe('validateTemplate', () => {
       const draft = valid({ body: `Hola ${v('1')} y ${v('2')}.` });
       expect(warningIds(draft)).toContain('body-variable-density');
     });
+  });
+});
+
+describe('media header sample', () => {
+  it('needs the uploaded sample of an image, video or document header', () => {
+    const ids = (draft: TemplateDraft) => validateTemplate(draft).errors.map(result => result.id);
+    expect(ids(valid({ headerFormat: 'IMAGE' }))).toContain('header-media-handle');
+    expect(ids(valid({ headerFormat: 'DOCUMENT', headerHandle: '4::cGRm' }))).not.toContain(
+      'header-media-handle'
+    );
   });
 });

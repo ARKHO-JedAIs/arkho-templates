@@ -96,16 +96,35 @@ def send_template(
     language: str,
     parameters: list[str],
     parameter_names: list[str] | None = None,
+    header: dict | None = None,
+    buttons: list[dict] | None = None,
 ) -> str | None:
-    """Sends an approved template, filling its body variables in order.
+    """Sends an approved template, filling its variables.
 
-    A NAMED template needs each value tagged with its variable name, so pass
-    ``parameter_names`` (same order as ``parameters``) for those.
+    ``parameters`` fill the body in order; a NAMED template needs each value
+    tagged with its variable name, so pass ``parameter_names`` (same order) for
+    those. ``header`` is ``{"text", "name"?}`` for a text header variable, or
+    ``{"media_type", "media_id", "filename"?}`` for an image, video or
+    document header (the id ``PostWhatsAppMessageMedia`` returned).
+    ``buttons`` are ``{"index", "text"}``: the URL suffix of each URL button
+    whose address ends with a variable.
     """
     template: dict = {"name": name, "language": {"code": language}}
+    components: list[dict] = []
+    if header and header.get("media_id"):
+        kind = header["media_type"]
+        media: dict = {"id": header["media_id"]}
+        if kind == "document" and header.get("filename"):
+            media["filename"] = header["filename"]
+        components.append({"type": "header", "parameters": [{"type": kind, kind: media}]})
+    elif header and header.get("text"):
+        parameter: dict = {"type": "text", "text": header["text"]}
+        if header.get("name"):
+            parameter["parameter_name"] = header["name"]
+        components.append({"type": "header", "parameters": [parameter]})
     if parameters:
         names = parameter_names or []
-        template["components"] = [
+        components.append(
             {
                 "type": "body",
                 "parameters": [
@@ -115,7 +134,18 @@ def send_template(
                     for index, value in enumerate(parameters)
                 ],
             }
-        ]
+        )
+    for button in buttons or []:
+        components.append(
+            {
+                "type": "button",
+                "sub_type": "url",
+                "index": str(button["index"]),
+                "parameters": [{"type": "text", "text": button["text"]}],
+            }
+        )
+    if components:
+        template["components"] = components
     return _send(
         {
             "messaging_product": "whatsapp",
@@ -186,22 +216,64 @@ def _template_definition(waba_id: str, meta_template_id: str | None) -> dict:
     return definition if isinstance(definition, dict) else {}
 
 
+def _examples(definition: dict) -> dict:
+    """The sample values of a definition, keyed as the web's creator keys them
+    (``header:<variable>``, ``body:<variable>``, ``button:<index>``)."""
+    examples: dict = {}
+    for component in definition.get("components") or []:
+        kind = str(component.get("type", "")).upper()
+        example = component.get("example") if isinstance(component.get("example"), dict) else {}
+        if kind == "HEADER":
+            names = variable_names(component.get("text") or "")
+            for param in example.get("header_text_named_params") or []:
+                examples[f"header:{param.get('param_name')}"] = str(param.get("example", ""))
+            values = example.get("header_text") or []
+            if names and values:
+                examples[f"header:{names[0]}"] = str(values[0])
+        elif kind == "BODY":
+            for param in example.get("body_text_named_params") or []:
+                examples[f"body:{param.get('param_name')}"] = str(param.get("example", ""))
+            rows = example.get("body_text") or []
+            if rows and isinstance(rows[0], list):
+                for index, value in enumerate(rows[0]):
+                    examples[f"body:{index + 1}"] = str(value)
+        elif kind == "BUTTONS":
+            for index, button in enumerate(component.get("buttons") or []):
+                sample = button.get("example")
+                if str(button.get("type", "")).upper() == "URL" and isinstance(sample, list) and sample:
+                    examples[f"button:{index}"] = str(sample[0])
+    return examples
+
+
+def _button(button: dict) -> dict:
+    described = {"type": button.get("type"), "text": button.get("text")}
+    if button.get("url"):
+        described["url"] = button["url"]
+    if button.get("phone_number"):
+        described["phoneNumber"] = button["phone_number"]
+    if str(button.get("type", "")).upper() == "COPY_CODE" and isinstance(button.get("example"), str):
+        described["example"] = button["example"]
+    return described
+
+
 def describe_template(summary: dict, definition: dict) -> dict:
-    header = body = footer = None
+    header = body = footer = header_format = header_handle = None
     buttons: list[dict] = []
     for component in definition.get("components") or []:
         kind = str(component.get("type", "")).upper()
-        if kind == "HEADER" and str(component.get("format", "TEXT")).upper() == "TEXT":
-            header = component.get("text")
+        if kind == "HEADER":
+            header_format = str(component.get("format") or "TEXT").upper()
+            if header_format == "TEXT":
+                header = component.get("text")
+            else:
+                handles = (component.get("example") or {}).get("header_handle") or []
+                header_handle = handles[0] if handles else None
         elif kind == "BODY":
             body = component.get("text")
         elif kind == "FOOTER":
             footer = component.get("text")
         elif kind == "BUTTONS":
-            buttons = [
-                {"type": button.get("type"), "text": button.get("text")}
-                for button in component.get("buttons") or []
-            ]
+            buttons = [_button(button) for button in component.get("buttons") or []]
     names = variable_names(body or "")
     declared = str(definition.get("parameter_format") or "").upper()
     if declared in (POSITIONAL, NAMED):
@@ -216,13 +288,27 @@ def describe_template(summary: dict, definition: dict) -> dict:
         "qualityScore": summary.get("templateQualityScore"),
         "metaTemplateId": summary.get("metaTemplateId"),
         "header": header,
+        "headerFormat": header_format,
+        "headerVariableNames": variable_names(header or ""),
+        "headerHandle": header_handle,
         "body": body or "",
         "footer": footer,
         "buttons": buttons,
         "variables": len(names),
         "variableNames": names,
         "parameterFormat": parameter_format,
+        "examples": _examples(definition),
     }
+
+
+def dynamic_url_buttons(template: dict) -> list[int]:
+    """Indexes of the URL buttons whose address ends with a variable: each
+    needs its suffix when the template is sent."""
+    return [
+        index
+        for index, button in enumerate(template.get("buttons") or [])
+        if str(button.get("type", "")).upper() == "URL" and VARIABLE.search(str(button.get("url") or ""))
+    ]
 
 
 def list_templates() -> list[dict]:
@@ -242,3 +328,68 @@ def find_template(name: str, language: str) -> dict:
         if summary.get("templateName") == name and summary.get("templateLanguage") == language:
             return describe_template(summary, _template_definition(waba_id, summary.get("metaTemplateId")))
     raise TemplateNotFound(f"There is no template {name} in {language}")
+
+
+def create_template(definition: dict) -> dict:
+    """Submits a new template to Meta's review: ``{metaTemplateId, status, category}``."""
+    response = social_messaging.create_whatsapp_message_template(
+        id=config.waba_id(),
+        templateDefinition=json.dumps(definition, ensure_ascii=False).encode("utf-8"),
+    )
+    return {
+        "metaTemplateId": response.get("metaTemplateId"),
+        "status": response.get("templateStatus"),
+        "category": response.get("category"),
+    }
+
+
+def update_template(
+    meta_template_id: str,
+    components: list[dict],
+    parameter_format: str | None = None,
+    category: str | None = None,
+) -> None:
+    """Replaces every component of a template; Meta reviews it again."""
+    kwargs: dict = {
+        "id": config.waba_id(),
+        "metaTemplateId": meta_template_id,
+        "templateComponents": json.dumps(components, ensure_ascii=False).encode("utf-8"),
+    }
+    if parameter_format:
+        kwargs["parameterFormat"] = parameter_format.lower()
+    if category:
+        kwargs["templateCategory"] = category
+    social_messaging.update_whatsapp_message_template(**kwargs)
+
+
+def delete_template(name: str, meta_template_id: str | None = None) -> None:
+    """Deletes one language version (with its id) or, by name alone, every language."""
+    kwargs: dict = {"id": config.waba_id(), "templateName": name}
+    if meta_template_id:
+        kwargs["metaTemplateId"] = meta_template_id
+    social_messaging.delete_whatsapp_message_template(**kwargs)
+
+
+# What each End User Messaging Social error means for the web.
+CLIENT_ERRORS = {
+    "InvalidParametersException": (422, "META_REJECTED", "WhatsApp rejected the request"),
+    "ValidationException": (422, "VALIDATION_ERROR", "The request is not valid"),
+    "AccessDeniedByMetaException": (
+        403,
+        "META_ACCESS_DENIED",
+        "Meta denied the request: check the WhatsApp Business Account permissions",
+    ),
+    "AccessDeniedException": (403, "ACCESS_DENIED", "The backend is not allowed to do this in AWS"),
+    "ThrottledRequestException": (429, "THROTTLED", "Too many requests to WhatsApp: try again in a moment"),
+    "ResourceNotFoundException": (404, "NOT_FOUND", "WhatsApp could not find it"),
+}
+
+
+def client_error(error: Exception) -> tuple[int, str, str]:
+    """``(HTTP status, error code, message)`` for an End User Messaging Social error."""
+    details = (getattr(error, "response", None) or {}).get("Error", {})
+    status, code, message = CLIENT_ERRORS.get(
+        details.get("Code", ""), (502, "SOCIAL_MESSAGING_ERROR", "WhatsApp rejected the request")
+    )
+    reason = str(details.get("Message") or "").strip()
+    return status, code, f"{message}: {reason}" if reason else message

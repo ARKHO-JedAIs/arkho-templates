@@ -1,6 +1,7 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { Loader2, Search } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useConversationSearch } from '../hooks/useConversationSearch';
 import { type InboxFilter, filterConversations, isWindowOpen } from '../services/mappers';
 import type { Conversation } from '../types';
 import { ContactAvatar } from './ContactAvatar';
@@ -16,6 +17,7 @@ interface ConversationListProps {
 
 const FILTERS: { value: InboxFilter; label: string }[] = [
   { value: 'all', label: 'Todas' },
+  { value: 'unread', label: 'Sin leer' },
   { value: 'human', label: 'Con persona' },
   { value: 'closed', label: 'Ventana cerrada' },
 ];
@@ -40,7 +42,26 @@ export function ModeChip({ mode }: { mode: Conversation['mode'] }) {
   );
 }
 
-/** The inbox: a search, quick filters and the conversations, most recent first. */
+/** Unread messages, in the brand colour; the number alone is not enough for a screen reader. */
+export function UnreadBadge({ count }: { count: number }) {
+  if (count <= 0) return null;
+  const label = count === 1 ? '1 mensaje sin leer' : `${count} mensajes sin leer`;
+  return (
+    <span
+      title={label}
+      className='inline-flex h-5 min-w-[1.25rem] shrink-0 items-center justify-center rounded-full bg-primary px-1.5 text-[11px] font-bold tabular-nums leading-none text-primary-foreground'
+    >
+      <span aria-hidden>{count > 99 ? '99+' : count}</span>
+      <span className='sr-only'>{label}</span>
+    </span>
+  );
+}
+
+/**
+ * The inbox: a search, quick filters and the conversations, most recent first.
+ * A search of 2+ characters asks the backend (every conversation, not only the
+ * loaded ones); a shorter one filters the list on screen.
+ */
 export function ConversationList({
   conversations,
   selected,
@@ -50,14 +71,25 @@ export function ConversationList({
 }: ConversationListProps) {
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<InboxFilter>('all');
+  const search = useConversationSearch(query);
 
-  const visible = useMemo(
-    () => filterConversations(conversations, query, filter, now),
-    [conversations, query, filter, now]
-  );
+  const visible = useMemo(() => {
+    if (!search.results) return filterConversations(conversations, query, filter, now);
+    // Search results are a snapshot: prefer the live version of each conversation.
+    const live = new Map(conversations.map(item => [item.phone, item]));
+    const found = search.results.map(item => live.get(item.phone) ?? item);
+    return filterConversations(found, '', filter, now);
+  }, [conversations, query, filter, now, search.results]);
 
   let body: ReactNode;
-  if (loading && conversations.length === 0) {
+  if (search.searching && !search.results) {
+    body = (
+      <p className='flex items-center justify-center gap-2 py-10 text-sm text-foreground-secondary'>
+        <Loader2 className='h-4 w-4 animate-spin' aria-hidden />
+        Buscando…
+      </p>
+    );
+  } else if (loading && conversations.length === 0) {
     body = (
       <p className='flex items-center justify-center gap-2 py-10 text-sm text-foreground-secondary'>
         <Loader2 className='h-4 w-4 animate-spin' aria-hidden />
@@ -82,6 +114,7 @@ export function ConversationList({
       <ul className='divide-y divide-border/60'>
         {visible.map(conversation => {
           const active = conversation.phone === selected;
+          const unread = conversation.unreadCount > 0;
           return (
             <li key={conversation.phone}>
               <button
@@ -101,13 +134,26 @@ export function ConversationList({
                     <span className='truncate text-sm font-semibold text-foreground'>
                       {conversation.name || `+${conversation.phone}`}
                     </span>
-                    <span className='shrink-0 text-xs text-foreground-secondary'>
+                    <span
+                      className={cn(
+                        'shrink-0 text-xs',
+                        unread ? 'font-bold text-foreground' : 'text-foreground-secondary'
+                      )}
+                    >
                       {when(conversation.lastMessageAt)}
                     </span>
                   </span>
-                  <span className='truncate text-[13px] text-foreground-secondary'>
-                    {conversation.lastDirection === 'outbound' ? 'Tú: ' : ''}
-                    {conversation.lastMessage}
+                  <span className='flex items-center justify-between gap-2'>
+                    <span
+                      className={cn(
+                        'truncate text-[13px]',
+                        unread ? 'font-semibold text-foreground' : 'text-foreground-secondary'
+                      )}
+                    >
+                      {conversation.lastDirection === 'outbound' ? 'Tú: ' : ''}
+                      {conversation.lastMessage}
+                    </span>
+                    <UnreadBadge count={conversation.unreadCount} />
                   </span>
                   <span className='mt-0.5 flex flex-wrap gap-1.5'>
                     <ModeChip mode={conversation.mode} />
@@ -142,7 +188,18 @@ export function ConversationList({
             placeholder='Buscar por nombre o número'
             className='min-w-0 flex-1 bg-transparent text-sm text-foreground placeholder:text-foreground-secondary focus:outline-none'
           />
+          {search.searching ? (
+            <Loader2
+              className='h-4 w-4 shrink-0 animate-spin text-foreground-secondary'
+              aria-label='Buscando'
+            />
+          ) : null}
         </div>
+        {search.error ? (
+          <p className='text-xs text-destructive-strong'>
+            {search.error} Se muestran solo las conversaciones cargadas.
+          </p>
+        ) : null}
         <div role='group' aria-label='Filtrar conversaciones' className='flex flex-wrap gap-1.5'>
           {FILTERS.map(item => (
             <button
