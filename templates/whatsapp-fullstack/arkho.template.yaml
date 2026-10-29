@@ -111,6 +111,18 @@ parameters:
     pattern: "^[^\"\\\\]{0,500}$"
     patternHint: "up to 500 characters, without double quotes or backslashes"
 
+  # Written to backend/.env as MEDIA_RETENTION_DAYS: a lifecycle expiration on
+  # the WhatsApp media bucket.
+  - name: media_retention_days
+    type: string
+    group: WhatsApp
+    prompt: "Days to keep WhatsApp files?"
+    description: "Days to keep received/sent files in S3. Empty = keep forever."
+    when: "components != 'frontend'"
+    default: ""
+    pattern: "^([1-9][0-9]{0,4})?$"
+    patternHint: "a whole number of days (1 to 99999), or empty to keep them forever"
+
   # ---------------------------------------------------------------------------
   # Frontend
   # ---------------------------------------------------------------------------
@@ -202,6 +214,22 @@ parameters:
     default: ""
     pattern: "^[a-z0-9]*$"
     patternHint: "the public Cognito app client id (lowercase letters and digits)"
+
+  # Both sides: rendered comma-joined into backend SSO_PROVIDERS (the stack
+  # derives each provider from it) and frontend VITE_AUTH_SSO_PROVIDERS (the
+  # sign-in buttons). The empty default keeps both lines empty, not a token.
+  - name: sso_providers
+    type: multichoice
+    group: Access
+    prompt: "Also sign in with Microsoft or Google?"
+    description: "Adds those buttons next to email and password, through Cognito. Needs an app registered at each provider (README). None = email and password only."
+    when: "auth_provider == 'cognito' || components == 'backend'"
+    default: []
+    choices:
+      - value: microsoft
+        label: "Microsoft (Entra ID)"
+      - value: google
+        label: "Google"
 
   # One answer for both sides: the frontend shows the code step (mock code
   # 000000 under mock auth) and the backend turns on Cognito email MFA.
@@ -353,3 +381,14 @@ nextSteps:
   - "{{ package_manager }} install   # Install dependencies (skip it if the CLI already installed them)"
   - "{{ package_manager }} run dev   # Start it at http://localhost:5173 (WhatsApp at /whatsapp)"
   - "cd frontend && {{ package_manager }} install && {{ package_manager }} run dev   # Frontend, all in one line"
+  - "## SIGN IN WITH MICROSOFT / GOOGLE (if chosen)"
+  - "# Deploy once; output CognitoIdpRedirectUri is the redirect URI to register"
+  - "# Microsoft: Azure portal > Entra ID > App registrations > New (Web)"
+  - "# Add the redirect URI; note Client ID and Tenant ID; create a Client secret"
+  - "# backend/.env: ENTRA_ID_CLIENT_ID, ENTRA_ID_CLIENT_SECRET, ENTRA_ID_ISSUER_URL"
+  - "# Issuer URL: https://login.microsoftonline.com/<tenant-id>/v2.0"
+  - "# Google: Cloud Console > APIs & Services > OAuth consent screen"
+  - "# Credentials > OAuth client ID (Web application), same redirect URI"
+  - "# backend/.env: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET"
+  - "# Redeploy (npx cdk deploy in backend/) to create the providers"
+  - "# frontend/.env: VITE_COGNITO_DOMAIN = output CognitoDomainUrl"

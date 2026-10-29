@@ -118,6 +118,62 @@ class AdminUsersTest(unittest.TestCase):
         self.assertEqual(self.module.handler(event, None)["statusCode"], 422)
 
 
+class AuditLogTest(unittest.TestCase):
+    """Each successful change logs one JSON line naming who did what to whom."""
+
+    def setUp(self):
+        self.module, self.cognito = load_handler("admin")
+
+    def audit_lines(self, event: dict) -> tuple[dict, list[dict]]:
+        with self.assertLogs(self.module.logger, level="INFO") as captured:
+            response = self.module.handler(event, None)
+        lines = [json.loads(record.getMessage()) for record in captured.records if '"audit"' in record.getMessage()]
+        return response, lines
+
+    def test_logs_a_create_with_the_roles(self):
+        self.cognito.admin_create_user.return_value = {"User": {"Username": "new@example.com", "Attributes": []}}
+        self.cognito.admin_list_groups_for_user.return_value = {"Groups": [{"GroupName": "admin"}]}
+        _, lines = self.audit_lines(request("POST", "/admin/users", body={"email": "new@example.com", "roles": ["admin"]}))
+        self.assertEqual(
+            lines,
+            [{"audit": "admin-users", "action": "create", "actor": "me@example.com", "target": "new@example.com", "roles": ["admin"]}],
+        )
+
+    def test_logs_an_update_with_the_changed_fields_and_roles(self):
+        _, lines = self.audit_lines(request("PATCH", "/admin/users/{username}", "ana", {"name": "Ana", "roles": ["admin"]}))
+        self.assertEqual(lines[0]["action"], "update")
+        self.assertEqual(lines[0]["target"], "ana")
+        self.assertEqual(lines[0]["fields"], ["name"])
+        self.assertEqual(lines[0]["roles"], ["admin"])
+
+    def test_logs_enable_disable_and_delete(self):
+        cases = (
+            (request("PATCH", "/admin/users/{username}/status", "ana", {"enabled": False}), "disable"),
+            (request("PATCH", "/admin/users/{username}/status", "ana", {"enabled": True}), "enable"),
+            (request("DELETE", "/admin/users/{username}", "ana"), "delete"),
+        )
+        for event, action in cases:
+            _, lines = self.audit_lines(event)
+            self.assertEqual(len(lines), 1)
+            self.assertEqual(lines[0]["action"], action)
+            self.assertEqual(lines[0]["actor"], "me@example.com")
+            self.assertEqual(lines[0]["target"], "ana")
+
+    def test_never_logs_the_temporary_password(self):
+        with self.assertLogs(self.module.logger, level="INFO") as captured:
+            response = self.module.handler(request("POST", "/admin/users/{username}/password", "ana"), None)
+        password = data(response)["temporaryPassword"]
+        output = "\n".join(captured.output)
+        self.assertIn('"action": "reset_password"', output)
+        self.assertNotIn(password, output)
+        self.assertNotIn("temporaryPassword", output)
+
+    def test_logs_nothing_when_the_change_is_refused(self):
+        with self.assertNoLogs(self.module.logger, level="INFO"):
+            response = self.module.handler(request("DELETE", "/admin/users/{username}", "me@example.com"), None)
+        self.assertEqual(response["statusCode"], 409)
+
+
 class SingleProfileTest(unittest.TestCase):
     def test_any_signed_in_user_when_there_is_no_admin_group(self):
         module, cognito = load_handler("")

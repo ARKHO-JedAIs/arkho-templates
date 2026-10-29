@@ -1,7 +1,16 @@
 import type {
   ChatMessage,
+  ContactCard,
   Conversation,
+  FlowReply,
+  LocationPayload,
+  MediaKind,
+  MessageKind,
+  MessageMedia,
   MessageStatus,
+  OrderPayload,
+  Referral,
+  ReplyPayload,
   TemplateQuality,
   WhatsAppTemplate,
 } from '../types';
@@ -30,6 +39,133 @@ export function toConversation(item: unknown): Conversation | null {
 
 const STATUSES: readonly MessageStatus[] = ['sent', 'delivered', 'read', 'failed'];
 
+const KINDS: readonly MessageKind[] = [
+  'text',
+  'template',
+  'image',
+  'audio',
+  'video',
+  'document',
+  'sticker',
+  'location',
+  'contacts',
+  'button_reply',
+  'list_reply',
+  'nfm_reply',
+  'button',
+  'order',
+  'system',
+  'request_welcome',
+  'unsupported',
+];
+
+export const MEDIA_KINDS: readonly MediaKind[] = ['image', 'audio', 'video', 'document', 'sticker'];
+
+export const isMediaKind = (kind: MessageKind): kind is MediaKind =>
+  (MEDIA_KINDS as readonly string[]).includes(kind);
+
+const record = (value: unknown): Record<string, unknown> =>
+  value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+
+/** DynamoDB numbers reach the web as numbers or, through AppSync, as strings. */
+const toNumber = (value: unknown): number | null => {
+  const number = typeof value === 'number' ? value : Number(text(value) || NaN);
+  return Number.isFinite(number) ? number : null;
+};
+
+function toMedia(value: unknown): MessageMedia | undefined {
+  const raw = record(value);
+  if (Object.keys(raw).length === 0) return undefined;
+  return {
+    url: orNull(raw.url),
+    mimeType: text(raw.mimeType),
+    size: toNumber(raw.size),
+    filename: orNull(raw.filename),
+    caption: orNull(raw.caption),
+    error: orNull(raw.error),
+    ...(raw.voice === true ? { voice: true } : {}),
+  };
+}
+
+function toLocation(payload: Record<string, unknown>): LocationPayload | undefined {
+  const latitude = toNumber(payload.latitude);
+  const longitude = toNumber(payload.longitude);
+  if (latitude === null || longitude === null) return undefined;
+  return { latitude, longitude, name: text(payload.name), address: text(payload.address) };
+}
+
+function toContacts(payload: Record<string, unknown>): ContactCard[] {
+  const list = Array.isArray(payload.contacts) ? payload.contacts : [];
+  return list.map(item => {
+    const raw = record(item);
+    const phones = Array.isArray(raw.phones) ? raw.phones : [];
+    const emails = Array.isArray(raw.emails) ? raw.emails : [];
+    return {
+      name: text(raw.name),
+      phones: phones.map(phone => text(record(phone).phone) || text(phone)).filter(Boolean),
+      emails: emails.map(email => text(email)).filter(Boolean),
+      org: text(raw.org),
+    };
+  });
+}
+
+const flowValue = (value: unknown): string =>
+  typeof value === 'string' ? value : JSON.stringify(value);
+
+function toFlow(payload: Record<string, unknown>): FlowReply {
+  const response = payload.response;
+  const fields =
+    typeof response === 'string'
+      ? response
+        ? [{ key: 'respuesta', value: response }]
+        : []
+      : Object.entries(record(response))
+          // The token identifies the Flow session; it is not something the contact wrote.
+          .filter(([key]) => key !== 'flow_token')
+          .map(([key, value]) => ({ key, value: flowValue(value) }));
+  return { body: text(payload.body), fields };
+}
+
+function toOrder(payload: Record<string, unknown>): OrderPayload {
+  const items = Array.isArray(payload.items) ? payload.items : [];
+  return {
+    catalogId: text(payload.catalog_id),
+    text: text(payload.text),
+    items: items.map(item => {
+      const raw = record(item);
+      return {
+        id: text(raw.product_retailer_id),
+        quantity: toNumber(raw.quantity) ?? 1,
+        price: toNumber(raw.item_price),
+        currency: text(raw.currency),
+      };
+    }),
+  };
+}
+
+function toReferral(value: unknown): Referral | undefined {
+  const raw = record(value);
+  if (Object.keys(raw).length === 0) return undefined;
+  return {
+    sourceType: text(raw.source_type),
+    headline: text(raw.headline),
+    sourceUrl: text(raw.source_url),
+  };
+}
+
+function toReply(kind: MessageKind, payload: Record<string, unknown>): ReplyPayload | undefined {
+  if (kind === 'button') return { id: text(payload.payload), title: text(payload.text) };
+  if (kind !== 'button_reply' && kind !== 'list_reply') return undefined;
+  const description = text(payload.description);
+  return {
+    id: text(payload.id),
+    title: text(payload.title),
+    ...(description ? { description } : {}),
+  };
+}
+
 /** A stored message from the API or a realtime payload; `null` if unusable. */
 export function toChatMessage(item: unknown): ChatMessage | null {
   if (!item || typeof item !== 'object') return null;
@@ -37,18 +173,48 @@ export function toChatMessage(item: unknown): ChatMessage | null {
   const timestamp = text(raw.date);
   if (!timestamp) return null;
   const direction = text(raw.direction) === 'inbound' ? 'in' : 'out';
-  const type = text(raw.type);
+  const type = text(raw.type) as MessageKind;
+  const kind: MessageKind = KINDS.includes(type) ? type : 'unsupported';
   const status = text(raw.status) as MessageStatus;
+  const payload = record(raw.payload);
+  const media = isMediaKind(kind) ? toMedia(raw.media) : undefined;
+  const location = kind === 'location' ? toLocation(payload) : undefined;
+  const reply = toReply(kind, payload);
+  const referral = toReferral(raw.referral);
+  const reaction = text(record(raw.reaction).emoji);
   return {
     id: text(raw.message_id) || `${timestamp}-${direction}`,
     direction,
-    kind: type === 'text' ? 'text' : type === 'template' ? 'template' : 'other',
+    kind,
     text: text(raw.message),
     timestamp,
     ...(raw.sent_by === 'human' ? { sentBy: text(raw.sent_by_name) || 'Operador' } : {}),
     ...(STATUSES.includes(status) ? { status } : {}),
     ...(text(raw.error) ? { error: text(raw.error) } : {}),
+    ...(media ? { media } : {}),
+    ...(location ? { location } : {}),
+    ...(kind === 'contacts' ? { contacts: toContacts(payload) } : {}),
+    ...(reply ? { reply } : {}),
+    ...(kind === 'nfm_reply' ? { flow: toFlow(payload) } : {}),
+    ...(kind === 'order' ? { order: toOrder(payload) } : {}),
+    ...(reaction ? { reaction } : {}),
+    ...(text(raw.reply_to) ? { replyTo: text(raw.reply_to) } : {}),
+    ...(referral ? { referral } : {}),
+    ...(raw.forwarded === true ? { forwarded: true } : {}),
+    ...(raw.deleted === true ? { deleted: true } : {}),
   };
+}
+
+/** The Google Maps link of a shared location. */
+export const mapsUrl = ({ latitude, longitude }: LocationPayload) =>
+  `https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}`;
+
+/** A file size for people: `820 B`, `14 KB`, `2,4 MB`. */
+export function formatBytes(bytes: number | null | undefined): string {
+  if (bytes === null || bytes === undefined || !Number.isFinite(bytes) || bytes < 0) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toLocaleString('es', { maximumFractionDigits: 1 })} MB`;
 }
 
 /** Oldest first, one entry per id: what a thread shows. */

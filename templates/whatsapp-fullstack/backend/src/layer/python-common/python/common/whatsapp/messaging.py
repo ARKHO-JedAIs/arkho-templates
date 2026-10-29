@@ -61,6 +61,35 @@ def send_text(phone: str, text: str, origination_phone_number_id: str | None = N
     )
 
 
+def send_media(
+    phone: str,
+    message_type: str,
+    media_id: str,
+    caption: str = "",
+    filename: str = "",
+    origination_phone_number_id: str | None = None,
+) -> str | None:
+    """Sends a file already handed to WhatsApp (``PostWhatsAppMessageMedia``).
+
+    Audio takes no caption, and only documents carry a file name.
+    """
+    body: dict = {"id": media_id}
+    if caption and message_type in ("image", "video", "document"):
+        body["caption"] = caption
+    if filename and message_type == "document":
+        body["filename"] = filename
+    return _send(
+        {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": f"+{phone}",
+            "type": message_type,
+            message_type: body,
+        },
+        origination_phone_number_id,
+    )
+
+
 def send_template(
     phone: str,
     name: str,

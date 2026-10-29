@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { Match } from 'aws-cdk-lib/assertions';
-import { getTemplate, TEST_PARAMS } from './helpers/setup';
+import { getTemplate, getTemplateWith, TEST_PARAMS } from './helpers/setup';
 
 const PREFIX = `${TEST_PARAMS.projectName}-${TEST_PARAMS.envName}`;
 
@@ -12,7 +12,20 @@ const FUNCTIONS = [
   'get-templates',
   'send-template',
   'put-control',
+  'media-upload-url',
 ];
+
+/** The IAM policies with a statement matching `statement`, by logical id. */
+function policiesWith(template: ReturnType<typeof getTemplate>, statement: Record<string, unknown>) {
+  return template.findResources('AWS::IAM::Policy', {
+    Properties: {
+      PolicyDocument: { Statement: Match.arrayWith([Match.objectLike(statement)]) },
+    },
+  });
+}
+
+/** The logical id prefix CDK gives the policy of one WhatsApp function. */
+const policyOf = (name: string) => `WhatsAppFactory${name.replace(/-/g, '')}lambda`;
 
 describe('WhatsAppFactory', () => {
   it('provisions the conversations and messages tables', () => {
@@ -179,7 +192,128 @@ describe('WhatsAppFactory', () => {
     const methods = template.findResources('AWS::ApiGateway::Method', {
       Properties: { AuthorizationType: 'CUSTOM' },
     });
-    // presigned-url plus the six WhatsApp routes.
-    expect(Object.keys(methods).length).toBeGreaterThanOrEqual(7);
+    // The six WhatsApp routes: they are what attaches the authorizer to the API.
+    expect(Object.keys(methods).length).toBeGreaterThanOrEqual(6);
+  });
+
+  it('exposes the media upload route', () => {
+    const template = getTemplate();
+    template.hasResourceProperties('AWS::ApiGateway::Resource', { PathPart: 'media' });
+    template.hasResourceProperties('AWS::ApiGateway::Resource', { PathPart: 'upload-url' });
+  });
+});
+
+describe('WhatsApp media bucket', () => {
+  it('is private, encrypted and SSL-only', () => {
+    const template = getTemplate();
+    template.hasResourceProperties('AWS::S3::Bucket', {
+      BucketName: `${PREFIX}-whatsapp-media`,
+      PublicAccessBlockConfiguration: {
+        BlockPublicAcls: true,
+        BlockPublicPolicy: true,
+        IgnorePublicAcls: true,
+        RestrictPublicBuckets: true,
+      },
+      BucketEncryption: {
+        ServerSideEncryptionConfiguration: [
+          { ServerSideEncryptionByDefault: { SSEAlgorithm: 'AES256' } },
+        ],
+      },
+    });
+    template.hasResourceProperties('AWS::S3::BucketPolicy', {
+      PolicyDocument: {
+        Statement: Match.arrayWith([
+          Match.objectLike({
+            Effect: 'Deny',
+            Condition: { Bool: { 'aws:SecureTransport': 'false' } },
+          }),
+          Match.objectLike({
+            Sid: 'AllowEndUserMessagingSocialMedia',
+            Principal: { Service: 'social-messaging.amazonaws.com' },
+          }),
+        ]),
+      },
+    });
+  });
+
+  it('is destroyed with a dev stack', () => {
+    const template = getTemplate();
+    template.hasResource('AWS::S3::Bucket', {
+      Properties: { BucketName: `${PREFIX}-whatsapp-media` },
+      DeletionPolicy: 'Delete',
+    });
+  });
+
+  it('keeps files forever unless MEDIA_RETENTION_DAYS is set', () => {
+    const rules = (template: ReturnType<typeof getTemplate>) => {
+      const buckets = template.findResources('AWS::S3::Bucket', {
+        Properties: { BucketName: `${PREFIX}-whatsapp-media` },
+      });
+      const [bucket] = Object.values(buckets) as {
+        Properties: { LifecycleConfiguration: { Rules: Record<string, unknown>[] } };
+      }[];
+      return bucket!.Properties.LifecycleConfiguration.Rules;
+    };
+    expect(rules(getTemplate()).some(rule => 'ExpirationInDays' in rule)).toBe(false);
+    expect(rules(getTemplateWith({ mediaRetentionDays: 5 }))).toEqual(
+      expect.arrayContaining([expect.objectContaining({ Id: 'ExpireMedia', ExpirationInDays: 5, Status: 'Enabled' })])
+    );
+  });
+
+  it('passes the bucket and the URL lifetime only to the functions that use media', () => {
+    const template = getTemplate();
+    for (const name of ['ws-handler', 'get-messages', 'send-message', 'media-upload-url']) {
+      template.hasResourceProperties('AWS::Lambda::Function', {
+        FunctionName: `${PREFIX}-whatsapp-${name}`,
+        Environment: {
+          Variables: Match.objectLike({
+            WHATSAPP_MEDIA_BUCKET_NAME: Match.anyValue(),
+            MEDIA_URL_TTL_SECONDS: '900',
+          }),
+        },
+      });
+    }
+    template.hasResourceProperties('AWS::Lambda::Function', {
+      FunctionName: `${PREFIX}-whatsapp-get-templates`,
+      Environment: { Variables: Match.objectLike({ WHATSAPP_MEDIA_BUCKET_NAME: Match.absent() }) },
+    });
+    getTemplateWith({ mediaUrlTtlSeconds: 300 }).hasResourceProperties('AWS::Lambda::Function', {
+      FunctionName: `${PREFIX}-whatsapp-get-messages`,
+      Environment: { Variables: Match.objectLike({ MEDIA_URL_TTL_SECONDS: '300' }) },
+    });
+  });
+
+  it('lets only ws-handler download and only send-message upload to WhatsApp', () => {
+    const template = getTemplate();
+    const download = Object.keys(policiesWith(template, { Action: 'social-messaging:GetWhatsAppMessageMedia' }));
+    const upload = Object.keys(policiesWith(template, { Action: 'social-messaging:PostWhatsAppMessageMedia' }));
+    expect(download).toHaveLength(1);
+    expect(download[0]).toContain(policyOf('ws-handler'));
+    expect(upload).toHaveLength(1);
+    expect(upload[0]).toContain(policyOf('send-message'));
+  });
+
+  it('scopes the bucket permissions per function', () => {
+    const policies = getTemplate().findResources('AWS::IAM::Policy') as Record<
+      string,
+      { Properties: { PolicyDocument: { Statement: { Action: string | string[] }[] } } }
+    >;
+    const allowed = (name: string, action: string) =>
+      Object.entries(policies).some(
+        ([id, policy]) =>
+          id.startsWith(policyOf(name)) &&
+          policy.Properties.PolicyDocument.Statement.some(statement =>
+            ([] as string[]).concat(statement.Action).includes(action)
+          )
+      );
+    expect(allowed('ws-handler', 's3:PutObject')).toBe(true);
+    expect(allowed('ws-handler', 's3:ListBucket')).toBe(true);
+    expect(allowed('media-upload-url', 's3:PutObject')).toBe(true);
+    expect(allowed('media-upload-url', 's3:GetObject')).toBe(false);
+    expect(allowed('get-messages', 's3:GetObject')).toBe(true);
+    expect(allowed('get-messages', 's3:PutObject')).toBe(false);
+    expect(allowed('send-message', 's3:PutObject')).toBe(false);
+    expect(allowed('send-message', 's3:ListBucket')).toBe(false);
+    expect(allowed('get-templates', 's3:GetObject')).toBe(false);
   });
 });

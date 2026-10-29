@@ -116,6 +116,14 @@ def set_roles(username: str, roles: list[str]) -> None:
             cognito.admin_remove_user_from_group(UserPoolId=USER_POOL_ID, Username=username, GroupName=group)
 
 
+def audit(event: dict, action: str, target: str, **details) -> None:
+    """One JSON line per successful change, for CloudWatch Logs Insights. Never
+    pass a password here: the temporary one only travels in the response."""
+    entry = {"audit": "admin-users", "action": action, "actor": caller(event)["username"], "target": target}
+    entry.update({key: value for key, value in details.items() if value is not None})
+    logger.info(json.dumps(entry, sort_keys=True))
+
+
 def not_self(event: dict, username: str, action: str) -> None:
     if username == caller(event)["username"]:
         raise ApiError(409, "SELF_CHANGE", f"You cannot {action} your own account")
@@ -166,7 +174,7 @@ def create_user(body: dict) -> dict:
     return to_user(created)
 
 
-def update_user(event: dict, username: str, body: dict) -> None:
+def update_user(event: dict, username: str, body: dict) -> dict:
     attrs = []
     if "name" in body:
         attrs.append({"Name": "name", "Value": str(body.get("name") or "").strip()})
@@ -181,6 +189,7 @@ def update_user(event: dict, username: str, body: dict) -> None:
     if roles is not None:
         not_self(event, username, "change the roles of")
         set_roles(username, roles)
+    return {"fields": sorted(key for key in ("name", "email") if key in body), "roles": roles}
 
 
 def route(event: dict):
@@ -191,16 +200,20 @@ def route(event: dict):
     if resource == "/admin/users" and method == "GET":
         return create_success_response(data=list_users())
     if resource == "/admin/users" and method == "POST":
-        return create_success_response(data=create_user(body_of(event)), status_code=201)
+        created = create_user(body_of(event))
+        audit(event, "create", created["username"], roles=created["roles"])
+        return create_success_response(data=created, status_code=201)
     if not username:
         raise ApiError(404, "NOT_FOUND", "Unknown route")
 
     if resource == "/admin/users/{username}" and method == "PATCH":
-        update_user(event, username, body_of(event))
+        changes = update_user(event, username, body_of(event))
+        audit(event, "update", username, **changes)
         return create_no_content_response()
     if resource == "/admin/users/{username}" and method == "DELETE":
         not_self(event, username, "delete")
         cognito.admin_delete_user(UserPoolId=USER_POOL_ID, Username=username)
+        audit(event, "delete", username)
         return create_no_content_response()
     if resource == "/admin/users/{username}/status" and method == "PATCH":
         enabled = body_of(event).get("enabled")
@@ -209,12 +222,14 @@ def route(event: dict):
         not_self(event, username, "disable")
         action = cognito.admin_enable_user if enabled else cognito.admin_disable_user
         action(UserPoolId=USER_POOL_ID, Username=username)
+        audit(event, "enable" if enabled else "disable", username)
         return create_no_content_response()
     if resource == "/admin/users/{username}/password" and method == "POST":
         password = temporary_password()
         cognito.admin_set_user_password(
             UserPoolId=USER_POOL_ID, Username=username, Password=password, Permanent=False
         )
+        audit(event, "reset_password", username)
         return create_success_response(data={"username": username, "temporaryPassword": password})
     raise ApiError(404, "NOT_FOUND", "Unknown route")
 

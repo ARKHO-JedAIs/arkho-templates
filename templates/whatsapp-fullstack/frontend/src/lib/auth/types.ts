@@ -1,3 +1,5 @@
+import type { SsoProvider } from './sso';
+
 /** The shape every auth provider must satisfy. Nothing outside lib/auth imports a provider directly. */
 export interface AuthUser {
   username: string;
@@ -38,6 +40,10 @@ export interface AuthProvider {
   /** Completes an MFA challenge (SMS/email/authenticator-app code) raised by signIn or,
    * chained, by completeNewPassword - the user pool can ask for either right after the other. */
   confirmOtp(code: string): Promise<SignInResult>;
+  /** Leaves the app for the Cognito Hosted UI of that provider (Microsoft or Google). */
+  signInWithSso(provider: SsoProvider): Promise<void>;
+  /** Finishes a federated sign-in on /auth/callback; throws with the reason when it failed. */
+  completeSsoSignIn(): Promise<void>;
   signOut(): Promise<void>;
 }
 

@@ -49,64 +49,65 @@ this file - do not fork content into the bootstraps.
 
 `MainStack` is the single root stack. What is **active** (instantiated) today:
 
-1. **DynamoDB** (`DynamoFactory`) - one single-table-design table (`PK`/`SK`,
-   on-demand): `usage-stats`, which stores arkho-cli usage statistics.
-   Installer telemetry and CLI command telemetry are tracked separately via PK
-   prefixes (`INSTALL#...` vs `USAGE#...`). No TTL is set, so all events are
-   retained. Users are centralized in Cognito.
-2. **S3** (`S3Factory`) - the `templates` bucket (private, SSE-S3, SSL-only)
-   that stores the project templates the CLI scaffolds from (e.g. reactjs). The
-   presigned-url-template Lambda is granted read/write over the whole bucket.
-3. **Layer** (`LayerFactory`) - the `python-common` layer (logging,
+1. **Layer** (`LayerFactory`) - the `python-common` layer (logging,
    standardized responses, CORS helpers) shared by the Python functions.
-4. **Lambda** (`LambdaFactory`) - one function per source folder under
-   `src/lambda`: hello-world, pre-signup, post-confirmation-signup, not-found,
-   presigned-url-template, authorizer.
-5. **Cognito** (`CognitoFactory`) - a User Pool plus an app client for the CLI,
-   with **optional Microsoft Entra ID (OIDC) federation**. Federation is off by
-   default and gated by env (`ENTRA_ID_ENABLED`); when enabled it provisions a
-   Hosted UI domain whose prefix is derived in code as
-   `${projectName}-${envName}` (not a manual env var). `pre-signup` and
-   `post-confirmation-signup` are wired as triggers; the `authorizer` receives
-   `USER_POOL_ID` / `APP_CLIENT_ID` after the pool exists, via `SetupFactory`
-   (`lib/stack/setup`), which holds post-creation cross-factory wiring.
-6. **API Gateway** (`ApiFactory`) - a regional REST API deployed to a stage
+2. **Lambda** (`LambdaFactory`) - the core functions under `src/lambda/core`:
+   `authorizer` (with the pinned Klayers PyJWT / cryptography layers) and
+   `not-found`.
+3. **Cognito** (`CognitoFactory`) - a User Pool with **self sign-up off**
+   (users are created by an admin, from Usuarios or the AWS CLI) and one app
+   client (`cli-client`), with **optional Microsoft Entra ID (OIDC) and Google
+   sign-in**. `SSO_PROVIDERS` (comma list: `microsoft`, `google`) drives both;
+   listing any provisions a Hosted UI domain whose prefix is derived in code as
+   `${projectName}-${envName}` (not a manual env var) and outputs
+   `CognitoDomainUrl` / `CognitoIdpRedirectUri`. A listed provider is created
+   only once its client id and secret are set (all empty = skipped with a
+   warning; partially set = synth fails). OAuth callback / logout URLs point to
+   the frontend (`AUTH_CALLBACK_URLS` / `AUTH_LOGOUT_URLS`). Federated users join
+   no group automatically. No Cognito triggers are wired. The `authorizer`
+   receives `USER_POOL_ID` / `APP_CLIENT_ID` after the pool exists, via
+   `SetupFactory` (`lib/stack/setup`), which holds post-creation cross-factory
+   wiring.
+4. **API Gateway** (`ApiFactory`) - a regional REST API deployed to a stage
    named after `envName`. Every route is a Lambda proxy integration and is
    protected by the `authorizer` function (Cognito JWT validation) unless it
-   opts out with `requireAuth: false`. Today: public `GET /hello-world`,
-   protected `GET /presigned-url`, and a `{proxy+}` catch-all answered by
-   `not-found` so unmatched paths return the standardized 404 body.
+   opts out with `requireAuth: false`. `ApiFactory` itself only adds a
+   `{proxy+}` catch-all answered by `not-found` so unmatched paths return the
+   standardized 404 body; the routes come from the modules below.
 
-7. **WhatsApp** (`WhatsAppFactory`, `lib/stack/whatsapp`) - one self-contained
+5. **WhatsApp** (`WhatsAppFactory`, `lib/stack/whatsapp`) - one self-contained
    module from the `whatsapp-fullstack` template: the `whatsapp-conversations`
    and `whatsapp-messages` tables, the `whatsapp-configuration` Parameter Store
    parameter (built from the `WHATSAPP_*` variables of `.env`), one Lambda per
    folder under `src/lambda/whatsapp`, the `whatsapp-ws-handler` SNS topic that
-   AWS End User Messaging Social publishes to, and the `whatsapp-events` AppSync
-   API the front subscribes to. Its Python helpers live in
+   AWS End User Messaging Social publishes to, the `whatsapp-events` AppSync
+   API the front subscribes to, and the private `whatsapp-media` bucket of the
+   files received and sent (`MEDIA_RETENTION_DAYS`, `MEDIA_URL_TTL_SECONDS`;
+   the web only ever gets presigned URLs). Its Python helpers live in
    `src/layer/python-common/python/common/whatsapp`. **Documented exception**:
    it owns its Lambdas and registers its `/whatsapp/*` routes itself (through
    `apiFactory.restApi.addRoute`) instead of going through `LambdaFactory` and
    `ApiFactory`, so the whole feature is one folder to read, change or remove.
    Unit tests of the handlers: `python -m unittest discover -s test/python`.
-8. **Users** (`UsersFactory`, `lib/stack/users`) - wired only when
+6. **Users** (`UsersFactory`, `lib/stack/users`) - wired only when
    `USERS_API_ENABLED=true`: one `admin-users` Lambda serving every
    `/admin/users` route of the frontend's Usuarios screen over Cognito, plus the
    `admin` and `member` role groups. Same documented exception as WhatsApp: it
-   registers its own routes.
+   registers its own routes. Every successful change logs one JSON audit line
+   (acting admin, action, target, roles; never a password); CloudTrail also
+   records the Cognito `Admin*` calls.
 
 **Add every new route in `ApiFactory` (`lib/stack/api`)**, so the URL surface
 stays in one place; `RestApiConstruct` stays generic. Two ordering constraints
 live in that construct: the authorizer is built **before** the `RestApi`,
 because `defaultMethodOptions` captures `this.authorizer` by value, and at least
 one method must reference the authorizer, or synth fails with "must be attached
-to a RestApi".
+to a RestApi". Today the protected WhatsApp routes satisfy that; removing the
+WhatsApp module needs another protected route in `ApiFactory`.
 
-The Lambda set follows the source under `src/lambda`: when a function's source
-folder is added or removed, adjust `LambdaFactory` **and** `ApiFactory` to
-match. `presigned-url-template` writes to the project `templates` bucket
-(`S3Factory`), whose name is passed directly into the Lambda environment; the
-presigned-URL TTL is a constant in `LambdaFactory`.
+The core Lambda set follows the source under `src/lambda/core`: when a
+function's source folder is added or removed, adjust `LambdaFactory` **and**
+`ApiFactory` to match.
 
 Everything else stays as **generic, reusable building blocks** and is wired in
 only when a service is actually needed. Do not activate a service in `MainStack`
@@ -121,20 +122,20 @@ without a reason.
   /construct            # Generic, reusable L2/L3 constructs (one per service)
   /stack
     main-stack.ts       # Root stack: wires the active factories
-    /cognito            # Active: Cognito + optional Entra ID federation + triggers
-    /dynamo             # Active: usage-stats table
-    /s3                 # Active: templates bucket
-    /lambda             # Active: one function per src/lambda folder
+    /cognito            # Active: Cognito + optional Entra ID / Google sign-in
+    /lambda             # Active: core functions (authorizer, not-found)
     /layer              # Active: python-common layer
-    /api                # Active: REST API routes, authorizer, 404 fallback
+    /api                # Active: REST API, authorizer, 404 fallback
     /setup              # Active: post-creation wiring (authorizer <- Cognito ids)
+    /whatsapp           # Active: WhatsApp module (own Lambdas and routes)
+    /users              # Active when USERS_API_ENABLED: Usuarios API
     /shared/util        # Environment config + helpers
 /src
-  /lambda/core/*        # core functions: hello-world, not-found,
-                        #   presigned-url-template, authorizer
-  /lambda/user/*        # Cognito trigger functions: pre-signup,
-                        #   post-confirmation-signup
-  /layer/python-common  # shared Python layer (common: logger, response, cors)
+  /lambda/core/*        # core functions: authorizer, not-found
+  /lambda/whatsapp/*    # WhatsApp functions
+  /lambda/users/*       # admin-users
+  /layer/python-common  # shared Python layer (common: logger, response, cors,
+                        #   whatsapp)
 /test                   # Vitest (aws-cdk-lib/assertions) tests
 ```
 
@@ -151,7 +152,7 @@ without a reason.
 - **Infrastructure**: AWS CDK (TypeScript), `aws-cdk-lib` v2.
 - **API**: API Gateway REST (regional), Lambda proxy integrations behind a
   token authorizer.
-- **Auth**: Cognito User Pools, optional Entra ID OIDC federation.
+- **Auth**: Cognito User Pools, optional Entra ID (OIDC) and Google sign-in.
 - **Storage**: DynamoDB (on-demand).
 - **Runtime**: Python 3.12 Lambda functions.
 - **Tooling**: Node.js 24+ and npm 11+ (`engine-strict=true`). `.env` is loaded
@@ -183,14 +184,17 @@ Set in `.env` (gitignored; see `.env.example`):
 - `ENV_NAME`: dev/staging/prod (required).
 - `PROJECT_NAME`: project prefix for resource names (required).
 - `AWS_ACCOUNT_ID`, `AWS_REGION`: deployment target.
-- `ENTRA_ID_ENABLED`: `true` to enable Entra ID OIDC federation (default off).
-- `ENTRA_ID_CLIENT_ID`, `ENTRA_ID_CLIENT_SECRET`, `ENTRA_ID_ISSUER_URL`: required
-  only when `ENTRA_ID_ENABLED=true`.
-
-The templates bucket is provisioned by `S3Factory` and its name is passed
-directly into the presigned-url-template Lambda environment as
-`TEMPLATES_BUCKET_NAME` (no env var). The presigned-URL TTL is a constant in
-`LambdaFactory` (`lib/stack/lambda`).
+- `SSO_PROVIDERS`: comma list of `microsoft`, `google` (empty = none).
+- `ENTRA_ID_CLIENT_ID`, `ENTRA_ID_CLIENT_SECRET`, `ENTRA_ID_ISSUER_URL`: the
+  Microsoft provider, when `SSO_PROVIDERS` lists `microsoft`.
+- `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`: the Google provider, when
+  `SSO_PROVIDERS` lists `google`.
+- `AUTH_CALLBACK_URLS`, `AUTH_LOGOUT_URLS`: frontend URLs Cognito may return
+  to (comma-separated; default `http://localhost:5173/auth/callback` and
+  `http://localhost:5173/login`).
+- `MEDIA_RETENTION_DAYS`: days the WhatsApp media bucket keeps files (empty =
+  forever; validated as a positive integer).
+- `MEDIA_URL_TTL_SECONDS`: lifetime of a presigned media URL (default 900).
 
 ## Workflow (Spec Kit)
 
@@ -231,8 +235,9 @@ with `uvx --from git+https://github.com/github/spec-kit.git specify init .`.
 Never commit secrets. Load from environment or standard AWS credential
 resolution (profiles, SSO). No AWS keys, Cognito client secrets, or tokens
 inlined in source or committed config. `.env` is gitignored; `.env.example`
-ships placeholders only. The Entra ID client secret comes from the environment
-at synth time; move it to AWS Secrets Manager before production use.
+ships placeholders only. The Entra ID and Google client secrets come from the
+environment at synth time; move them to AWS Secrets Manager before production
+use.
 
 A `secretlint` pre-commit hook (`husky` + `lint-staged`) blocks commits that
 contain credentials. Do not bypass it with `git commit --no-verify`. If a real

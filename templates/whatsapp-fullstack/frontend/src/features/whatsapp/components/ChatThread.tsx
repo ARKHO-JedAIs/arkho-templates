@@ -1,19 +1,32 @@
-import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   AlertCircle,
+  Ban,
   Check,
   CheckCheck,
   FileText,
+  Forward,
+  Info,
   Loader2,
+  Megaphone,
   RotateCw,
   Sparkles,
   UserRound,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { templateParts } from '../services/mappers';
+import { isMediaKind, templateParts } from '../services/mappers';
 import type { ChatMessage, MessageStatus } from '../types';
 import { formatMessage } from './formatMessage';
+import {
+  ContactCards,
+  FlowCard,
+  LocationCard,
+  MediaView,
+  OrderCard,
+  QuotedBlock,
+  ReplyView,
+} from './MessageContent';
 
 interface ChatThreadProps {
   messages: readonly ChatMessage[];
@@ -29,6 +42,8 @@ interface ChatThreadProps {
   canLoadOlder?: boolean;
   loadingOlder?: boolean;
   onLoadOlder?: () => void;
+  /** A file URL failed (they expire): reload the messages to get fresh ones. */
+  onMediaExpired?: () => void;
 }
 
 const STATUS_LABEL: Record<MessageStatus, string> = {
@@ -101,6 +116,7 @@ export function ChatThread({
   canLoadOlder,
   loadingOlder,
   onLoadOlder,
+  onMediaExpired,
 }: ChatThreadProps) {
   const scroller = useRef<HTMLDivElement>(null);
   // What was on screen last render, to tell a new message (scroll to it) from
@@ -108,6 +124,21 @@ export function ChatThread({
   const last = useRef<{ newest?: string; height: number }>({ height: 0 });
   // Failed messages being sent again, so their button cannot fire twice.
   const [retrying, setRetrying] = useState<ReadonlySet<string>>(() => new Set());
+  // Messages whose file URL was already refreshed once: a second failure is an
+  // error, not another reload.
+  const refreshed = useRef(new Set<string>());
+
+  const byId = useMemo(() => new Map(messages.map(message => [message.id, message])), [messages]);
+
+  const expire = useCallback(
+    (id: string) => {
+      if (!onMediaExpired || refreshed.current.has(id)) return false;
+      refreshed.current.add(id);
+      onMediaExpired();
+      return true;
+    },
+    [onMediaExpired]
+  );
 
   const days = useMemo(() => {
     const groups: { key: string; label: string; messages: ChatMessage[] }[] = [];
@@ -201,14 +232,20 @@ export function ChatThread({
                 <p className='sticky top-0 z-10 mx-auto my-1 rounded-full bg-card px-3 py-1 text-xs font-semibold text-foreground-secondary shadow-sm'>
                   {day.label}
                 </p>
-                {day.messages.map(message => (
-                  <Bubble
-                    key={message.id}
-                    message={message}
-                    onRetry={onRetry && message.kind === 'text' ? retry : undefined}
-                    retrying={retrying.has(message.id)}
-                  />
-                ))}
+                {day.messages.map(message =>
+                  message.kind === 'system' || message.kind === 'request_welcome' ? (
+                    <Notice key={message.id} message={message} />
+                  ) : (
+                    <Bubble
+                      key={message.id}
+                      message={message}
+                      quoted={message.replyTo ? byId.get(message.replyTo) : undefined}
+                      onRetry={onRetry && message.kind === 'text' ? retry : undefined}
+                      retrying={retrying.has(message.id)}
+                      onMediaExpired={() => expire(message.id)}
+                    />
+                  )
+                )}
               </div>
             ))}
           </div>
@@ -219,14 +256,102 @@ export function ChatThread({
   );
 }
 
+/** What is not a message from someone: centered, like WhatsApp's own notices. */
+function Notice({ message }: { message: ChatMessage }) {
+  return (
+    <p className='mx-auto my-1 flex max-w-[85%] items-center gap-1.5 rounded-lg bg-card px-3 py-1.5 text-center text-xs text-foreground-secondary shadow-sm'>
+      <Info className='h-3.5 w-3.5 shrink-0' aria-hidden />
+      {message.kind === 'request_welcome'
+        ? 'El contacto abrió el chat por primera vez.'
+        : message.text || 'Aviso del sistema'}
+    </p>
+  );
+}
+
+/** The body of a bubble, by message type. */
+function Content({
+  message,
+  text,
+  onMediaExpired,
+}: {
+  message: ChatMessage;
+  text: string;
+  onMediaExpired: () => boolean;
+}) {
+  const plain = text ? (
+    <p className='whitespace-pre-wrap break-words'>{formatMessage(text)}</p>
+  ) : null;
+  if (message.deleted) {
+    return (
+      <p className='flex items-center gap-1.5 italic text-foreground-secondary'>
+        <Ban className='h-3.5 w-3.5' aria-hidden />
+        Mensaje eliminado
+      </p>
+    );
+  }
+  if (isMediaKind(message.kind) && message.media) {
+    const caption = message.media.caption;
+    return (
+      <div className='flex flex-col gap-1.5'>
+        <MediaView
+          key={message.media.url ?? 'none'}
+          kind={message.kind}
+          media={message.media}
+          onExpired={onMediaExpired}
+        />
+        {caption ? (
+          <p className='whitespace-pre-wrap break-words'>{formatMessage(caption)}</p>
+        ) : null}
+      </div>
+    );
+  }
+  if (message.kind === 'location' && message.location) {
+    return <LocationCard location={message.location} />;
+  }
+  if (message.kind === 'contacts' && message.contacts) {
+    return <ContactCards contacts={message.contacts} />;
+  }
+  if (
+    (message.kind === 'button_reply' ||
+      message.kind === 'list_reply' ||
+      message.kind === 'button') &&
+    message.reply
+  ) {
+    return <ReplyView kind={message.kind} reply={message.reply} />;
+  }
+  if (message.kind === 'nfm_reply' && message.flow) {
+    return (
+      <div className='flex flex-col gap-1.5'>
+        <FlowCard flow={message.flow} />
+        {message.flow.body ? (
+          <p className='text-xs text-foreground-secondary'>{message.flow.body}</p>
+        ) : null}
+      </div>
+    );
+  }
+  if (message.kind === 'order' && message.order) return <OrderCard order={message.order} />;
+  if (message.kind === 'unsupported') {
+    return (
+      <p className='flex items-center gap-1.5 italic text-foreground-secondary'>
+        <AlertCircle className='h-3.5 w-3.5' aria-hidden />
+        Tipo de mensaje no soportado
+      </p>
+    );
+  }
+  return plain;
+}
+
 interface BubbleProps {
   message: ChatMessage;
+  /** The message `message.replyTo` points to, when it is loaded. */
+  quoted?: ChatMessage;
   onRetry?: (message: ChatMessage) => void;
   retrying: boolean;
+  onMediaExpired: () => boolean;
 }
 
 /** One message: white on the left for the contact, the brand's soft tint on the right for us. */
-function Bubble({ message, onRetry, retrying }: BubbleProps) {
+function Bubble({ message, quoted, onRetry, retrying, onMediaExpired }: BubbleProps) {
   const inbound = message.direction === 'in';
   const failed = !inbound && message.status === 'failed';
   const template = message.kind === 'template' ? templateParts(message.text) : null;
@@ -240,10 +365,18 @@ function Bubble({ message, onRetry, retrying }: BubbleProps) {
       )}
     >
       <Author message={message} />
+      {message.referral ? (
+        <span className='flex items-center gap-1 px-1 text-[11px] font-semibold text-foreground-secondary'>
+          <Megaphone className='h-3 w-3 shrink-0' aria-hidden />
+          Desde anuncio
+          {message.referral.headline ? `: ${message.referral.headline}` : null}
+        </span>
+      ) : null}
       <div
         className={cn(
           // The square corner is the bubble's "tail", on the speaker's side.
-          'rounded-2xl px-3 py-2 text-sm leading-relaxed text-foreground shadow-sm',
+          'relative rounded-2xl px-3 py-2 text-sm leading-relaxed text-foreground shadow-sm',
+          message.reaction && 'mb-3',
           inbound ? 'rounded-tl-[4px] bg-card' : 'rounded-tr-[4px]',
           !inbound &&
             (failed ? 'border border-destructive/30 bg-destructive-light' : 'bg-primary-light'),
@@ -259,11 +392,18 @@ function Bubble({ message, onRetry, retrying }: BubbleProps) {
             </span>
           </p>
         ) : null}
-        {text ? (
-          <p className='whitespace-pre-wrap break-words'>{formatMessage(text)}</p>
-        ) : template ? (
-          <p className='text-xs text-foreground-secondary'>Idioma: {template.language}</p>
+        {message.forwarded ? (
+          <p className='mb-0.5 flex items-center gap-1 text-[11px] italic text-foreground-secondary'>
+            <Forward className='h-3 w-3' aria-hidden />
+            Reenviado
+          </p>
         ) : null}
+        {message.replyTo ? <QuotedBlock quoted={quoted} /> : null}
+        {template && !text ? (
+          <p className='text-xs text-foreground-secondary'>Idioma: {template.language}</p>
+        ) : (
+          <Content message={message} text={text} onMediaExpired={onMediaExpired} />
+        )}
         <p
           className={cn(
             'mt-1 flex items-center justify-end gap-1 text-[11px]',
@@ -281,6 +421,18 @@ function Bubble({ message, onRetry, retrying }: BubbleProps) {
             <StatusIcon status={message.status} />
           ) : null}
         </p>
+        {message.reaction ? (
+          <span
+            className={cn(
+              'absolute -bottom-3 flex h-6 min-w-6 items-center justify-center rounded-full border border-border bg-card px-1 text-sm shadow-sm',
+              inbound ? 'left-2' : 'right-2'
+            )}
+            role='img'
+            aria-label={`Reacción: ${message.reaction}`}
+          >
+            {message.reaction}
+          </span>
+        ) : null}
       </div>
       {failed && onRetry ? (
         <button

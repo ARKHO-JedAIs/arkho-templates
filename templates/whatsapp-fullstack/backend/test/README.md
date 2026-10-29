@@ -33,7 +33,7 @@ npm test -- test/lambda
 ### Ejecutar un archivo específico
 
 ```bash
-npm test -- test/s3/templates-bucket.test.ts
+npm test -- test/cognito-sso.test.ts
 ```
 
 ## Crear nuevos tests
@@ -88,7 +88,7 @@ const lambdaKeys = Object.keys(resources).filter(
 
 ## Convenciones
 
-- **Naming**: Archivos en kebab-case: `templates-bucket.test.ts`
+- **Naming**: Archivos en kebab-case: `cognito-sso.test.ts`
 - **Organización**: Un archivo por recurso principal
 - **Describes**: Nombre descriptivo del recurso
 - **Tests**: Comenzar con verbo que describe el comportamiento

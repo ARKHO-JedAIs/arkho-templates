@@ -3,19 +3,213 @@ import type {
   ControlMode,
   Conversation,
   CreateTemplateInput,
+  MediaKind,
   SendTemplateInput,
 } from '../types';
 import { publishDemoEvent } from '../realtime';
+import { checkAttachment } from './attachments';
 
 /**
- * In-memory WhatsApp for `VITE_AUTH_PROVIDER=mock`: three demo contacts - one
+ * In-memory WhatsApp for `VITE_AUTH_PROVIDER=mock`: four demo contacts - one
  * answered by the AI agent, one taken by a person (with a message that failed
- * to deliver), one whose 24 hour window has closed - and a
- * contact that answers a few seconds after you write, through the same event
- * path the AppSync channel uses. Nothing leaves the browser.
+ * to deliver), one whose 24 hour window has closed, and one that sent one
+ * message of every type WhatsApp delivers - and a contact that answers a few
+ * seconds after you write, through the same event path the AppSync channel
+ * uses. Nothing leaves the browser: the files are generated inline.
  */
 
 const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
+
+/** A generated picture, so the demo needs no external URL. */
+const svg = (width: number, height: number, body: string) =>
+  `data:image/svg+xml;charset=utf-8,${encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">${body}</svg>`
+  )}`;
+
+const DEMO_PHOTO = svg(
+  320,
+  220,
+  '<rect width="320" height="220" fill="lightsteelblue"/>' +
+    '<circle cx="250" cy="60" r="28" fill="lightyellow"/>' +
+    '<path d="M0 220 L110 90 L190 180 L240 130 L320 220 Z" fill="seagreen"/>' +
+    '<text x="16" y="34" font-family="sans-serif" font-size="18" fill="white">Foto de demostración</text>'
+);
+
+const DEMO_STICKER = svg(
+  160,
+  160,
+  '<circle cx="80" cy="80" r="72" fill="gold"/>' +
+    '<circle cx="56" cy="66" r="9" fill="black"/><circle cx="104" cy="66" r="9" fill="black"/>' +
+    '<path d="M48 100 Q80 132 112 100" stroke="black" stroke-width="7" fill="none" stroke-linecap="round"/>'
+);
+
+/** One second of a soft 440 Hz tone as an 8-bit mono WAV. */
+function demoTone(): string {
+  const rate = 8000;
+  const samples = rate;
+  const bytes = new Uint8Array(44 + samples);
+  const view = new DataView(bytes.buffer);
+  const ascii = (offset: number, value: string) =>
+    [...value].forEach((char, index) => bytes.set([char.charCodeAt(0)], offset + index));
+  ascii(0, 'RIFF');
+  view.setUint32(4, 36 + samples, true);
+  ascii(8, 'WAVEfmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, rate, true);
+  view.setUint32(28, rate, true);
+  view.setUint16(32, 1, true);
+  view.setUint16(34, 8, true);
+  ascii(36, 'data');
+  view.setUint32(40, samples, true);
+  for (let index = 0; index < samples; index++) {
+    const fade = Math.min(1, index / 400, (samples - index) / 400);
+    bytes[44 + index] = 128 + Math.round(40 * fade * Math.sin((2 * Math.PI * 440 * index) / rate));
+  }
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return `data:audio/wav;base64,${btoa(binary)}`;
+}
+
+const DEMO_DOCUMENT = `data:text/plain;charset=utf-8,${encodeURIComponent(
+  'Presupuesto de demostración\n\n2 x Producto A ... $19.980\nTotal ... $19.980\n'
+)}`;
+
+const media = (
+  url: string | null,
+  mimeType: string,
+  extra: Partial<NonNullable<ChatMessage['media']>> = {}
+): NonNullable<ChatMessage['media']> => ({
+  url,
+  mimeType,
+  size: null,
+  filename: null,
+  caption: null,
+  error: null,
+  ...extra,
+});
+
+/** One message of every type the backend normalizes, from one contact. */
+function everyType(): ChatMessage[] {
+  const at = (minutes: number) => minutesAgo(minutes);
+  const inbound = (id: string, minutes: number, rest: Partial<ChatMessage>): ChatMessage => ({
+    id,
+    direction: 'in',
+    kind: 'text',
+    text: '',
+    timestamp: at(minutes),
+    ...rest,
+  });
+  return [
+    inbound('demo-t1', 95, { kind: 'request_welcome', text: '[Abrió el chat]' }),
+    inbound('demo-t2', 94, {
+      text: 'Hola, vi su anuncio de la promoción',
+      referral: { sourceType: 'ad', headline: 'Promoción de temporada', sourceUrl: '' },
+    }),
+    inbound('demo-t3', 93, {
+      kind: 'image',
+      text: '[Imagen] ¿Tienen este modelo?',
+      media: media(DEMO_PHOTO, 'image/png', { caption: '¿Tienen este modelo?', size: 48_213 }),
+      reaction: '❤️',
+    }),
+    {
+      id: 'demo-t4',
+      direction: 'out',
+      kind: 'text',
+      text: 'Sí, lo tenemos en tres colores.',
+      timestamp: at(92),
+      sentBy: 'demo@example.com',
+      status: 'read',
+      replyTo: 'demo-t3',
+      reaction: '👍',
+    },
+    inbound('demo-t5', 90, {
+      kind: 'audio',
+      text: '[Audio]',
+      media: media(demoTone(), 'audio/wav', { voice: true, size: 8_044 }),
+    }),
+    inbound('demo-t6', 89, {
+      kind: 'video',
+      text: '[Video] Así se ve',
+      media: media(null, 'video/mp4', { caption: 'Así se ve', error: 'download_failed' }),
+    }),
+    inbound('demo-t7', 88, {
+      kind: 'document',
+      text: '[Documento]',
+      media: media(DEMO_DOCUMENT, 'text/plain', { filename: 'presupuesto.txt', size: 74 }),
+    }),
+    inbound('demo-t8', 87, {
+      kind: 'sticker',
+      text: '[Sticker]',
+      media: media(DEMO_STICKER, 'image/svg+xml'),
+    }),
+    inbound('demo-t9', 86, {
+      kind: 'location',
+      text: '[Ubicación] Oficina',
+      location: {
+        latitude: -33.4263,
+        longitude: -70.6205,
+        name: 'Oficina',
+        address: 'Av. Providencia 1234, Santiago',
+      },
+    }),
+    inbound('demo-t10', 85, {
+      kind: 'contacts',
+      text: '[Contacto] Ana Pérez',
+      contacts: [
+        { name: 'Ana Pérez', phones: ['+56 9 2222 3333'], emails: ['ana@example.com'], org: '' },
+      ],
+    }),
+    inbound('demo-t11', 84, {
+      kind: 'button_reply',
+      text: 'Sí, confirmo',
+      reply: { id: 'confirm', title: 'Sí, confirmo' },
+    }),
+    inbound('demo-t12', 83, {
+      kind: 'list_reply',
+      text: 'Jueves 10:00',
+      reply: { id: 'slot-thu-10', title: 'Jueves 10:00', description: 'Sucursal centro' },
+    }),
+    inbound('demo-t13', 82, {
+      kind: 'button',
+      text: 'Ver estado',
+      reply: { id: 'ORDER_STATUS', title: 'Ver estado' },
+    }),
+    inbound('demo-t14', 81, {
+      kind: 'nfm_reply',
+      text: 'Formulario enviado',
+      flow: {
+        body: 'Formulario enviado',
+        fields: [
+          { key: 'nombre', value: 'Valentina Muñoz' },
+          { key: 'comuna', value: 'Providencia' },
+          { key: 'acepta_terminos', value: 'true' },
+        ],
+      },
+    }),
+    inbound('demo-t15', 80, {
+      kind: 'order',
+      text: '[Pedido] 2 producto(s)',
+      order: {
+        catalogId: 'demo-catalog',
+        text: 'Para el viernes',
+        items: [
+          { id: 'SKU-001', quantity: 2, price: 9990, currency: 'CLP' },
+          { id: 'SKU-007', quantity: 1, price: 4990, currency: 'CLP' },
+        ],
+      },
+    }),
+    inbound('demo-t16', 79, {
+      kind: 'system',
+      text: 'Valentina cambió su número de teléfono.',
+    }),
+    inbound('demo-t17', 78, {
+      kind: 'unsupported',
+      text: '[Tipo de mensaje no soportado] Message type unknown',
+    }),
+  ];
+}
 
 const conversations = new Map<string, Conversation>([
   [
@@ -45,6 +239,19 @@ const conversations = new Map<string, Conversation>([
     },
   ],
   [
+    '56944444444',
+    {
+      phone: '56944444444',
+      name: 'Valentina Muñoz',
+      lastMessage: '[Tipo de mensaje no soportado] Message type unknown',
+      lastMessageAt: minutesAgo(78),
+      lastDirection: 'inbound',
+      lastInboundAt: minutesAgo(80),
+      mode: 'human',
+      takenByName: 'demo@example.com',
+    },
+  ],
+  [
     '56922222222',
     {
       phone: '56922222222',
@@ -60,6 +267,7 @@ const conversations = new Map<string, Conversation>([
 ]);
 
 const messages = new Map<string, ChatMessage[]>([
+  ['56944444444', everyType()],
   [
     '56911111111',
     [
@@ -314,6 +522,7 @@ function messagePayload(phone: string, message: ChatMessage) {
     message: message.text,
     ...(message.sentBy ? { sent_by: 'human', sent_by_name: message.sentBy } : {}),
     ...(message.status ? { status: message.status } : {}),
+    ...(message.media ? { media: message.media } : {}),
   };
 }
 
@@ -369,6 +578,50 @@ export const mockWhatsApp = {
       timestamp: new Date().toISOString(),
       sentBy: 'demo@example.com',
       status: 'sent',
+    };
+    append(phone, message);
+    simulateStatuses(phone, message);
+    simulateReply(phone);
+    return delay(message);
+  },
+
+  /**
+   * A file "sent" from the demo: the upload progress is simulated and the file
+   * is shown from an object URL. Validated like the real path.
+   */
+  sendMedia: async (
+    phone: string,
+    file: File,
+    mimeType: string,
+    caption: string,
+    onProgress?: (fraction: number) => void
+  ) => {
+    const check = checkAttachment({ name: file.name, type: mimeType, size: file.size });
+    if (!check.ok) throw new Error(check.error);
+    for (const step of [0.25, 0.5, 0.75, 1]) {
+      await new Promise(resolve => window.setTimeout(resolve, 150));
+      onProgress?.(step);
+    }
+    const kind: MediaKind = check.kind;
+    const label = {
+      image: '[Imagen]',
+      audio: '[Audio]',
+      video: '[Video]',
+      document: '[Documento]',
+    }[check.kind];
+    const message: ChatMessage = {
+      id: nextId(),
+      direction: 'out',
+      kind,
+      text: `${label} ${caption}`.trim(),
+      timestamp: new Date().toISOString(),
+      sentBy: 'demo@example.com',
+      status: 'sent',
+      media: media(URL.createObjectURL(file), mimeType, {
+        size: file.size,
+        filename: file.name,
+        caption: caption || null,
+      }),
     };
     append(phone, message);
     simulateStatuses(phone, message);

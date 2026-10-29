@@ -96,6 +96,16 @@ export const mockProvider: AuthProvider = {
     return { status: 'signed-in' as const };
   },
 
+  // The sign-in screen never offers federated buttons in mock mode, so these
+  // only run if someone calls them by hand.
+  async signInWithSso() {
+    throw new Error('Federated sign-in needs VITE_AUTH_PROVIDER=cognito');
+  },
+
+  async completeSsoSignIn() {
+    throw new Error('Federated sign-in needs VITE_AUTH_PROVIDER=cognito');
+  },
+
   async signOut() {
     localStorage.removeItem(STORAGE_KEY);
   },

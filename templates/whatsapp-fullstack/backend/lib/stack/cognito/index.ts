@@ -1,25 +1,27 @@
 import { Stack } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import { AccountRecovery, FeaturePlan, Mfa, OAuthScope, UserPoolEmail } from 'aws-cdk-lib/aws-cognito';
-import { IFunction } from 'aws-cdk-lib/aws-lambda';
 import { CognitoConstruct } from '../../construct/cognito-construct';
 import { capitalizeFirstLetter } from '../shared/util/capitalize';
-import { CognitoConfig, ParamsConfig } from '../shared/util/env-config';
+import {
+  CognitoConfig,
+  DEFAULT_AUTH_CALLBACK_URLS,
+  DEFAULT_AUTH_LOGOUT_URLS,
+  ParamsConfig,
+} from '../shared/util/env-config';
 
 export interface CognitoFactoryProps {
   params: ParamsConfig;
   cognito: CognitoConfig;
-  lambdaTriggers?: {
-    preSignUp?: IFunction;
-    postConfirmation?: IFunction;
-  };
 }
 
 /**
- * Centralized factory for the arkho-cli authentication resources.
+ * Centralized factory for the authentication resources.
  *
  * Creates a Cognito User Pool with the native provider and, when configured,
- * federates to Microsoft Entra ID via OIDC.
+ * federates to Microsoft Entra ID (OIDC) and Google. Self sign-up is off:
+ * accounts are created by an administrator (Usuarios screen or the AWS CLI),
+ * and a federated user gets an account on first sign-in but no role group.
  */
 export class CognitoFactory extends Construct {
   public readonly cognitoConstruct: CognitoConstruct;
@@ -27,7 +29,7 @@ export class CognitoFactory extends Construct {
   constructor(scope: Construct, id: string, props: CognitoFactoryProps) {
     super(scope, id);
 
-    const { params, cognito, lambdaTriggers } = props;
+    const { params, cognito } = props;
     const { envName, projectName } = params;
     const { emailMfa } = cognito;
     const appName = capitalizeFirstLetter(projectName);
@@ -36,7 +38,7 @@ export class CognitoFactory extends Construct {
       params,
       userPoolConfig: {
         userPoolName: `${projectName}-${envName}-user-pool`,
-        selfSignUpEnabled: true,
+        selfSignUpEnabled: false,
         signInAliases: {
           email: true,
           username: false,
@@ -98,23 +100,16 @@ export class CognitoFactory extends Construct {
             authorizationCodeGrant: true,
             implicitCodeGrant: false,
           },
-          scopes: [OAuthScope.EMAIL, OAuthScope.OPENID, OAuthScope.PROFILE],
-          callbackUrls: envName === 'prod'
-            ? ['https://example.com/callback']
-            : ['http://localhost:8976/callback', 'http://localhost:3000/callback'],
-          logoutUrls: envName === 'prod'
-            ? ['https://example.com/logout']
-            : ['http://localhost:8976/logout', 'http://localhost:3000/logout'],
+          // COGNITO_ADMIN lets a federated session read its own attributes
+          // (email, name) from the frontend.
+          scopes: [OAuthScope.EMAIL, OAuthScope.OPENID, OAuthScope.PROFILE, OAuthScope.COGNITO_ADMIN],
+          callbackUrls: cognito.callbackUrls ?? DEFAULT_AUTH_CALLBACK_URLS,
+          logoutUrls: cognito.logoutUrls ?? DEFAULT_AUTH_LOGOUT_URLS,
         },
       },
       entraId: cognito.entraId,
+      google: cognito.google,
       domainPrefix: cognito.domainPrefix,
-      ...(lambdaTriggers && {
-        lambdaTriggers: {
-          ...(lambdaTriggers.preSignUp && { preSignUp: lambdaTriggers.preSignUp }),
-          ...(lambdaTriggers.postConfirmation && { postConfirmation: lambdaTriggers.postConfirmation }),
-        },
-      }),
       createOutputs: true,
       tags: {
         Service: 'Authentication',

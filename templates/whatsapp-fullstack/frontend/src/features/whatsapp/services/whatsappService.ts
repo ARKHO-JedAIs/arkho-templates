@@ -5,6 +5,7 @@ import type {
   ControlMode,
   Conversation,
   CreateTemplateInput,
+  OutboundMedia,
   SendTemplateInput,
   WhatsAppTemplate,
 } from '../types';
@@ -64,6 +65,79 @@ export async function sendMessage(phone: string, message: string): Promise<ChatM
     '/whatsapp/messages',
     { method: 'POST', body: JSON.stringify({ phone, message }) },
     'No se pudo enviar el mensaje'
+  );
+  return toChatMessage(data);
+}
+
+/** The progress of an upload, from 0 to 1. */
+export type UploadProgress = (fraction: number) => void;
+
+interface UploadTicket {
+  upload_url: string;
+  key: string;
+  headers?: Record<string, string>;
+}
+
+/** PUTs the file to its presigned URL; no auth header, the URL is the authorization. */
+function putFile(
+  url: string,
+  file: Blob,
+  headers: Record<string, string>,
+  onProgress?: UploadProgress
+) {
+  return new Promise<void>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('PUT', url);
+    for (const [name, value] of Object.entries(headers)) xhr.setRequestHeader(name, value);
+    xhr.upload.onprogress = event => {
+      if (event.lengthComputable) onProgress?.(event.loaded / event.total);
+    };
+    xhr.onload = () =>
+      xhr.status >= 200 && xhr.status < 300
+        ? resolve()
+        : reject(new Error(`No se pudo subir el archivo (${xhr.status}).`));
+    xhr.onerror = () => reject(new Error('No se pudo subir el archivo: revisa tu conexión.'));
+    xhr.send(file);
+  });
+}
+
+/**
+ * Sends a file: asks the backend for an upload URL, uploads the file straight
+ * to the media bucket, then sends it (`POST /whatsapp/messages` with `media`).
+ * Validate it with `checkAttachment` first; the backend checks it again.
+ */
+export async function sendMedia(
+  phone: string,
+  file: File,
+  mimeType: string,
+  caption: string,
+  onProgress?: UploadProgress
+): Promise<ChatMessage | null> {
+  if (usingDemoData) return mockWhatsApp.sendMedia(phone, file, mimeType, caption, onProgress);
+  const ticket = await request<UploadTicket>(
+    '/whatsapp/media/upload-url',
+    {
+      method: 'POST',
+      body: JSON.stringify({ phone, filename: file.name, mimeType, size: file.size }),
+    },
+    'No se pudo preparar el envío del archivo'
+  );
+  await putFile(
+    ticket.upload_url,
+    file,
+    ticket.headers ?? { 'Content-Type': mimeType },
+    onProgress
+  );
+  const media: OutboundMedia = {
+    key: ticket.key,
+    mimeType,
+    filename: file.name,
+    ...(caption ? { caption } : {}),
+  };
+  const data = await request<unknown>(
+    '/whatsapp/messages',
+    { method: 'POST', body: JSON.stringify({ phone, media }) },
+    'No se pudo enviar el archivo'
   );
   return toChatMessage(data);
 }

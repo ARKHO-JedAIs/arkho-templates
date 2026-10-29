@@ -1,7 +1,7 @@
 from traceback import format_exc
 
 from common import create_error_response, create_success_response, get_logger, with_cors
-from common.whatsapp import http, store
+from common.whatsapp import http, media, store
 
 logger = get_logger(__name__)
 
@@ -11,7 +11,9 @@ def handler(event, context):
     """GET /whatsapp/messages?phone=<digits>[&before=<iso date>]
 
     The last page of one conversation, oldest first; ``before`` (the oldest
-    date already shown) pages backwards.
+    date already shown) pages backwards. A message with a file carries
+    ``media.url``, a presigned GET valid for MEDIA_URL_TTL_SECONDS: the web
+    reloads the page when one expires. The object key is never returned.
     """
     if not http.is_allowed(event):
         return create_error_response("Your profile cannot use WhatsApp", 403, "FORBIDDEN")
@@ -27,7 +29,7 @@ def handler(event, context):
     return create_success_response(
         data={
             "conversation": conversation,
-            "messages": messages,
+            "messages": [media.exposed(message) for message in messages],
             "window_open": store.window_open(conversation),
         }
     )

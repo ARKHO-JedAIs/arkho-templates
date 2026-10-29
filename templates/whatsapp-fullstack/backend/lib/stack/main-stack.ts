@@ -1,8 +1,6 @@
 import * as cdk from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import { CognitoConfig, EnvironmentConfig, ParamsConfig, WhatsAppConfig } from './shared/util/env-config';
-import { DynamoFactory } from './dynamo';
-import { S3Factory } from './s3';
 import { LayerFactory } from './layer';
 import { LambdaFactory } from './lambda';
 import { CognitoFactory } from './cognito';
@@ -23,12 +21,11 @@ interface MainStackProps extends cdk.StackProps {
 /**
  * Root stack for arkho-cli-cdk.
  *
- * Active resources: a DynamoDB usage-stats table, the templates S3 bucket, the
- * python-common layer, the Lambda functions whose source lives under
- * src/lambda, Cognito (with optional Entra ID SSO), and the REST API that
- * exposes them. The pre-signup and post-confirmation functions are wired as
- * Cognito triggers; the authorizer receives the Cognito ids after the user
- * pool is created.
+ * Active resources: the python-common layer, the core Lambda functions
+ * (authorizer, not-found), Cognito (with optional Microsoft Entra ID and Google
+ * sign-in), the REST API, and the WhatsApp and Users modules that register
+ * their own routes on it. The authorizer receives the Cognito ids after the
+ * user pool is created.
  *
  * The remaining service constructs under lib/construct stay as generic,
  * reusable building blocks and are wired in as the backend grows.
@@ -40,26 +37,11 @@ export class MainStack extends cdk.Stack {
     const { params, cognito, whatsapp, usersApiEnabled } = props;
     const { envName, projectName } = params;
 
-    new DynamoFactory(this, 'DynamoFactory', { params });
-
-    const s3Factory = new S3Factory(this, 'S3Factory', { params });
-
     const layerFactory = new LayerFactory(this, 'LayerFactory', { params });
 
-    const lambdaFactory = new LambdaFactory(this, 'LambdaFactory', {
-      params,
-      layerFactory,
-      s3Factory,
-    });
+    const lambdaFactory = new LambdaFactory(this, 'LambdaFactory', { params, layerFactory });
 
-    const cognitoFactory = new CognitoFactory(this, 'CognitoFactory', {
-      params,
-      cognito,
-      lambdaTriggers: {
-        preSignUp: lambdaFactory.preSignupLambda.function,
-        postConfirmation: lambdaFactory.postConfirmationSignupLambda.function,
-      },
-    });
+    const cognitoFactory = new CognitoFactory(this, 'CognitoFactory', { params, cognito });
 
     const apiFactory = new ApiFactory(this, 'ApiFactory', { params, lambdaFactory });
 

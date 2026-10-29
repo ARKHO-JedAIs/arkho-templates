@@ -17,6 +17,7 @@ answers:
   whatsapp_business_account_id: waba-0123456789abcdef0123456789abcdef
   default_phone_prefix: "56"
   auto_reply_message: Gracias por escribirnos, en breve te respondemos.
+  media_retention_days: "90"
 
   package_manager: npm
   brand_color: "#E30613"
@@ -27,6 +28,7 @@ answers:
   ses_from_email: no-reply@example.com
   cognito_user_pool_id: us-east-1_abc123
   cognito_user_pool_client_id: 1h57kf5cpq17m0eml12eu1s0j3
+  sso_providers: [microsoft, google]
   api_base_url: https://api.example.com/dev/
   appsync_url: https://example.appsync-api.us-east-1.amazonaws.com/graphql
   use_roles: true

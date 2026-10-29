@@ -4,13 +4,14 @@ import { mergeMessages, toChatMessage } from '../services/mappers';
 import { WhatsAppAuthError, fetchMessages } from '../services/whatsappService';
 import type { ChatMessage } from '../types';
 
-// MESSAGE_STATUS carries the whole stored message, so merging it by id is
-// what updates the ticks of a message already on screen.
+// MESSAGE_STATUS and MESSAGE_UPDATED (a reaction) carry the whole stored
+// message, so merging it by id is what updates a message already on screen.
 const MESSAGE_EVENTS = new Set([
   'MESSAGE_RECEIVED',
   'MESSAGE_SENT',
   'TEMPLATE_SENT',
   'MESSAGE_STATUS',
+  'MESSAGE_UPDATED',
 ]);
 
 /** The backend's page size: a shorter page means there is nothing older. */

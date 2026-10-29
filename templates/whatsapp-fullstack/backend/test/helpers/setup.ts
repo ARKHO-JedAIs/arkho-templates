@@ -1,6 +1,7 @@
 import * as cdk from 'aws-cdk-lib';
 import { Template } from 'aws-cdk-lib/assertions';
 import { MainStack } from '../../lib/stack/main-stack';
+import type { WhatsAppConfig } from '../../lib/stack/shared/util/env-config';
 
 // Fixed values so the synthesized template is deterministic and does not
 // depend on the developer's .env.
@@ -26,22 +27,29 @@ export const TEST_PARAMS = {
 
 let _template: Template | undefined;
 
+function synth(whatsapp: WhatsAppConfig): Template {
+  const app = new cdk.App();
+  const stack = new MainStack(app, 'TestStack', {
+    env: TEST_ENV,
+    params: TEST_PARAMS,
+    cognito: {
+      domainPrefix: undefined,
+      entraId: { enabled: false },
+      emailMfa: { enabled: false },
+    },
+    whatsapp,
+  });
+  return Template.fromStack(stack);
+}
+
 export function getTemplate(): Template {
-  if (!_template) {
-    const app = new cdk.App();
-    const stack = new MainStack(app, 'TestStack', {
-      env: TEST_ENV,
-      params: TEST_PARAMS,
-      cognito: {
-        domainPrefix: undefined,
-        entraId: { enabled: false },
-        emailMfa: { enabled: false },
-      },
-      whatsapp: TEST_WHATSAPP,
-    });
-    _template = Template.fromStack(stack);
-  }
+  if (!_template) _template = synth(TEST_WHATSAPP);
   return _template;
+}
+
+/** A fresh template with some WhatsApp settings changed (not cached). */
+export function getTemplateWith(whatsapp: Partial<WhatsAppConfig>): Template {
+  return synth({ ...TEST_WHATSAPP, ...whatsapp });
 }
 
 export function getResources(): Record<string, { Type: string; Properties?: Record<string, unknown> }> {

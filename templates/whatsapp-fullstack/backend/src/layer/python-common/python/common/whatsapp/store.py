@@ -10,6 +10,7 @@ milliseconds, so two messages in the same second do not overwrite each other).
 """
 import os
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 
 import boto3
 from boto3.dynamodb.conditions import Key
@@ -116,6 +117,61 @@ def update_status(message_id: str, status: str, error: str = "") -> dict | None:
     ).get("Attributes")
 
 
+def to_dynamo(value):
+    """``value`` with every float as a Decimal: the DynamoDB resource rejects floats."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, float):
+        return Decimal(str(value))
+    if isinstance(value, dict):
+        return {key: to_dynamo(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [to_dynamo(item) for item in value]
+    return value
+
+
+def mark_message(message_id: str, **fields) -> dict | None:
+    """Sets ``fields`` on the stored message with this WhatsApp id; None when it is unknown."""
+    key = find_message_key(message_id)
+    if key is None or not fields:
+        return None
+    table = _require(messages_table, "WHATSAPP_MESSAGES_TABLE_NAME")
+    names = {f"#{name}": name for name in fields}
+    values = {f":{name}": to_dynamo(value) for name, value in fields.items()}
+    expression = "SET " + ", ".join(f"#{name} = :{name}" for name in fields)
+    return table.update_item(
+        Key=key,
+        UpdateExpression=expression,
+        ExpressionAttributeNames=names,
+        ExpressionAttributeValues=values,
+        ReturnValues="ALL_NEW",
+    ).get("Attributes")
+
+
+def set_reaction(message_id: str, emoji: str) -> dict | None:
+    """The contact's reaction on one of the stored messages; an empty emoji removes it.
+
+    A contact has one reaction per message, so a new one replaces the last.
+    """
+    key = find_message_key(message_id)
+    if key is None:
+        return None
+    table = _require(messages_table, "WHATSAPP_MESSAGES_TABLE_NAME")
+    if emoji:
+        kwargs = {
+            "UpdateExpression": "SET #reaction = :reaction",
+            "ExpressionAttributeValues": {":reaction": {"emoji": emoji, "date": now_iso()}},
+        }
+    else:
+        kwargs = {"UpdateExpression": "REMOVE #reaction"}
+    return table.update_item(
+        Key=key,
+        ExpressionAttributeNames={"#reaction": "reaction"},
+        ReturnValues="ALL_NEW",
+        **kwargs,
+    ).get("Attributes")
+
+
 def save_message(phone: str, direction: str, message_type: str, text: str = "", **extra) -> dict:
     """Appends one message to the contact's conversation and returns the item."""
     table = _require(messages_table, "WHATSAPP_MESSAGES_TABLE_NAME")
@@ -127,7 +183,7 @@ def save_message(phone: str, direction: str, message_type: str, text: str = "", 
     }
     if text:
         item["message"] = text
-    item.update({key: value for key, value in extra.items() if value not in (None, "")})
+    item.update({key: to_dynamo(value) for key, value in extra.items() if value not in (None, "")})
     table.put_item(Item=item)
     return item
 
@@ -146,11 +202,13 @@ def list_messages(phone: str, before: str | None = None) -> list[dict]:
     return list(reversed(response.get("Items", [])))
 
 
-def touch_conversation(message: dict, name: str = "") -> dict:
+def touch_conversation(message: dict, name: str = "", opens_window: bool = True) -> dict:
     """Updates the inbox summary with ``message`` and returns the conversation.
 
     New contacts start answered by the assistant. The name is the WhatsApp
-    profile name, only known from what the contact sends.
+    profile name, only known from what the contact sends. An inbound message
+    that is not the contact writing (a system notice) passes ``opens_window``
+    False, so it does not reopen the 24 hour window.
     """
     table = _require(conversations_table, "WHATSAPP_CONVERSATIONS_TABLE_NAME")
     names = {
@@ -174,7 +232,7 @@ def touch_conversation(message: dict, name: str = "") -> dict:
         "#last_direction = :last_direction, #last_type = :last_type, "
         "#mode = if_not_exists(#mode, :assistant), #inbox = :inbox"
     )
-    if message["direction"] == INBOUND:
+    if message["direction"] == INBOUND and opens_window:
         names["#last_inbound_at"] = "last_inbound_at"
         values[":last_inbound_at"] = message["date"]
         expression += ", #last_inbound_at = :last_inbound_at"

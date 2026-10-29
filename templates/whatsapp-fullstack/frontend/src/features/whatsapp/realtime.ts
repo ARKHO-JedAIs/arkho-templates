@@ -10,7 +10,8 @@ import { isMockAuth } from '@/lib/auth/session';
  * already configured (AppSync accepts the user pool token).
  *
  * Channels: a contact's phone carries its conversation (`MESSAGE_RECEIVED`,
- * `MESSAGE_SENT`, `TEMPLATE_SENT`, `CONTROL_CHANGED`) and `inbox` carries the
+ * `MESSAGE_SENT`, `TEMPLATE_SENT`, `MESSAGE_STATUS`, `MESSAGE_UPDATED`,
+ * `CONTROL_CHANGED`) and `inbox` carries the
  * conversation list (`CONVERSATION_UPDATED`). The payload is the stored item.
  *
  * Under mock auth the demo data publishes on an in-memory bus instead, so the

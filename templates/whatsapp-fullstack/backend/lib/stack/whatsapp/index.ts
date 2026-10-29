@@ -5,6 +5,7 @@ import { CfnOutput, Duration, RemovalPolicy, Stack } from 'aws-cdk-lib';
 import * as appsync from 'aws-cdk-lib/aws-appsync';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as iam from 'aws-cdk-lib/aws-iam';
+import * as s3 from 'aws-cdk-lib/aws-s3';
 import { Code } from 'aws-cdk-lib/aws-lambda';
 import { SqsDestination } from 'aws-cdk-lib/aws-lambda-destinations';
 import { RetentionDays } from 'aws-cdk-lib/aws-logs';
@@ -14,6 +15,7 @@ import { Construct } from 'constructs';
 import { AppSyncConstruct } from '../../construct/appsync-construct';
 import { DynamoConstruct } from '../../construct/dynamo-construct';
 import { LambdaConstruct } from '../../construct/lambda-construct';
+import { S3Construct } from '../../construct/s3-construct';
 import { SnsConstruct } from '../../construct/sns-construct';
 import { SsmParametersConstruct } from '../../construct/ssm-parameters-construct';
 import { ApiFactory } from '../api';
@@ -71,15 +73,25 @@ interface WhatsAppFunction {
   tables: 'read' | 'write';
   sends?: boolean;
   readsTemplates?: boolean;
+  /** What the function does in the media bucket. */
+  media?: 'download' | 'presign-read' | 'presign-upload' | 'send';
+  timeoutSeconds?: number;
 }
+
+/** Default lifetime of a presigned media URL (MEDIA_URL_TTL_SECONDS). */
+export const DEFAULT_MEDIA_URL_TTL_SECONDS = 900;
+const INBOUND_MEDIA_PREFIX = 'media/';
+const OUTBOUND_MEDIA_PREFIX = 'outbound/';
 
 // One Lambda per folder under src/lambda/whatsapp. `route` exposes it on the
 // REST API behind the authorizer; ws-handler has none, SNS invokes it.
 const FUNCTIONS: WhatsAppFunction[] = [
-  { name: 'ws-handler', description: 'Receives WhatsApp messages and statuses from End User Messaging Social (SNS)', tables: 'write', sends: true },
+  // A video download runs inside the invocation, hence the longer timeout.
+  { name: 'ws-handler', description: 'Receives WhatsApp messages and statuses from End User Messaging Social (SNS)', tables: 'write', sends: true, media: 'download', timeoutSeconds: 90 },
   { name: 'get-conversations', description: 'Lists the WhatsApp conversations', route: { path: '/whatsapp/conversations', method: 'GET' }, tables: 'read' },
-  { name: 'get-messages', description: 'Returns one WhatsApp conversation', route: { path: '/whatsapp/messages', method: 'GET' }, tables: 'read' },
-  { name: 'send-message', description: 'Sends a WhatsApp text message from the web', route: { path: '/whatsapp/messages', method: 'POST' }, tables: 'write', sends: true },
+  { name: 'get-messages', description: 'Returns one WhatsApp conversation', route: { path: '/whatsapp/messages', method: 'GET' }, tables: 'read', media: 'presign-read' },
+  { name: 'send-message', description: 'Sends a WhatsApp text or media message from the web', route: { path: '/whatsapp/messages', method: 'POST' }, tables: 'write', sends: true, media: 'send' },
+  { name: 'media-upload-url', description: 'Presigns the upload of a file to send through WhatsApp', route: { path: '/whatsapp/media/upload-url', method: 'POST' }, tables: 'read', media: 'presign-upload' },
   { name: 'get-templates', description: 'Lists the WhatsApp templates with their status', route: { path: '/whatsapp/templates', method: 'GET' }, tables: 'read', readsTemplates: true },
   { name: 'send-template', description: 'Sends an approved WhatsApp template', route: { path: '/whatsapp/templates/send', method: 'POST' }, tables: 'write', sends: true, readsTemplates: true },
   { name: 'put-control', description: 'Hands a conversation to a person or back to the automatic replies', route: { path: '/whatsapp/control', method: 'PUT' }, tables: 'write' },
@@ -113,7 +125,8 @@ function schemaFor(adminGroup: string): string {
  * instead of being lost. Outbound: the functions call
  * socialmessaging:SendWhatsAppMessage with their IAM role, so no Meta token is
  * stored. Conversations and messages live in DynamoDB; every change is
- * announced on the AppSync events API the front subscribes to.
+ * announced on the AppSync events API the front subscribes to. Files received
+ * and sent live in the private media bucket; the web only gets presigned URLs.
  */
 export class WhatsAppFactory extends Construct {
   public readonly conversationsTable: DynamoConstruct;
@@ -121,6 +134,7 @@ export class WhatsAppFactory extends Construct {
   public readonly topic: SnsConstruct;
   public readonly deadLetterQueue: sqs.Queue;
   public readonly eventsApi: AppSyncConstruct;
+  public readonly mediaBucket: S3Construct;
   public readonly functions: Record<string, LambdaConstruct> = {};
 
   constructor(scope: Construct, id: string, props: WhatsAppFactoryProps) {
@@ -211,6 +225,51 @@ export class WhatsAppFactory extends Construct {
       responseMappingTemplate: appsync.MappingTemplate.fromString(RESOLVER_RESPONSE),
     });
 
+    // Received and sent files. Private: the web only gets presigned URLs.
+    this.mediaBucket = new S3Construct(this, 'MediaBucket', {
+      params,
+      bucketConfig: {
+        bucketName: `${prefix}-whatsapp-media`,
+        encryption: { type: 's3Managed' },
+        blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+        enforceSSL: true,
+        // The browser PUTs to presigned URLs, which carry their own
+        // authorization, so the origin is not what protects the bucket.
+        cors: [
+          {
+            allowedMethods: [s3.HttpMethods.PUT, s3.HttpMethods.GET, s3.HttpMethods.HEAD],
+            allowedOrigins: ['*'],
+            allowedHeaders: ['*'],
+            maxAge: 3000,
+          },
+        ],
+        lifecycleRules: [
+          { id: 'AbortIncompleteUploads', abortIncompleteMultipartUploadAfter: Duration.days(1) },
+          ...(whatsapp.mediaRetentionDays
+            ? [{ id: 'ExpireMedia', expiration: Duration.days(whatsapp.mediaRetentionDays) }]
+            : []),
+        ],
+      },
+    });
+    const mediaBucket = this.mediaBucket.bucket;
+    // GetWhatsAppMessageMedia / PostWhatsAppMessageMedia act with the caller's
+    // credentials (the role grants below). AWS does not document whether the
+    // service also needs a bucket policy, so it is allowed on the two prefixes,
+    // only on behalf of this account; remove it once a deploy proves it unused.
+    mediaBucket.addToResourcePolicy(
+      new iam.PolicyStatement({
+        sid: 'AllowEndUserMessagingSocialMedia',
+        effect: iam.Effect.ALLOW,
+        principals: [new iam.ServicePrincipal('social-messaging.amazonaws.com')],
+        actions: ['s3:PutObject', 's3:GetObject'],
+        resources: [
+          mediaBucket.arnForObjects(`${INBOUND_MEDIA_PREFIX}*`),
+          mediaBucket.arnForObjects(`${OUTBOUND_MEDIA_PREFIX}*`),
+        ],
+        conditions: { StringEquals: { 'aws:SourceAccount': account } },
+      })
+    );
+
     const logging = {
       logRetention: RetentionDays.ONE_MONTH,
       removalPolicy: isProd ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
@@ -220,6 +279,14 @@ export class WhatsAppFactory extends Construct {
     // are unknown at synth time: the scope is every one of this account.
     const sendStatement = new iam.PolicyStatement({
       actions: ['social-messaging:SendWhatsAppMessage'],
+      resources: [`arn:${partition}:social-messaging:${region}:${account}:phone-number-id/*`],
+    });
+    const getMediaStatement = new iam.PolicyStatement({
+      actions: ['social-messaging:GetWhatsAppMessageMedia'],
+      resources: [`arn:${partition}:social-messaging:${region}:${account}:phone-number-id/*`],
+    });
+    const postMediaStatement = new iam.PolicyStatement({
+      actions: ['social-messaging:PostWhatsAppMessageMedia'],
       resources: [`arn:${partition}:social-messaging:${region}:${account}:phone-number-id/*`],
     });
     const templatesStatement = new iam.PolicyStatement({
@@ -235,13 +302,19 @@ export class WhatsAppFactory extends Construct {
         handler: 'index.handler',
         runtime: PYTHON_RUNTIME,
         layers: [layerFactory.pythonCommonLayer.layer],
-        timeout: Duration.seconds(30),
+        timeout: Duration.seconds(definition.timeoutSeconds ?? 30),
         environment: {
           WHATSAPP_CONVERSATIONS_TABLE_NAME: this.conversationsTable.tableName,
           WHATSAPP_MESSAGES_TABLE_NAME: this.messagesTable.tableName,
           WHATSAPP_CONFIGURATION_PARAMETER_NAME: parameters.getParameterName(CONFIGURATION_KEY),
           WHATSAPP_ADMIN_GROUP: whatsapp.adminGroup,
           APPSYNC_GRAPHQL_URL: this.eventsApi.graphqlUrl,
+          ...(definition.media
+            ? {
+                WHATSAPP_MEDIA_BUCKET_NAME: this.mediaBucket.bucketName,
+                MEDIA_URL_TTL_SECONDS: String(whatsapp.mediaUrlTtlSeconds ?? DEFAULT_MEDIA_URL_TTL_SECONDS),
+              }
+            : {}),
         },
         logging,
       });
@@ -258,6 +331,7 @@ export class WhatsAppFactory extends Construct {
       this.eventsApi.grantMutation(fn.function, PUBLISH_EVENT_FIELD);
       if (definition.sends) fn.function.addToRolePolicy(sendStatement);
       if (definition.readsTemplates) fn.function.addToRolePolicy(templatesStatement);
+      this.grantMedia(fn, definition.media, getMediaStatement, postMediaStatement);
 
       if (definition.route) {
         apiFactory.restApi.addRoute({
@@ -322,10 +396,59 @@ export class WhatsAppFactory extends Construct {
       description: 'Parameter Store name of the WhatsApp configuration',
       exportName: `${prefix}-WhatsAppConfigurationParameterName`,
     });
+    new CfnOutput(this, 'WhatsAppMediaBucketName', {
+      value: this.mediaBucket.bucketName,
+      description: 'Private bucket of the files received and sent through WhatsApp',
+      exportName: `${prefix}-WhatsAppMediaBucketName`,
+    });
     new CfnOutput(this, 'WhatsAppDeadLetterQueueUrl', {
       value: this.deadLetterQueue.queueUrl,
       description: 'Inbound WhatsApp notifications that failed after the retries',
       exportName: `${prefix}-WhatsAppDeadLetterQueueUrl`,
     });
+  }
+
+  /**
+   * Least privilege per function: ws-handler downloads into media/ (list,
+   * write, copy and delete the original; read sent files), get-messages only
+   * signs reads, media-upload-url only signs uploads to outbound/, and
+   * send-message checks an upload and hands it to WhatsApp.
+   */
+  private grantMedia(
+    fn: LambdaConstruct,
+    access: WhatsAppFunction['media'],
+    getMediaStatement: iam.PolicyStatement,
+    postMediaStatement: iam.PolicyStatement
+  ): void {
+    if (!access) return;
+    const bucket = this.mediaBucket.bucket;
+    const inbound = bucket.arnForObjects(`${INBOUND_MEDIA_PREFIX}*`);
+    const outbound = bucket.arnForObjects(`${OUTBOUND_MEDIA_PREFIX}*`);
+    const role = fn.function;
+    if (access === 'download') {
+      role.addToRolePolicy(getMediaStatement);
+      role.addToRolePolicy(
+        new iam.PolicyStatement({
+          actions: ['s3:ListBucket'],
+          resources: [bucket.bucketArn],
+          conditions: { StringLike: { 's3:prefix': [`${INBOUND_MEDIA_PREFIX}*`] } },
+        })
+      );
+      role.addToRolePolicy(
+        new iam.PolicyStatement({
+          actions: ['s3:PutObject', 's3:GetObject', 's3:DeleteObject'],
+          resources: [inbound],
+        })
+      );
+      // Reactions and statuses re-announce sent messages with a fresh URL.
+      role.addToRolePolicy(new iam.PolicyStatement({ actions: ['s3:GetObject'], resources: [outbound] }));
+    } else if (access === 'presign-read') {
+      role.addToRolePolicy(new iam.PolicyStatement({ actions: ['s3:GetObject'], resources: [inbound, outbound] }));
+    } else if (access === 'presign-upload') {
+      role.addToRolePolicy(new iam.PolicyStatement({ actions: ['s3:PutObject'], resources: [outbound] }));
+    } else {
+      role.addToRolePolicy(postMediaStatement);
+      role.addToRolePolicy(new iam.PolicyStatement({ actions: ['s3:GetObject'], resources: [outbound] }));
+    }
   }
 }

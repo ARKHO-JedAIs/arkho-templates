@@ -14,7 +14,10 @@ export interface ApiFactoryProps {
  * Every route is a Lambda proxy integration and is protected by the Lambda
  * authorizer (`src/lambda/core/authorizer`, which validates Cognito JWTs)
  * unless it opts out with `requireAuth: false`. New routes are added here so
- * the URL surface stays in one place.
+ * the URL surface stays in one place; the feature modules (WhatsApp, Users)
+ * register theirs through `restApi.addRoute`, and those protected routes are
+ * also what attach the authorizer - a TokenAuthorizer no method references
+ * fails synth with "must be attached to a RestApi".
  */
 export class ApiFactory extends Construct {
   public readonly restApi: RestApiConstruct;
@@ -28,32 +31,9 @@ export class ApiFactory extends Construct {
       params,
       authorizerType: 'lambda',
       authorizerFunction: lambdaFactory.authorizerLambda.function,
-      routes: [
-        // Reference example of the API Gateway -> Lambda wiring. Public on
-        // purpose so `curl <api-url>hello-world` verifies the deploy before any
-        // Cognito token exists; it returns a static payload and reads nothing.
-        // Delete it, or drop `requireAuth: false`, once the API serves real
-        // routes.
-        {
-          path: '/hello-world',
-          method: 'GET',
-          lambda: lambdaFactory.helloWorldLambda.function,
-          requireAuth: false,
-        },
-        // Protected counterpart: the handler reads the caller from
-        // `requestContext.authorizer`, so it only works behind the authorizer.
-        // It is also what attaches the authorizer to the API - a TokenAuthorizer
-        // that no method references fails synth with "must be attached to a
-        // RestApi".
-        {
-          path: '/presigned-url',
-          method: 'GET',
-          lambda: lambdaFactory.presignedUrlTemplateLambda.function,
-        },
-      ],
     });
 
-    // Anything the routes above do not match answers with the standardized 404
+    // Anything no route matches answers with the standardized 404
     // body from the not-found function instead of API Gateway's default error.
     this.restApi.addNotFoundHandler(lambdaFactory.notFoundLambda.function);
   }

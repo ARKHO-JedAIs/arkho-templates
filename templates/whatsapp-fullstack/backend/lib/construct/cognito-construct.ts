@@ -1,4 +1,4 @@
-import { RemovalPolicy, CfnOutput, Duration, Tags } from 'aws-cdk-lib';
+import { RemovalPolicy, CfnOutput, Duration, SecretValue, Tags } from 'aws-cdk-lib';
 import {
   UserPool,
   UserPoolClient,
@@ -16,6 +16,7 @@ import {
   BooleanAttribute,
   DateTimeAttribute,
   UserPoolIdentityProviderOidc,
+  UserPoolIdentityProviderGoogle,
   OidcAttributeRequestMethod,
   ProviderAttribute,
   UserPoolClientIdentityProvider,
@@ -284,8 +285,7 @@ export interface CognitoUserPoolGroupConfig {
  *
  * When enabled, an OIDC identity provider is created and added to the User
  * Pool Client alongside the native Cognito provider. A Hosted UI domain is
- * required for federation, so `domainPrefix` must be supplied (here or via
- * CognitoConstructProps.domainPrefix).
+ * required for federation, so CognitoConstructProps.domainPrefix must be set.
  */
 export interface CognitoEntraIdConfig {
   enabled: boolean;
@@ -295,6 +295,18 @@ export interface CognitoEntraIdConfig {
    * Entra ID OIDC issuer, e.g. https://login.microsoftonline.com/<tenantId>/v2.0
    */
   issuerUrl?: string;
+  scopes?: string[];
+}
+
+/**
+ * Optional Google sign-in for the User Pool, with the same rules as
+ * CognitoEntraIdConfig: added to the client next to the native provider, and
+ * it needs CognitoConstructProps.domainPrefix.
+ */
+export interface CognitoGoogleConfig {
+  enabled: boolean;
+  clientId?: string;
+  clientSecret?: string;
   scopes?: string[];
 }
 
@@ -328,7 +340,14 @@ export interface CognitoConstructProps {
   entraId?: CognitoEntraIdConfig;
 
   /**
-   * Hosted UI domain prefix. Required when Entra ID federation is enabled.
+   * Optional Google sign-in. Disabled by default.
+   */
+  google?: CognitoGoogleConfig;
+
+  /**
+   * Hosted UI domain prefix. Required when Entra ID or Google is enabled; with
+   * it, the outputs also carry the domain URL and the redirect URI to register
+   * at the identity providers.
    */
   domainPrefix?: string;
 
@@ -406,8 +425,8 @@ export interface CognitoConstructProps {
  *     { groupName: 'operator', description: 'Field operator', precedence: 10 },
  *   ],
  *   lambdaTriggers: {
- *     preSignUp: lambdaFunctions.preSignupLambda.function,
- *     postConfirmation: lambdaFunctions.postConfirmationSignupLambda.function
+ *     preSignUp: preSignUpFunction,
+ *     postConfirmation: postConfirmationFunction
  *   }
  * });
  * ```
@@ -434,6 +453,11 @@ export class CognitoConstruct extends Construct {
   public readonly entraIdProvider?: UserPoolIdentityProviderOidc;
 
   /**
+   * The Google identity provider (if enabled)
+   */
+  public readonly googleProvider?: UserPoolIdentityProviderGoogle;
+
+  /**
    * The Hosted UI domain (if a domain prefix was provided)
    */
   public readonly domain?: UserPoolDomain;
@@ -458,6 +482,7 @@ export class CognitoConstruct extends Construct {
       userPoolGroups = [],
       lambdaTriggers = {},
       entraId,
+      google,
       domainPrefix,
       createOutputs = true,
       tags = {},
@@ -573,6 +598,12 @@ export class CognitoConstruct extends Construct {
       );
     }
 
+    if ((entraId?.enabled || google?.enabled) && !domainPrefix) {
+      throw new Error(
+        'Federated sign-in enabled but no domainPrefix was provided (Hosted UI domain is required for federation)'
+      );
+    }
+
     // Optional Microsoft Entra ID (OIDC) federation
     const supportedIdentityProviders = [UserPoolClientIdentityProvider.COGNITO];
     if (entraId?.enabled) {
@@ -581,12 +612,6 @@ export class CognitoConstruct extends Construct {
           'Entra ID federation enabled but clientId, clientSecret or issuerUrl is missing'
         );
       }
-      if (!domainPrefix) {
-        throw new Error(
-          'Entra ID federation enabled but no domainPrefix was provided (Hosted UI domain is required for federation)'
-        );
-      }
-
       this.entraIdProvider = new UserPoolIdentityProviderOidc(this, 'EntraIdProvider', {
         userPool: this.userPool,
         name: 'EntraID',
@@ -597,12 +622,34 @@ export class CognitoConstruct extends Construct {
         attributeRequestMethod: OidcAttributeRequestMethod.GET,
         attributeMapping: {
           email: ProviderAttribute.other('email'),
+          fullname: ProviderAttribute.other('name'),
           givenName: ProviderAttribute.other('given_name'),
           familyName: ProviderAttribute.other('family_name'),
         },
       });
 
       supportedIdentityProviders.push(UserPoolClientIdentityProvider.custom('EntraID'));
+    }
+
+    if (google?.enabled) {
+      if (!google.clientId || !google.clientSecret) {
+        throw new Error('Google sign-in enabled but clientId or clientSecret is missing');
+      }
+
+      this.googleProvider = new UserPoolIdentityProviderGoogle(this, 'GoogleProvider', {
+        userPool: this.userPool,
+        clientId: google.clientId,
+        clientSecretValue: SecretValue.unsafePlainText(google.clientSecret),
+        scopes: google.scopes ?? ['openid', 'email', 'profile'],
+        attributeMapping: {
+          email: ProviderAttribute.GOOGLE_EMAIL,
+          fullname: ProviderAttribute.GOOGLE_NAME,
+          givenName: ProviderAttribute.GOOGLE_GIVEN_NAME,
+          familyName: ProviderAttribute.GOOGLE_FAMILY_NAME,
+        },
+      });
+
+      supportedIdentityProviders.push(UserPoolClientIdentityProvider.GOOGLE);
     }
 
     // Hosted UI domain (required for federation, optional otherwise)
@@ -670,10 +717,13 @@ export class CognitoConstruct extends Construct {
       this.userPoolClient.node.addDependency(this.resourceServer);
     }
 
-    // The client must be created after the Entra ID provider so that
-    // supportedIdentityProviders can reference it
+    // The client must be created after the identity providers so that
+    // supportedIdentityProviders can reference them
     if (this.entraIdProvider) {
       this.userPoolClient.node.addDependency(this.entraIdProvider);
+    }
+    if (this.googleProvider) {
+      this.userPoolClient.node.addDependency(this.googleProvider);
     }
 
     // Create CloudFormation outputs if requested
@@ -695,6 +745,21 @@ export class CognitoConstruct extends Construct {
         description: 'Cognito User Pool ARN',
         exportName: `${projectName}-${envName}-UserPoolArn`,
       });
+
+      if (this.domain) {
+        const domainUrl = this.domain.baseUrl();
+        new CfnOutput(this, 'CognitoDomainUrl', {
+          value: domainUrl,
+          description: 'Cognito Hosted UI domain URL (frontend VITE_COGNITO_DOMAIN, without https://)',
+          exportName: `${projectName}-${envName}-CognitoDomainUrl`,
+        });
+
+        new CfnOutput(this, 'CognitoIdpRedirectUri', {
+          value: `${domainUrl}/oauth2/idpresponse`,
+          description: 'Redirect URI to register at Microsoft Entra ID and Google',
+          exportName: `${projectName}-${envName}-CognitoIdpRedirectUri`,
+        });
+      }
     }
 
     // Apply tags

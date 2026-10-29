@@ -7,26 +7,10 @@ import { getTemplate, TEST_PARAMS } from './helpers/setup';
 const PREFIX = `${TEST_PARAMS.projectName}-${TEST_PARAMS.envName}`;
 
 describe('MainStack', () => {
-  it('provisions the usage-stats DynamoDB table', () => {
+  it('provisions no usage-stats table and no templates bucket', () => {
     const template = getTemplate();
-    // usage-stats plus the two WhatsApp tables (test/whatsapp.test.ts).
-    template.resourceCountIs('AWS::DynamoDB::Table', 3);
-    template.hasResourceProperties('AWS::DynamoDB::Table', {
-      TableName: `${PREFIX}-usage-stats`,
-      BillingMode: 'PAY_PER_REQUEST',
-      KeySchema: [
-        { AttributeName: 'PK', KeyType: 'HASH' },
-        { AttributeName: 'SK', KeyType: 'RANGE' },
-      ],
-    });
-  });
-
-  it('provisions the templates S3 bucket', () => {
-    const template = getTemplate();
-    template.resourceCountIs('AWS::S3::Bucket', 1);
-    template.hasResourceProperties('AWS::S3::Bucket', {
-      BucketName: `${PREFIX}-templates`,
-    });
+    template.resourcePropertiesCountIs('AWS::DynamoDB::Table', { TableName: `${PREFIX}-usage-stats` }, 0);
+    template.resourcePropertiesCountIs('AWS::S3::Bucket', { BucketName: `${PREFIX}-templates` }, 0);
   });
 
   it('provisions a Cognito User Pool and Client', () => {
@@ -35,34 +19,18 @@ describe('MainStack', () => {
     template.resourceCountIs('AWS::Cognito::UserPoolClient', 1);
   });
 
-  it('does not federate to Entra ID when disabled', () => {
-    const template = getTemplate();
-    template.resourceCountIs('AWS::Cognito::UserPoolIdentityProvider', 0);
-  });
-
   it('builds the python-common layer', () => {
     const template = getTemplate();
     template.resourceCountIs('AWS::Lambda::LayerVersion', 1);
   });
 
-  it('provisions the Lambda functions backed by src/lambda', () => {
+  it('provisions the core Lambda functions and none of the removed ones', () => {
     const template = getTemplate();
-    // Count only our explicitly named functions; CDK-managed helpers (e.g. the
-    // S3 auto-delete-objects custom resource) have no FunctionName.
-    const named = template.findResources('AWS::Lambda::Function', {
-      Properties: { FunctionName: Match.anyValue() },
-    });
-    // The six core functions plus the seven WhatsApp ones (test/whatsapp.test.ts).
-    expect(Object.keys(named)).toHaveLength(13);
-    for (const name of [
-      `${PREFIX}-hello-world`,
-      `${PREFIX}-pre-signup`,
-      `${PREFIX}-post-confirmation-signup`,
-      `${PREFIX}-not-found`,
-      `${PREFIX}-presigned-url-template`,
-      `${PREFIX}-authorizer`,
-    ]) {
+    for (const name of [`${PREFIX}-not-found`, `${PREFIX}-authorizer`]) {
       template.hasResourceProperties('AWS::Lambda::Function', { FunctionName: name });
+    }
+    for (const name of ['hello-world', 'pre-signup', 'post-confirmation-signup', 'presigned-url-template']) {
+      template.resourcePropertiesCountIs('AWS::Lambda::Function', { FunctionName: `${PREFIX}-${name}` }, 0);
     }
   });
 
@@ -76,54 +44,20 @@ describe('MainStack', () => {
     });
   });
 
-  it('serves GET /hello-world without authorization', () => {
-    const template = getTemplate();
-    const [helloWorldResourceId] = Object.keys(
-      template.findResources('AWS::ApiGateway::Resource', {
-        Properties: { PathPart: 'hello-world' },
-      })
-    );
-    expect(helloWorldResourceId).toBeDefined();
-
-    template.hasResourceProperties('AWS::ApiGateway::Method', {
-      HttpMethod: 'GET',
-      ResourceId: { Ref: helloWorldResourceId },
-      AuthorizationType: 'NONE',
-      Integration: Match.objectLike({ Type: 'AWS_PROXY' }),
-    });
-  });
-
-  it('lets API Gateway invoke the hello-world Lambda', () => {
-    getTemplate().hasResourceProperties('AWS::Lambda::Permission', {
-      Action: 'lambda:InvokeFunction',
-      Principal: 'apigateway.amazonaws.com',
-      FunctionName: {
-        'Fn::GetAtt': [Match.stringLikeRegexp('HelloWorldLambda'), 'Arn'],
-      },
-    });
-  });
-
-  it('guards GET /presigned-url with the Lambda authorizer', () => {
+  it('guards the API with the Lambda authorizer and has no example routes', () => {
     const template = getTemplate();
     template.hasResourceProperties('AWS::ApiGateway::Authorizer', {
       Name: `${PREFIX}-lambda-authorizer`,
       Type: 'TOKEN',
       IdentitySource: 'method.request.header.Authorization',
     });
-
-    const [presignedUrlResourceId] = Object.keys(
-      template.findResources('AWS::ApiGateway::Resource', {
-        Properties: { PathPart: 'presigned-url' },
-      })
-    );
-    expect(presignedUrlResourceId).toBeDefined();
-
     template.hasResourceProperties('AWS::ApiGateway::Method', {
-      HttpMethod: 'GET',
-      ResourceId: { Ref: presignedUrlResourceId },
       AuthorizationType: 'CUSTOM',
       AuthorizerId: Match.anyValue(),
     });
+    for (const pathPart of ['hello-world', 'presigned-url']) {
+      template.resourcePropertiesCountIs('AWS::ApiGateway::Resource', { PathPart: pathPart }, 0);
+    }
   });
 
   it('falls back to the not-found Lambda on unmatched routes', () => {
@@ -155,13 +89,8 @@ describe('MainStack', () => {
     }
   });
 
-  it('wires pre-signup and post-confirmation as Cognito triggers', () => {
-    const template = getTemplate();
-    template.hasResourceProperties('AWS::Cognito::UserPool', Match.objectLike({
-      LambdaConfig: Match.objectLike({
-        PreSignUp: Match.anyValue(),
-        PostConfirmation: Match.anyValue(),
-      }),
-    }));
+  it('wires no Cognito triggers', () => {
+    const pools = Object.values(getTemplate().findResources('AWS::Cognito::UserPool'));
+    expect(pools[0]?.Properties?.LambdaConfig).toBeUndefined();
   });
 });

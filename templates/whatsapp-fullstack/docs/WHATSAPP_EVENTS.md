@@ -13,14 +13,19 @@ Sources:
 - Meta WhatsApp Cloud API: "Webhooks notification payload reference" and
   "Message templates - components".
 - The real code of this template (`ws-handler/index.py`,
-  `common/whatsapp/store.py`, `common/whatsapp/messaging.py`).
+  `common/whatsapp/store.py`, `common/whatsapp/messaging.py`,
+  `common/whatsapp/media.py`).
 
 Legend for "Template today":
 
-- **handled** - stored with its real text and/or applied (status).
-- **placeholder** - stored as an inbound message whose text is a placeholder
-  such as `[Imagen] <caption>` or `[reaction]`; the payload details are lost.
+- **handled** - stored with a normalized `type`, a readable `message` and a
+  `payload` per type (and `media` for files), announced, and drawn by the web.
 - **ignored** - parsed but nothing is stored or announced.
+
+Every stored inbound message also keeps, when present, `reply_to`
+(`context.id`), `forwarded` (`context.forwarded` / `frequently_forwarded`) and
+`referral` (`source_url`, `source_type`, `source_id`, `headline`, `body`,
+`media_type`, `ctwa_clid`).
 
 Anything marked **to verify on the first deploy** is not stated by the AWS
 documentation; capture a real SNS message (CloudWatch logs of ws-handler) before
@@ -48,7 +53,7 @@ How ws-handler unwraps it, per SNS record:
 | `Records[].Sns.Message` -> `json.loads` | a non-JSON message is logged and skipped (no retry) |
 | `context.MetaPhoneNumberIds[0].arn` | origination phone number for replies |
 | `whatsAppWebhookEntry` -> `json.loads` | `parse_entry` |
-| `entry.changes[].value.messages[]` | `extract_messages` -> `handle_message` (store, announce, mark as read, auto-reply) |
+| `entry.changes[].value.messages[]` | `extract_messages` (`normalize` per type) -> `handle_message` (download media, store, announce, mark as read, auto-reply) or `handle_reaction` |
 | `entry.changes[].value.statuses[]` | `extract_statuses` -> `handle_status` (update the stored message, announce) |
 | `entry.changes[].field` | **not checked**: any change whose `value` has no `messages`/`statuses` is silently ignored |
 
@@ -86,30 +91,36 @@ Media: every media type carries `<type>.id` (the media id), `<type>.mime_type`
 and `<type>.sha256`. Download it with EUM Social `GetWhatsAppMessageMedia`
 (`mediaId`, `originationPhoneNumberId`, `destinationS3File`), which writes it
 straight to S3. Meta only keeps the media for a limited time, so download it
-when the event arrives.
+when the event arrives (section 6).
+
+Auto-reply: only the types marked "auto-reply" below trigger `answer`
+(`AUTO_REPLY_TYPES` in ws-handler). Every stored inbound message except
+`system` opens the 24 hour window.
 
 | `type` | Key fields | Media | Template today | Recommended handling |
 | --- | --- | --- | --- | --- |
-| `text` | `text.body` | no | handled: `body` stored as the message text | keep; read `context.id` to show "reply to", store `referral` on the conversation |
-| `image` | `image.id`, `mime_type`, `sha256`, `caption` | yes | placeholder: `[Imagen] <caption>` | download to S3 (section 7), store the key, serve a presigned URL |
-| `audio` | `audio.id`, `mime_type`, `voice` (true for a voice note) | yes | placeholder: `[Audio]` | download; transcribe with Amazon Transcribe if an agent must read it |
-| `video` | `video.id`, `mime_type`, `sha256`, `caption` | yes | placeholder: `[Video] <caption>` | download; mind the Lambda timeout and the bucket size |
-| `document` | `document.id`, `mime_type`, `sha256`, `filename`, `caption` | yes | placeholder: `[Documento] <caption>` | download; keep `filename` as the display name |
-| `sticker` | `sticker.id`, `mime_type`, `sha256`, `animated` | yes | placeholder: `[Sticker]` | download (webp) or keep the placeholder |
-| `location` | `location.latitude`, `longitude`, `name`, `address`, `url` | no | placeholder: `[Ubicacion]` (coordinates lost) | store the coordinates and render a map link |
-| `contacts` | `contacts[]` with `name.formatted_name`, `phones[]`, `emails[]`, `org`, ... | no | placeholder: `[Contacto]` | store the vCard data, show name and phone |
-| `interactive` / `button_reply` | `interactive.button_reply.id`, `.title` | no | handled: `title` stored | also store `id`, it is the stable value to branch on |
-| `interactive` / `list_reply` | `interactive.list_reply.id`, `.title`, `.description` | no | handled: `title` stored | also store `id` |
-| `interactive` / `nfm_reply` (Flows) | `interactive.nfm_reply.response_json` (JSON string), `body`, `name` | no | stored with an **empty** text (no `title`) | parse `response_json` and store the submitted fields |
-| `button` (template quick reply) | `button.text`, `button.payload`; `context.id` = template `wamid` | no | handled: `button.text` stored | store `payload`; link to the template sent via `context.id` |
-| `reaction` | `reaction.message_id` (wamid reacted to), `reaction.emoji` (empty = removed) | no | placeholder: `[reaction]` stored as a new message, auto-reply fires | do not store as a message; attach the emoji to `message_id` and skip auto-reply |
-| `order` | `order.catalog_id`, `order.text`, `order.product_items[]` (`product_retailer_id`, `quantity`, `item_price`, `currency`) | no | placeholder: `[order]` | only relevant with a Meta catalog; store the items |
-| `system` | `system.body`, `system.type` (`user_changed_number`, ...), `system.wa_id` / `new_wa_id` | no | placeholder: `[system]` | update the contact's phone; never auto-reply |
-| `request_welcome` | no payload; the user opened the chat for the first time | no | placeholder: `[request_welcome]`, auto-reply fires | send a welcome message instead of storing it as a message |
-| `unsupported` / `unknown` | `errors[]` (`code`, `title`, `error_data.details`) | no | placeholder: `[unsupported]` / `[unknown]` | store with the error title; do not auto-reply |
+| `text` | `text.body` | no | handled: `type: text`, `message` = body; `reply_to`, `referral` kept; auto-reply | - |
+| `image` | `image.id`, `mime_type`, `sha256`, `caption` | yes | handled: downloaded to `media/<id>.jpg`, `media: {key, mimeType, size, caption, sha256}`; the web gets a presigned URL; auto-reply | - |
+| `audio` | `audio.id`, `mime_type`, `voice` (true for a voice note) | yes | handled: as image, plus `media.voice`; auto-reply | transcribe in the `after_media_stored` hook (Amazon Transcribe) if an agent must read it |
+| `video` | `video.id`, `mime_type`, `sha256`, `caption` | yes | handled: as image (ws-handler timeout 90 s for the download); auto-reply | mind the bucket size: set `MEDIA_RETENTION_DAYS` |
+| `document` | `document.id`, `mime_type`, `sha256`, `filename`, `caption` | yes | handled: as image, plus `media.filename` (the display and download name); auto-reply | - |
+| `sticker` | `sticker.id`, `mime_type`, `sha256`, `animated` | yes | handled: as image (webp), plus `media.animated`; auto-reply | - |
+| `location` | `location.latitude`, `longitude`, `name`, `address`, `url` | no | handled: `payload: {latitude, longitude, name, address, url}` (numbers as DynamoDB Decimals); the web links to Google Maps; auto-reply | - |
+| `contacts` | `contacts[]` with `name.formatted_name`, `phones[]`, `emails[]`, `org`, ... | no | handled: `payload.contacts[] = {name, phones[{phone, wa_id, type}], emails[], org}`; auto-reply | - |
+| `interactive` / `button_reply` | `interactive.button_reply.id`, `.title` | no | handled: `type: button_reply`, `payload: {id, title}`; auto-reply | branch on `payload.id` in `answer` |
+| `interactive` / `list_reply` | `interactive.list_reply.id`, `.title`, `.description` | no | handled: `type: list_reply`, `payload: {id, title, description}`; auto-reply | branch on `payload.id` |
+| `interactive` / `nfm_reply` (Flows) | `interactive.nfm_reply.response_json` (JSON string), `body`, `name` | no | handled: `type: nfm_reply`, `payload: {name, body, response}` (`response` parsed; the raw text when it is not JSON); the web shows a key/value card; auto-reply | - |
+| `button` (template quick reply) | `button.text`, `button.payload`; `context.id` = template `wamid` | no | handled: `type: button`, `payload: {text, payload}`, `reply_to` = the template `wamid`; auto-reply | - |
+| `reaction` | `reaction.message_id` (wamid reacted to), `reaction.emoji` (empty = removed) | no | handled: **not** stored as a message; `reaction: {emoji, date}` set on (or removed from) the target message and announced as `MESSAGE_UPDATED`; no auto-reply, no mark-as-read | - |
+| `order` | `order.catalog_id`, `order.text`, `order.product_items[]` (`product_retailer_id`, `quantity`, `item_price`, `currency`) | no | handled: `payload: {catalog_id, text, items[]}`; auto-reply | only relevant with a Meta catalog |
+| `system` | `system.body`, `system.type` (`user_changed_number`, ...), `system.wa_id` / `new_wa_id` | no | handled: `payload: {body, type, wa_id, new_wa_id}`; shown as a centered notice; no auto-reply; does not open the window | move the conversation to `new_wa_id` |
+| `request_welcome` | no payload; the user opened the chat for the first time | no | handled: stored as a notice; no auto-reply | send a welcome message from `answer`'s caller if you want one |
+| `unsupported` / `unknown` / any other type | `errors[]` (`code`, `title`, `error_data.details`) | no | handled: `type: unsupported`, `payload: {original_type, errors[], raw}` (`raw` = the message JSON, 4000 chars); no auto-reply | - |
 
-Not covered above: `ephemeral`, `edit`, `revoke` and call-related types exist in
-recent Meta API versions; they fall into the generic placeholder today.
+`ephemeral`, `edit`, `revoke` and call-related types exist in recent Meta API
+versions; they are stored as `unsupported` with their raw payload. An
+`interactive` message of another subtype is `unsupported` with
+`original_type: interactive/<subtype>`.
 
 ## 3. Statuses of what we sent (`field: messages`, `value.statuses[]`)
 
@@ -123,8 +134,8 @@ Fields: `id` (the `wamid` we got from `SendWhatsAppMessage`), `status`,
 | `delivered` | reached the device | handled (rank 2) | keep |
 | `read` | read; only when the contact has read receipts on | handled (rank 3) | keep |
 | `failed` | not delivered; `errors[]` explains why | handled (rank 4, always wins); `errors[0].title` stored as the reason | also store `errors[0].code` (e.g. 131047 re-engagement, 131026 undeliverable) to drive UI hints |
-| `deleted` | the contact deleted the message (listed by AWS) | ignored (not in `STATUS_RANK`) | mark the message as deleted, drop downloaded media |
-| `warning` | the message references an unavailable item (listed by AWS) | ignored | log it |
+| `deleted` | the contact deleted the message (listed by AWS) | handled: `deleted: true` on the message (`store.mark_message`) + `MESSAGE_STATUS`; the web shows "Mensaje eliminado" | drop the downloaded media too if your retention rules require it |
+| `warning` | the message references an unavailable item (listed by AWS) | handled: logged and stored as `warning` (`errors[0].title`) + `MESSAGE_STATUS` | - |
 | `accepted` | accepted by WhatsApp for processing (listed by AWS) | ignored | optional |
 | `Message retries exhausted, dropping message.` | EUM Social could not hand the message to WhatsApp within 180 minutes (listed by AWS) | ignored | treat as `failed` |
 | handover events (`WhatsApp Message Handover Succeeded` / `Failed`) | generated by EUM Social, delivered in the `statuses` field | ignored (not in `STATUS_RANK`) | treat "Failed" as `failed`; **to verify on the first deploy**: the exact `status` string and whether `id` is the `wamid` |
@@ -234,7 +245,61 @@ What this template does today:
   Header variables, media headers and button parameters are not sent yet, so a
   template that needs them is rejected by Meta (502).
 
-## 6. How midoc handles media (recommended design)
+## 6. Media
+
+### What this template does
+
+| Step | Where | What |
+| --- | --- | --- |
+| Bucket | `WhatsAppFactory` | `${projectName}-${envName}-whatsapp-media`: block public access, SSE-S3, SSL only, RETAIN in prod / DESTROY + auto-delete otherwise; optional expiration after `MEDIA_RETENTION_DAYS` (empty = keep forever); incomplete multipart uploads aborted after 1 day; CORS PUT/GET from any origin (presigned URLs carry their own authorization) |
+| Download | ws-handler, `media.download_inbound` | `get_whatsapp_message_media(mediaId, originationPhoneNumberId, metadataOnly=False, destinationS3File={bucketName, key: "media/"})`; the object is found with `stored_media_key` (prefix `media/<id>.`) and renamed with `rename_media` / `MEDIA_EXTENSIONS`; the size comes from S3 (the API's `fileSize` is in KB) |
+| Never lose the message | ws-handler, `store_media` | a failed download stores the message with `media.error = "download_failed"` |
+| Serve | get-messages, ws-handler and send-message announcements, `media.exposed` | `media.key` is replaced by `media.url`, a presigned GET valid for `MEDIA_URL_TTL_SECONDS` (default 900); the key never leaves the backend; the web reloads the conversation when a URL fails |
+| Upload | `POST /whatsapp/media/upload-url` (media-upload-url) | `{phone, filename, mimeType, size}` checked against WhatsApp's limits (below); returns a presigned PUT for `outbound/<uuid>.<ext>` signed with that `Content-Type` (5 minutes) |
+| Send | `POST /whatsapp/messages` with `{phone, media: {key, mimeType, filename?, caption?}}` | `head_object` checks the upload (key under `outbound/`, same `Content-Type`, size within the limit), `post_whatsapp_message_media(originationPhoneNumberId, sourceS3File)` returns the WhatsApp media id, the message goes out as `image` / `audio` / `video` / `document` (audio without caption, document with `filename`), stored with `media` like an inbound one; the 24 hour window rule still applies |
+| Transcription | ws-handler `after_media_stored` | a no-op hook; not included |
+
+Outbound limits (AWS End User Messaging Social "Supported media file types and
+sizes in WhatsApp" and Meta Cloud API "Media - Supported media types"):
+
+| Type | MIME types | Max size |
+| --- | --- | --- |
+| image | `image/jpeg`, `image/png` | 5 MB |
+| audio | `audio/aac`, `audio/amr`, `audio/mpeg`, `audio/mp4`, `audio/ogg` (OPUS only, per Meta) | 16 MB |
+| video | `video/mp4`, `video/3gpp` (AWS lists `video/3gp`) | 16 MB |
+| document | `text/plain`, `application/pdf`, Word, Excel, PowerPoint (`.doc[x]`, `.xls[x]`, `.ppt[x]`) | 100 MB |
+| sticker (inbound only) | `image/webp` | 100 KB static, 500 KB animated |
+
+IAM (least privilege, all on `phone-number-id/*` of the account):
+ws-handler gets `social-messaging:GetWhatsAppMessageMedia`, `s3:ListBucket`
+(prefix `media/`) and `s3:PutObject` / `GetObject` / `DeleteObject` on
+`media/*` (plus `GetObject` on `outbound/*` to re-sign sent files);
+send-message gets `social-messaging:PostWhatsAppMessageMedia` and
+`s3:GetObject` on `outbound/*`; media-upload-url only `s3:PutObject` on
+`outbound/*`; get-messages only `s3:GetObject` on both prefixes.
+
+Verified in the AWS documentation: the request/response of
+`GetWhatsAppMessageMedia` (`fileSize` in KB), that the destination `key` is a
+prefix the object name is appended to (the CLI example writes
+`inbound_<MEDIA_ID>.jpeg` for `key=inbound_`), that the bucket must be in the
+same account and Region as the WABA, the resource type of both actions
+(`phone-number-id`, Service Authorization Reference, no dependent actions
+listed), and the supported types and sizes. **Not documented, to verify on
+the first deploy**: whether EUM Social writes and reads the bucket with the
+caller's credentials only or also as the `social-messaging.amazonaws.com`
+principal. The bucket policy therefore also allows that principal
+`s3:PutObject` / `GetObject` on `media/*` and `outbound/*`, conditioned on
+`aws:SourceAccount`; remove the `AllowEndUserMessagingSocialMedia` statement
+if the first deploy shows it is not needed. Also to verify: the exact object
+name for MIME types with parameters (`audio/ogg; codecs=opus`), which the
+prefix lookup tolerates.
+
+Limits worth knowing: API Gateway stops waiting after 29 seconds, so handing a
+very large document to WhatsApp from send-message can time out the request
+even if the message is sent; the web reloads only the last page of messages
+when a URL expires.
+
+### How midoc handles media (the design this follows)
 
 midoc (`midoc-medical-planner-backend`) already downloads WhatsApp media. Its
 flow, in `src/lambda/ws-handler/index.py` and `src/lambda/get-ws-message/index.py`:
@@ -250,19 +315,10 @@ flow, in `src/lambda/ws-handler/index.py` and `src/lambda/get-ws-message/index.p
 | 7. Audio | `transcribe_audio_message` -> `transcribe_audio_from_s3` | Amazon Transcribe job over the S3 object (`MediaFormat` from `AUDIO_MEDIA_FORMATS`), output to `media/<media_id>.json`; the text is what the agent reads |
 | 8. Serve | `get-ws-message`: `exposed_message` + `media_url` | `media_id` and `object_key` are hidden (`HIDDEN_MEDIA_ATTRIBUTES`); a message with media gets a presigned `get_object` `media_url` (default 3600 s); a URL that cannot be signed leaves that one message without it |
 
-To add media to this template the same way:
-
-1. Add a private media bucket to `WhatsAppFactory` and grant ws-handler
-   `social-messaging:GetWhatsAppMessageMedia` plus `s3:PutObject` /
-   `GetObject` / `ListBucket` / `DeleteObject` on it (EUM Social writes with
-   the caller's permissions; **to verify on the first deploy** whether the
-   bucket policy also needs to allow the service).
-2. In ws-handler, download in `handle_message` after the duplicate check and
-   before `store.save_message`, store `object_key` and `mime_type` on the
-   message, keep the placeholder text as the fallback.
-3. In `get-messages`, replace `object_key` with a presigned `media_url`.
-4. Raise the ws-handler timeout if videos or transcription are expected
-   (midoc polls Transcribe synchronously).
+Differences from midoc: the presigned URL lasts 15 minutes instead of an
+hour and the web refreshes it, the key is never returned (also not in the
+AppSync events), a failed download is stored as `media.error` instead of an
+empty media, outbound files are supported, and transcription is left as a hook.
 
 ## Sources
 
@@ -272,5 +328,12 @@ To add media to this template the same way:
 - https://docs.aws.amazon.com/social-messaging/latest/userguide/managing-event-destinations-status.html
 - https://docs.aws.amazon.com/social-messaging/latest/userguide/managing-flows-webhooks.html
 - https://docs.aws.amazon.com/social-messaging/latest/userguide/monitor-event-bridge.html
+- https://docs.aws.amazon.com/social-messaging/latest/userguide/managing-media-files-s3.html
+- https://docs.aws.amazon.com/social-messaging/latest/userguide/receive-message-image.html
+- https://docs.aws.amazon.com/social-messaging/latest/userguide/send-message-media.html
+- https://docs.aws.amazon.com/social-messaging/latest/userguide/supported-media-types.html
+- https://docs.aws.amazon.com/social-messaging/latest/APIReference/API_GetWhatsAppMessageMedia.html
+- https://docs.aws.amazon.com/service-authorization/latest/reference/list_socialmessaging.html
+- https://developers.facebook.com/docs/whatsapp/cloud-api/reference/media#supported-media-types
 - https://developers.facebook.com/docs/whatsapp/cloud-api/webhooks/components
 - https://developers.facebook.com/docs/whatsapp/business-management-api/message-templates/components

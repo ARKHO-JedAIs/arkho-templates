@@ -7,6 +7,7 @@ import {
 import Layout from '@/components/layout';
 import { sections } from '@/app/sections';
 import LoginPage from '@/features/auth/LoginPage';
+import AuthCallbackPage from '@/features/auth/AuthCallbackPage';
 import HomePage from '@/features/home/HomePage';
 import { AppError } from '@/components/AppError';
 import { SectionPending } from '@/components/SectionPending';
@@ -21,6 +22,13 @@ const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/login',
   component: LoginPage,
+});
+
+// Cognito sends the browser back here after Microsoft or Google sign-in.
+const authCallbackRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/auth/callback',
+  component: AuthCallbackPage,
 });
 
 const appRoute = createRoute({
@@ -52,6 +60,7 @@ const sectionRoutes = sections.flatMap(section =>
 
 const routeTree = rootRoute.addChildren([
   loginRoute,
+  authCallbackRoute,
   appRoute.addChildren([homeRoute, ...sectionRoutes]),
 ]);
 

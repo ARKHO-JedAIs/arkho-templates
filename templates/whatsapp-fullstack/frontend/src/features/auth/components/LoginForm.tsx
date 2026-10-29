@@ -21,6 +21,7 @@ import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { NewPasswordForm } from './NewPasswordForm';
 import { OtpForm } from './OtpForm';
+import { SsoButtons } from './SsoButtons';
 
 const REMEMBERED_EMAIL_KEY = 'remembered-email';
 
@@ -275,6 +276,7 @@ export function LoginForm() {
           )}
         </Button>
       </form>
+      <SsoButtons />
       <div className='mt-6 flex items-start gap-3 rounded-xl  p-3.5'>
         <ShieldCheck className='mt-0.5 h-4 w-4 shrink-0 text-[hsl(var(--brand-accent))]' />
         <p className='text-xs leading-relaxed text-muted-foreground'>

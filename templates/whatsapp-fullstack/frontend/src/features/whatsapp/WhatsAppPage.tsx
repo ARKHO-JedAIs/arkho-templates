@@ -14,7 +14,13 @@ import { useConversation } from './hooks/useConversation';
 import { useConversations } from './hooks/useConversations';
 import type { LiveState } from './realtime';
 import { isWindowOpen, windowHoursLeft } from './services/mappers';
-import { sendMessage, sendTemplate, setControl, usingDemoData } from './services/whatsappService';
+import {
+  sendMedia,
+  sendMessage,
+  sendTemplate,
+  setControl,
+  usingDemoData,
+} from './services/whatsappService';
 import type { ChatMessage, ControlMode, SendTemplateInput } from './types';
 
 const LIVE_LABEL: Record<LiveState, { text: string; pill: string; dot: string }> = {
@@ -61,6 +67,22 @@ export function WhatsAppPage() {
       if (message) thread.add(message);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'No se pudo enviar el mensaje.');
+      throw err;
+    }
+  };
+
+  const sendFile = async (
+    file: File,
+    mimeType: string,
+    caption: string,
+    onProgress: (fraction: number) => void
+  ) => {
+    if (!selected) return;
+    try {
+      const message = await sendMedia(selected, file, mimeType, caption, onProgress);
+      if (message) thread.add(message);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'No se pudo enviar el archivo.');
       throw err;
     }
   };
@@ -163,6 +185,7 @@ export function WhatsAppPage() {
             canLoadOlder={thread.canLoadOlder}
             loadingOlder={thread.loadingOlder}
             onLoadOlder={thread.loadOlder}
+            onMediaExpired={thread.reload}
             header={
               <div className='flex flex-wrap items-center justify-between gap-2.5'>
                 <div className='flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2'>
@@ -252,6 +275,7 @@ export function WhatsAppPage() {
                 windowOpen={windowOpen}
                 mode={mode}
                 onSend={send}
+                onSendMedia={sendFile}
                 onTemplate={() => openTemplate(selected)}
                 onTakeOver={() => void changeControl('human')}
                 takingOver={changingControl}

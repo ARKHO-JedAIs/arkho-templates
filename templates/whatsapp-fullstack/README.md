@@ -55,6 +55,7 @@ same realtime path AppSync uses, so the whole screen can be exercised.
 | Brand colours and logo | `frontend/src/styles/brand.json` | `primary` and `secondary` hex (empty secondary = a dark shade of the primary), `logo` and `logoOnDark` paths under `frontend/public/`. Tailwind turns each hex into a full palette at build time; `dev` picks up an edit by itself. |
 | Sign-in layout | `frontend/src/features/auth/layouts/` | One of `basic`, `brand-panel`, `insights`, `orbit`, chosen at generation; `index.ts` re-exports it. |
 | Verification code | `frontend/.env` `VITE_MOCK_AUTH_OTP`, `backend/.env` `EMAIL_MFA_ENABLED` + `SES_FROM_EMAIL` | Mock mode: code `000000`. Real: Cognito email MFA through SES (verified sender, SES out of the sandbox). |
+| Microsoft / Google buttons | `backend/.env` `SSO_PROVIDERS`, `frontend/.env` `VITE_AUTH_SSO_PROVIDERS` | Cognito sign-in only (hidden in mock mode). See [Sign in with Microsoft or Google](#sign-in-with-microsoft-or-google). |
 
 ## Deploy and connect a WhatsApp number
 
@@ -115,6 +116,50 @@ same realtime path AppSync uses, so the whole screen can be exercised.
    shows up live. Reply from the web within 24 hours, or send a template
    (templates are created and approved in WhatsApp Manager).
 
+## Sign in with Microsoft or Google
+
+Optional buttons ("Iniciar sesión con Microsoft", "Continuar con Google") next
+to email and password, through the Cognito Hosted UI. Chosen at generation
+(`sso_providers`), or later: `SSO_PROVIDERS=microsoft,google` in
+`backend/.env` and `VITE_AUTH_SSO_PROVIDERS=microsoft,google` in
+`frontend/.env` (`VITE_AUTH_PROVIDER=cognito` only).
+
+1. **Deploy once.** A listed provider without its ids is skipped with a
+   warning, but the Hosted UI domain is created. Note two outputs:
+   `CognitoIdpRedirectUri` (`https://<domain>.auth.<region>.amazoncognito.com/oauth2/idpresponse`)
+   and `CognitoDomainUrl`.
+2. **Microsoft (Entra ID)** - Azure portal > Microsoft Entra ID > App
+   registrations > *New registration*, platform *Web*, redirect URI =
+   `CognitoIdpRedirectUri`. Copy the *Application (client) ID* and the
+   *Directory (tenant) ID*, then Certificates & secrets > *New client secret*.
+   In `backend/.env`:
+
+   ```
+   ENTRA_ID_CLIENT_ID=<application id>
+   ENTRA_ID_CLIENT_SECRET=<secret value>
+   ENTRA_ID_ISSUER_URL=https://login.microsoftonline.com/<tenant-id>/v2.0
+   ```
+
+3. **Google** - Google Cloud Console > APIs & Services > *OAuth consent
+   screen* (app name, support email, scopes openid, email, profile), then
+   Credentials > *Create credentials* > *OAuth client ID*, type *Web
+   application*, authorised redirect URI = `CognitoIdpRedirectUri`. In
+   `backend/.env`: `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`.
+4. **Redeploy** (`npx cdk deploy`): the providers are created and added to the
+   app client.
+5. **Frontend** - in `frontend/.env`, `VITE_COGNITO_DOMAIN=<CognitoDomainUrl>`
+   (with or without `https://`). After sign-in Cognito returns to
+   `VITE_AUTH_REDIRECT_SIGN_IN` (`/auth/callback`) and after sign-out to
+   `VITE_AUTH_REDIRECT_SIGN_OUT` (`/login`); both must be listed in the backend
+   `AUTH_CALLBACK_URLS` / `AUTH_LOGOUT_URLS` (defaults: `http://localhost:5173/...`).
+   Add the production URLs there before deploying for real.
+
+A federated user gets a Cognito account on first sign-in but **does not join
+the `admin` group automatically**: an admin assigns the role from Usuarios
+(or `admin-add-user-to-group`). Mapping Entra or Google groups to roles is a
+later step. Client secrets come from `backend/.env` at synth time; move them to
+AWS Secrets Manager before production.
+
 ## WhatsApp configuration
 
 In `backend/.env` (gitignored: the phone number ARN carries the account id).
@@ -128,6 +173,8 @@ At deploy they become the Parameter Store parameter the Lambdas read.
 | `WHATSAPP_DEFAULT_PHONE_PREFIX` | Country prefix added to numbers typed without one. |
 | `WHATSAPP_AUTO_REPLY_MESSAGE` | Sent to every inbound message while the assistant answers. Empty = none. |
 | `WHATSAPP_ADMIN_GROUP` / `WHATSAPP_REQUIRE_ADMIN` | Cognito group the WhatsApp API and live channel require; `false` = any signed-in user. |
+| `MEDIA_RETENTION_DAYS` | Days the `whatsapp-media` bucket keeps received/sent files. Empty = keep forever. |
+| `MEDIA_URL_TTL_SECONDS` | Lifetime of the presigned URLs the web gets for files (default 900). |
 
 Inbound notifications that still fail after Lambda's retries are kept 14 days
 in the `WhatsAppDeadLetterQueueUrl` queue: fix the cause, then redrive them.
@@ -140,8 +187,9 @@ Every route requires the `WHATSAPP_ADMIN_GROUP` group (403 otherwise), unless
 | Method | Path | Body / query | Returns `data` |
 |---|---|---|---|
 | GET | `/whatsapp/conversations` | | conversations, most recent first |
-| GET | `/whatsapp/messages` | `?phone=<digits>[&before=<iso>]` | `{ conversation, messages, window_open }` |
-| POST | `/whatsapp/messages` | `{ phone, message }` | the stored message; 409 `WINDOW_CLOSED` after 24 h |
+| GET | `/whatsapp/messages` | `?phone=<digits>[&before=<iso>]` | `{ conversation, messages, window_open }`; files as presigned `media.url` |
+| POST | `/whatsapp/messages` | `{ phone, message }` or `{ phone, media: { key, mimeType, filename?, caption? } }` | the stored message; 409 `WINDOW_CLOSED` after 24 h; 422 `MEDIA_REJECTED` |
+| POST | `/whatsapp/media/upload-url` | `{ phone, filename, mimeType, size }` | `{ upload_url, key, type, headers, expires_in }`: a presigned PUT checked against WhatsApp's type/size limits |
 | GET | `/whatsapp/templates` | | every template with its status, components and variables (only APPROVED ones can be sent) |
 | POST | `/whatsapp/templates/send` | `{ phone, template_name, language, parameters? }` | the stored message |
 | PUT | `/whatsapp/control` | `{ phone, mode: "human" \| "assistant" }` | the conversation |
@@ -158,12 +206,19 @@ function over Cognito, roles = the `admin` and `member` groups):
 | POST | `/admin/users/{username}/password` | | `{ temporaryPassword }` |
 | DELETE | `/admin/users/{username}` | | 204 |
 
-Nobody can disable, delete or change the roles of their own account.
+Nobody can disable, delete or change the roles of their own account. Each
+successful change logs one JSON line (`"audit": "admin-users"`) with the acting
+admin, the action, the target user and the roles - never a password - in the
+function's CloudWatch log group; CloudTrail also records the Cognito `Admin*`
+calls themselves.
 
 Realtime (AppSync `onEvent(id)`): `id=<phone>` carries `MESSAGE_RECEIVED`,
 `MESSAGE_SENT`, `TEMPLATE_SENT`, `MESSAGE_STATUS` (sent, delivered, read,
-failed) and `CONTROL_CHANGED`; `id=inbox` carries `CONVERSATION_UPDATED`. The
-payload is the stored item. Only the admin group can subscribe when one is set.
+failed, deleted, warning), `MESSAGE_UPDATED` (a reaction) and
+`CONTROL_CHANGED`; `id=inbox` carries `CONVERSATION_UPDATED`. The payload is
+the stored item, with a presigned `media.url` instead of the file's key. Every
+inbound WhatsApp message type and how it is stored is mapped in
+`docs/WHATSAPP_EVENTS.md`. Only the admin group can subscribe when one is set.
 
 ## Not included yet
 

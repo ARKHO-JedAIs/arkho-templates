@@ -47,7 +47,7 @@ def install_aws_stubs() -> None:
 install_aws_stubs()
 sys.path.insert(0, str(ROOT / "src" / "layer" / "python-common" / "python"))
 
-from common.whatsapp import config, http, messaging, realtime, store  # noqa: E402
+from common.whatsapp import config, http, media, messaging, realtime, store  # noqa: E402
 
 spec = importlib.util.spec_from_file_location(
     "ws_handler", ROOT / "src" / "lambda" / "whatsapp" / "ws-handler" / "index.py"
@@ -90,6 +90,12 @@ class WsHandlerTest(unittest.TestCase):
             mock.patch.object(messaging, "mark_as_read"),
             mock.patch.object(messaging, "send_text", return_value="wamid.reply"),
             mock.patch.object(config, "auto_reply_message", return_value=""),
+            mock.patch.object(
+                media, "download_inbound", return_value={"key": "media/m1.jpg", "mimeType": "image/jpeg", "size": 2048}
+            ),
+            mock.patch.object(media, "presign_download", side_effect=lambda key, filename="": f"https://signed/{key}"),
+            mock.patch.object(store, "set_reaction", return_value=None),
+            mock.patch.object(store, "mark_message", return_value=None),
         ]
         self.mocks = {p.attribute: p.start() for p in patches}
         self.addCleanup(mock.patch.stopall)

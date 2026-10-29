@@ -5,9 +5,39 @@ import {
   fetchUserAttributes,
   getCurrentUser as amplifyGetCurrentUser,
   signIn as amplifySignIn,
+  signInWithRedirect,
   signOut as amplifySignOut,
 } from 'aws-amplify/auth';
+// Exchanges the ?code= Cognito returns to /auth/callback for tokens, as soon
+// as Amplify is configured.
+import 'aws-amplify/auth/enable-oauth-listener';
+import type { SsoProvider } from './sso';
 import type { AuthProvider, AuthUser, SignInResult } from './types';
+
+/** Cognito's name for each identity provider (backend CognitoConstruct). */
+const COGNITO_PROVIDER: Record<SsoProvider, Parameters<typeof signInWithRedirect>[0]> = {
+  microsoft: { provider: { custom: 'EntraID' } },
+  google: { provider: 'Google' },
+};
+
+/**
+ * A failed federated sign-in comes back as ?error=...&error_description=...,
+ * and Amplify rewrites the URL while handling it - so it is read once, when
+ * the page loads, before anything else can touch it.
+ */
+const redirectError: string | null =
+  typeof window === 'undefined'
+    ? null
+    : (() => {
+        const params = new URLSearchParams(window.location.search);
+        return params.get('error_description') ?? params.get('error');
+      })();
+
+export interface CognitoOAuthSettings {
+  domain: string;
+  redirectSignIn: string;
+  redirectSignOut: string;
+}
 
 /**
  * Amplify's way of saying "nobody is signed in" - an expected answer, not a
@@ -22,12 +52,29 @@ function isNoSessionError(error: unknown): boolean {
  * are present - hence the non-null assertions. Configuring Amplify with an
  * empty pool id throws, so that check is the guard, not this function.
  */
-export function configureCognito(userPoolId: string, userPoolClientId: string): void {
+export function configureCognito(
+  userPoolId: string,
+  userPoolClientId: string,
+  oauth?: CognitoOAuthSettings
+): void {
   Amplify.configure({
     Auth: {
       Cognito: {
         userPoolId,
         userPoolClientId,
+        ...(oauth && {
+          loginWith: {
+            oauth: {
+              domain: oauth.domain,
+              // aws.cognito.signin.user.admin lets a federated session read its
+              // own attributes (fetchUserAttributes), as a password one can.
+              scopes: ['openid', 'email', 'profile', 'aws.cognito.signin.user.admin'],
+              redirectSignIn: [oauth.redirectSignIn],
+              redirectSignOut: [oauth.redirectSignOut],
+              responseType: 'code' as const,
+            },
+          },
+        }),
       },
     },
   });
@@ -130,6 +177,17 @@ export const cognitoProvider: AuthProvider = {
   async confirmOtp(code: string) {
     const { nextStep } = await confirmSignIn({ challengeResponse: code });
     return interpretNextStep(nextStep);
+  },
+
+  async signInWithSso(provider: SsoProvider) {
+    await signInWithRedirect(COGNITO_PROVIDER[provider]);
+  },
+
+  async completeSsoSignIn() {
+    if (redirectError) throw new Error(redirectError);
+    // Amplify holds token reads until the code exchange it started finishes.
+    const user = await cognitoProvider.getCurrentUser();
+    if (!user) throw new Error('No session was created');
   },
 
   async signOut() {

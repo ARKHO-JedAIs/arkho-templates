@@ -51,6 +51,28 @@ Use a **public** app client (no client secret) — a secret cannot be kept in a
 browser bundle. If either id is missing, the app renders a configuration screen
 naming the missing variable rather than throwing from inside Amplify.
 
+### Sign in with Microsoft or Google
+
+`VITE_AUTH_SSO_PROVIDERS` (comma list: `microsoft`, `google`; empty = none)
+adds "Iniciar sesión con Microsoft" / "Continuar con Google" under the password
+form of every sign-in layout, separated by "o". Cognito only: in mock mode the
+buttons are hidden. They go through the Cognito Hosted UI, so the backend must
+have the providers set up (root README, "Sign in with Microsoft or Google"):
+
+```
+VITE_AUTH_SSO_PROVIDERS=microsoft,google
+VITE_COGNITO_DOMAIN=<backend output CognitoDomainUrl>
+VITE_AUTH_REDIRECT_SIGN_IN=http://localhost:5173/auth/callback
+VITE_AUTH_REDIRECT_SIGN_OUT=http://localhost:5173/login
+```
+
+With a provider listed and no `VITE_COGNITO_DOMAIN`, the configuration screen
+names it. Cognito returns to `/auth/callback`, which finishes the sign-in and
+lands on `/`, or shows the error with a link back to `/login`. The redirect
+URLs must also be in the backend `AUTH_CALLBACK_URLS` / `AUTH_LOGOUT_URLS`.
+A federated user does not join the `admin` group automatically: an admin
+assigns it from Usuarios (mapping Entra or Google groups is a later step).
+
 ### Roles
 
 Roles come from the `cognito:groups` claim on the ID token. A user in the group
