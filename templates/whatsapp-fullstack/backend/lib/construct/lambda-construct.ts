@@ -10,6 +10,14 @@ import { Queue, IQueue } from 'aws-cdk-lib/aws-sqs';
 import { IVpc, ISecurityGroup, SubnetSelection } from 'aws-cdk-lib/aws-ec2';
 import { Construct } from 'constructs';
 
+/** IAM role names are capped at 64 characters; a long functionName is trimmed
+ * so `<base>-role` still fits, instead of cdk throwing InvalidRoleName. */
+const IAM_ROLE_NAME_MAX_LENGTH = 64;
+function iamRoleName(base: string): string {
+  const suffix = '-role';
+  return `${base.slice(0, IAM_ROLE_NAME_MAX_LENGTH - suffix.length)}${suffix}`;
+}
+
 /**
  * Configuration properties for the Lambda construct
  */
@@ -268,7 +276,7 @@ export class LambdaConstruct extends Construct {
    */
   private createExecutionRole(functionName: string, additionalPolicies: PolicyStatement[]): Role {
     const role = new Role(this, 'ExecutionRole', {
-      roleName: `${functionName}-role`,
+      roleName: iamRoleName(functionName),
       assumedBy: new ServicePrincipal('lambda.amazonaws.com'),
       managedPolicies: [
         ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole')
