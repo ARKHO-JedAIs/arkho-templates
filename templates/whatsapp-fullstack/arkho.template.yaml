@@ -76,8 +76,8 @@ parameters:
     description: "End User Messaging Social > Phone numbers: the number's ARN."
     when: "components != 'frontend' && whatsapp_ready"
     default: ""
-    pattern: "^(arn:aws:social-messaging:[a-z0-9-]+:[0-9]{12}:phone-number-id/[a-f0-9]+)?$"
-    patternHint: "the phone number ARN, e.g. arn:aws:social-messaging:us-east-1:123456789012:phone-number-id/abc123..."
+    pattern: "^(arn:aws:social-messaging:[a-z0-9-]+:[0-9]{12}:phone-number-id/[a-f0-9]{32})?$"
+    patternHint: "the phone number ARN, full 32-character id, e.g. arn:aws:social-messaging:us-east-1:123456789012:phone-number-id/0123456789abcdef0123456789abcdef"
 
   - name: whatsapp_business_account_id
     type: string
@@ -86,8 +86,8 @@ parameters:
     description: "End User Messaging Social > Business accounts, e.g. waba-0a46e718017b4acd927aa5833b4fb13e."
     when: "components != 'frontend' && whatsapp_ready"
     default: ""
-    pattern: "^(waba-[a-f0-9]+)?$"
-    patternHint: "the WABA id as AWS shows it, e.g. waba-0a46e718017b4acd927aa5833b4fb13e"
+    pattern: "^(waba-[a-f0-9]{32})?$"
+    patternHint: "the full 32-character WABA id as AWS shows it, e.g. waba-0a46e718017b4acd927aa5833b4fb13e"
 
   - name: default_phone_prefix
     type: string
