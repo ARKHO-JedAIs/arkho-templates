@@ -167,7 +167,7 @@ AWS Secrets Manager before production.
 ## AI agent
 
 Chosen at generation (`AGENT_RUNTIME` in `backend/.env`); the agent's code is
-`backend/agent` (Python, Bedrock) and is the same for both runtimes.
+`backend/src/agent` (Python, Bedrock) and is the same for both runtimes.
 
 | `AGENT_RUNTIME` | What is created | When |
 |---|---|---|

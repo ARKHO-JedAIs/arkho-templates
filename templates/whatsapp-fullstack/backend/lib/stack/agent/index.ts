@@ -22,8 +22,8 @@ export interface AgentFactoryProps {
   whatsappFactory: WhatsAppFactory;
 }
 
-/** Build context of the agent image: backend/agent (Dockerfile, app and Lambda handler). */
-export const AGENT_DIRECTORY = 'agent';
+/** Build context of the agent image: backend/src/agent (Dockerfile, app and Lambda handler). */
+export const AGENT_DIRECTORY = 'src/agent';
 /** The Lambda variant runs the same image with this command (awslambdaric). */
 export const AGENT_LAMBDA_CMD = ['lambda_handler.handler'];
 

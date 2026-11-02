@@ -1,6 +1,6 @@
 # Agent tests
 
-Unit tests of the WhatsApp AI agent in `backend/agent`. They never call AWS
+Unit tests of the WhatsApp AI agent in `backend/src/agent`. They never call AWS
 or Bedrock: `support.FakeModel` scripts the model's answers (text or tool
 calls) so the real Strands event loop, hooks and tools run offline, and the
 DynamoDB / AppSync / SSM / AgentCore Memory clients are mocked.
@@ -13,7 +13,7 @@ these packages):
 cd backend
 python -m venv .venv
 . .venv/bin/activate        # Windows: .venv\Scripts\activate
-pip install -r agent/requirements.txt
+pip install -r src/agent/requirements.txt
 python -m unittest discover -s test/agent
 ```
 

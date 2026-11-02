@@ -68,7 +68,7 @@ export function agentCoreName(projectName: string, envName: string, suffix: stri
  *
  * @example
  * ```typescript
- * const image = new DockerImageAsset(this, 'AgentImage', { directory: 'agent', platform: Platform.LINUX_ARM64 });
+ * const image = new DockerImageAsset(this, 'AgentImage', { directory: 'src/agent', platform: Platform.LINUX_ARM64 });
  * const runtime = new AgentCoreRuntimeConstruct(this, 'AgentRuntime', {
  *   params,
  *   runtimeConfig: {

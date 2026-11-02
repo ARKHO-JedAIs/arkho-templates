@@ -10,7 +10,7 @@ safety rules live in code.
 ## Architecture
 
 ```
-backend/agent/
+backend/src/agent/
   Dockerfile              # linux/arm64, python 3.12-slim, non-root, ADOT
   requirements.txt        # only what the code imports, pinned
   src/
@@ -193,7 +193,7 @@ them in the constructor, as `HandoffTools` does.
 ## Running locally
 
 ```bash
-cd backend/agent
+cd backend/src/agent
 python -m venv .venv && . .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 export AWS_REGION=us-east-1 AWS_PROFILE=<profile with Bedrock access>
@@ -207,7 +207,7 @@ curl -N localhost:8080/invocations -H "Content-Type: application/json" \
 Container (AgentCore Runtime requires arm64):
 
 ```bash
-docker build --platform linux/arm64 -t whatsapp-agent backend/agent
+docker build --platform linux/arm64 -t whatsapp-agent backend/src/agent
 docker run --rm -p 8080:8080 -e AWS_REGION -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_SESSION_TOKEN whatsapp-agent
 ```
 

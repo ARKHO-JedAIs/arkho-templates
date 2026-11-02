@@ -132,7 +132,7 @@ parameters:
     type: choice
     group: Agent
     prompt: "AI agent to answer WhatsApp?"
-    description: "Where the AI agent runs. Both runtimes use the same agent code (backend/agent); none keeps only the fixed automatic reply."
+    description: "Where the AI agent runs. Both runtimes use the same agent code (backend/src/agent); none keeps only the fixed automatic reply."
     when: "components != 'frontend'"
     default: agentcore
     choices:
@@ -388,6 +388,8 @@ templating:
   skip:
     # Bytecode Python leaves behind when the backend tests run in this folder.
     - "backend/**/__pycache__/**"
+    # A virtualenv made to run the agent tests locally.
+    - "backend/**/.venv/**"
     - "frontend/dist/**"
     - "frontend/.env.local"
 
@@ -467,7 +469,7 @@ nextSteps:
   - "# backend/.env: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET"
   - "# Redeploy (npx cdk deploy in backend/) to create the providers"
   - "# frontend/.env: VITE_COGNITO_DOMAIN = output CognitoDomainUrl"
-  - "## AI AGENT (if chosen) - backend/agent, deployed with the backend"
+  - "## AI AGENT (if chosen) - backend/src/agent, deployed with the backend"
   - "# Bedrock console > Model access: enable the model in AGENT_MODEL_ID (backend/.env) first"
   - "# Docker must be running for npx cdk deploy: the agent image (ARM64) is built on deploy"
   - "# Base prompt: Parameter Store, output AgentPromptParameterName (JSON; basePrompt, greeting...)"

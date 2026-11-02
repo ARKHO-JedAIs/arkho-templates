@@ -11,7 +11,7 @@ import os
 import sys
 from unittest import mock
 
-AGENT_SRC = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "agent", "src"))
+AGENT_SRC = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "src", "agent", "src"))
 if AGENT_SRC not in sys.path:
     sys.path.insert(0, AGENT_SRC)
 

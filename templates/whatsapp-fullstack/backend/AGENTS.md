@@ -147,8 +147,8 @@ without a reason.
     /users              # Active when USERS_API_ENABLED: Usuarios API
     /agent              # Active when AGENT_RUNTIME != none: AI agent
     /shared/util        # Environment config + helpers
-/agent                  # AI agent image (Python): AgentCore app + Lambda handler
 /src
+  /agent                # AI agent image (Python): AgentCore app + Lambda handler
   /lambda/core/*        # core functions: authorizer, not-found
   /lambda/whatsapp/*    # WhatsApp functions
   /lambda/users/*       # admin-users
