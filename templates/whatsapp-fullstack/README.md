@@ -64,6 +64,38 @@ same realtime path AppSync uses, so the whole screen can be exercised.
 
 1. **Deploy the backend**
 
+   With `AGENT_RUNTIME=agentcore` (the default), AgentCore Runtime delivers its
+   X-Ray traces through CloudWatch Logs, which a fresh account/region has not
+   enabled yet - do it once, before the first deploy, or `cdk deploy` fails on
+   `AgentFactory/Runtime/Runtime/TracesDelivery` ("X-Ray Delivery Destination
+   is supported with CloudWatch Logs..."). X-Ray also needs a resource policy
+   to write to the log groups it uses (`AccessDeniedException ... PutLogEvents
+   on the aws/spans Log Group` otherwise):
+
+   ```bash
+   aws logs put-resource-policy --policy-name TransactionSearchXRayAccess --policy-document '{
+     "Version": "2012-10-17",
+     "Statement": [{
+       "Sid": "TransactionSearchXRayAccess",
+       "Effect": "Allow",
+       "Principal": { "Service": "xray.amazonaws.com" },
+       "Action": "logs:PutLogEvents",
+       "Resource": [
+         "arn:aws:logs:<your-region>:<your-account-id>:log-group:aws/spans:*",
+         "arn:aws:logs:<your-region>:<your-account-id>:log-group:/aws/application-signals/data:*"
+       ],
+       "Condition": {
+         "ArnLike": { "aws:SourceArn": "arn:aws:xray:<your-region>:<your-account-id>:*" },
+         "StringEquals": { "aws:SourceAccount": "<your-account-id>" }
+       }
+     }]
+   }' --profile <your-profile> --region <your-region>
+
+   aws xray update-trace-segment-destination --destination CloudWatchLogs --profile <your-profile> --region <your-region>
+   # Takes a couple of minutes to go from PENDING to ACTIVE
+   # (aws xray get-trace-segment-destination --profile <your-profile> --region <your-region>).
+   ```
+
    ```bash
    cd backend
    # .env: check AWS_REGION (a region where End User Messaging Social is available).
