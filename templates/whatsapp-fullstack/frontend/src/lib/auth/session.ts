@@ -18,10 +18,12 @@ export const isMockAuth = authProviderName === 'mock';
 
 const provider: AuthProvider = isMockAuth ? mockProvider : cognitoProvider;
 
-/** The federated sign-in buttons to show, from VITE_AUTH_SSO_PROVIDERS. Never under mock. */
+/**
+ * The federated sign-in buttons to show, from VITE_AUTH_SSO_PROVIDERS. Shown
+ * under mock too, as a preview; signInWithSso then explains what to set up.
+ */
 export const ssoProviders: SsoProvider[] = parseSsoProviders(
-  import.meta.env.VITE_AUTH_SSO_PROVIDERS,
-  isMockAuth
+  import.meta.env.VITE_AUTH_SSO_PROVIDERS
 );
 
 /**

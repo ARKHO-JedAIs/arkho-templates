@@ -1,8 +1,6 @@
 import { useState } from 'react';
 import { AlertTriangle, ChevronDown, ScrollText } from 'lucide-react';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
 import {
   EDIT_CONDITIONS,
@@ -12,23 +10,16 @@ import {
 } from '../templateRules';
 
 interface TemplateConditionsProps {
-  accepted: boolean;
-  onAcceptedChange: (accepted: boolean) => void;
   /** Editing adds Meta's edit rules and the unverified edit warnings. */
   editing?: boolean;
 }
 
 /**
  * Meta's conditions for creating templates, read from `templateRules` (the
- * validator's own source), and the checkbox that confirms they were read. The
- * checkbox stays visible when the list is collapsed.
+ * validator's own source). Collapsed by default; just a reference, not a gate.
  */
-export function TemplateConditions({
-  accepted,
-  onAcceptedChange,
-  editing = false,
-}: TemplateConditionsProps) {
-  const [open, setOpen] = useState(true);
+export function TemplateConditions({ editing = false }: TemplateConditionsProps) {
+  const [open, setOpen] = useState(false);
   return (
     <section
       aria-labelledby='template-conditions-title'
@@ -96,16 +87,6 @@ export function TemplateConditions({
           </ul>
         </CollapsibleContent>
       </Collapsible>
-      <div className='flex items-center gap-2.5 border-t border-border px-4 py-3'>
-        <Checkbox
-          id='template-conditions-accepted'
-          checked={accepted}
-          onCheckedChange={checked => onAcceptedChange(checked === true)}
-        />
-        <Label htmlFor='template-conditions-accepted' className='text-sm font-medium'>
-          He leído las condiciones
-        </Label>
-      </div>
     </section>
   );
 }

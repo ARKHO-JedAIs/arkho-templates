@@ -17,8 +17,9 @@ const PROVIDERS: Record<
 
 /**
  * "o" and one button per provider in VITE_AUTH_SSO_PROVIDERS, under the
- * password form. Renders nothing when none is configured, and always nothing
- * under mock sign-in.
+ * password form. Renders nothing when none is configured. Shown in mock too,
+ * as a preview; there a click explains what is still missing instead of
+ * redirecting.
  */
 export function SsoButtons() {
   const [pending, setPending] = useState<SsoProvider | null>(null);
@@ -30,8 +31,12 @@ export function SsoButtons() {
     try {
       // On success the browser leaves for the provider, so nothing after this runs.
       await signInWithSso(provider);
-    } catch {
-      toast.error(`No se pudo abrir el inicio de sesión con ${PROVIDERS[provider].name}.`);
+    } catch (err) {
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : `No se pudo abrir el inicio de sesión con ${PROVIDERS[provider].name}.`
+      );
       setPending(null);
     }
   };

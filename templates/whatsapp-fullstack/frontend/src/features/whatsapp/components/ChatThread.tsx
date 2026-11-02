@@ -1,4 +1,12 @@
-import { useCallback, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  Fragment,
+  useCallback,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import {
   AlertCircle,
   Ban,
@@ -30,6 +38,9 @@ import {
 
 interface ChatThreadProps {
   messages: readonly ChatMessage[];
+  /** How many were unread when this conversation was opened; draws the
+   * "N mensajes no leídos" divider above the oldest of them, like WhatsApp. */
+  unreadCount?: number;
   header?: ReactNode;
   footer?: ReactNode;
   loading?: boolean;
@@ -107,6 +118,7 @@ function dayLabel(date: Date, now = new Date()): string {
 /** One conversation, its messages grouped by day: the contact on the left, us on the right. */
 export function ChatThread({
   messages,
+  unreadCount = 0,
   header,
   footer,
   loading,
@@ -129,6 +141,21 @@ export function ChatThread({
   const refreshed = useRef(new Set<string>());
 
   const byId = useMemo(() => new Map(messages.map(message => [message.id, message])), [messages]);
+
+  // The oldest unread message: unreadCount only counts the contact's own
+  // messages (ws-handler), so this walks back from the newest one counting
+  // those, same as WhatsApp's own "N mensajes no leídos" line.
+  const unreadDividerId = useMemo(() => {
+    if (unreadCount <= 0) return null;
+    let remaining = unreadCount;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].direction === 'in') {
+        remaining -= 1;
+        if (remaining === 0) return messages[i].id;
+      }
+    }
+    return messages[0]?.id ?? null;
+  }, [messages, unreadCount]);
 
   const expire = useCallback(
     (id: string) => {
@@ -232,22 +259,24 @@ export function ChatThread({
                 <p className='sticky top-0 z-10 mx-auto my-1 rounded-full bg-card px-3 py-1 text-xs font-semibold text-foreground-secondary shadow-sm'>
                   {day.label}
                 </p>
-                {day.messages.map(message =>
-                  message.kind === 'system' ||
-                  message.kind === 'request_welcome' ||
-                  message.kind === 'event' ? (
-                    <Notice key={message.id} message={message} />
-                  ) : (
-                    <Bubble
-                      key={message.id}
-                      message={message}
-                      quoted={message.replyTo ? byId.get(message.replyTo) : undefined}
-                      onRetry={onRetry && message.kind === 'text' ? retry : undefined}
-                      retrying={retrying.has(message.id)}
-                      onMediaExpired={() => expire(message.id)}
-                    />
-                  )
-                )}
+                {day.messages.map(message => (
+                  <Fragment key={message.id}>
+                    {message.id === unreadDividerId ? <UnreadDivider count={unreadCount} /> : null}
+                    {message.kind === 'system' ||
+                    message.kind === 'request_welcome' ||
+                    message.kind === 'event' ? (
+                      <Notice message={message} />
+                    ) : (
+                      <Bubble
+                        message={message}
+                        quoted={message.replyTo ? byId.get(message.replyTo) : undefined}
+                        onRetry={onRetry && message.kind === 'text' ? retry : undefined}
+                        retrying={retrying.has(message.id)}
+                        onMediaExpired={() => expire(message.id)}
+                      />
+                    )}
+                  </Fragment>
+                ))}
               </div>
             ))}
           </div>
@@ -255,6 +284,15 @@ export function ChatThread({
       </div>
       {footer ? <footer className='border-t border-border/60'>{footer}</footer> : null}
     </section>
+  );
+}
+
+/** "N mensajes no leídos" above the oldest unread message, like WhatsApp's own divider. */
+function UnreadDivider({ count }: { count: number }) {
+  return (
+    <p className='sticky top-0 z-10 mx-auto my-1 rounded-full bg-success-light px-3 py-1 text-xs font-semibold text-success-strong shadow-sm'>
+      {count === 1 ? '1 mensaje no leído' : `${count} mensajes no leídos`}
+    </p>
   );
 }
 

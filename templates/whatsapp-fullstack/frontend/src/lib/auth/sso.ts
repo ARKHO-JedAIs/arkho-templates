@@ -8,11 +8,11 @@ const KNOWN: readonly SsoProvider[] = ['microsoft', 'google'];
 
 /**
  * VITE_AUTH_SSO_PROVIDERS as a list, in a fixed order and without unknown or
- * repeated names. Always empty under mock sign-in: there is no Hosted UI to
- * redirect to.
+ * repeated names. Shown under mock sign-in too, so the buttons are visible
+ * before a backend exists; clicking one there explains what to configure
+ * instead of redirecting (there is no Hosted UI to go to yet).
  */
-export function parseSsoProviders(raw: string | undefined, isMock: boolean): SsoProvider[] {
-  if (isMock) return [];
+export function parseSsoProviders(raw: string | undefined): SsoProvider[] {
   const listed = (raw ?? '')
     .split(',')
     .map(item => item.trim().toLowerCase())

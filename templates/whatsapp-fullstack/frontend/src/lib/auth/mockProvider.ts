@@ -96,10 +96,18 @@ export const mockProvider: AuthProvider = {
     return { status: 'signed-in' as const };
   },
 
-  // The sign-in screen never offers federated buttons in mock mode, so these
-  // only run if someone calls them by hand.
-  async signInWithSso() {
-    throw new Error('Federated sign-in needs VITE_AUTH_PROVIDER=cognito');
+  // The sign-in screen shows these buttons in mock too, as a preview of the
+  // real sign-in page; clicking one explains what it still needs instead of
+  // pretending to sign in.
+  async signInWithSso(provider) {
+    const vars =
+      provider === 'microsoft'
+        ? 'ENTRA_ID_CLIENT_ID, ENTRA_ID_CLIENT_SECRET, ENTRA_ID_ISSUER_URL'
+        : 'GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET';
+    throw new Error(
+      `Para usar esto: despliega el backend con ${vars} en backend/.env, y pon ` +
+        'VITE_AUTH_PROVIDER=cognito y VITE_COGNITO_DOMAIN en frontend/.env.'
+    );
   },
 
   async completeSsoSignIn() {

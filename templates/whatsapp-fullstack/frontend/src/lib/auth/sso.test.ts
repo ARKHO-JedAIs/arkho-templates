@@ -3,20 +3,20 @@ import { normalizeCognitoDomain, parseSsoProviders } from './sso';
 
 describe('parseSsoProviders', () => {
   it('reads the comma list the generator writes, spaces included', () => {
-    expect(parseSsoProviders('microsoft, google', false)).toEqual(['microsoft', 'google']);
+    expect(parseSsoProviders('microsoft, google')).toEqual(['microsoft', 'google']);
   });
 
   it('keeps a fixed order and drops unknown or repeated names', () => {
-    expect(parseSsoProviders('Google,github,google', false)).toEqual(['google']);
+    expect(parseSsoProviders('Google,github,google')).toEqual(['google']);
   });
 
   it('is empty when nothing is listed', () => {
-    expect(parseSsoProviders('', false)).toEqual([]);
-    expect(parseSsoProviders(undefined, false)).toEqual([]);
+    expect(parseSsoProviders('')).toEqual([]);
+    expect(parseSsoProviders(undefined)).toEqual([]);
   });
 
-  it('is always empty under mock sign-in', () => {
-    expect(parseSsoProviders('microsoft,google', true)).toEqual([]);
+  it('is the same list under mock sign-in: the buttons are a preview there too', () => {
+    expect(parseSsoProviders('microsoft,google')).toEqual(['microsoft', 'google']);
   });
 });
 

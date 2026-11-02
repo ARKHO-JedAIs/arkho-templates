@@ -69,6 +69,16 @@ export function WhatsAppPage() {
   const { apply } = inbox;
   const unread = conversation?.unreadCount ?? 0;
   const reading = useRef<string | null>(null);
+
+  // How many were unread right when this conversation was opened, so the
+  // "N mensajes no leídos" divider (like WhatsApp's own) can stay in place
+  // while the badge itself drops to 0 as soon as it opens.
+  const [unreadAtOpen, setUnreadAtOpen] = useState(0);
+  useEffect(() => {
+    setUnreadAtOpen(conversation?.unreadCount ?? 0);
+    // Only re-snapshot when a different conversation is opened.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected]);
   useEffect(() => {
     if (!conversation || unread === 0 || reading.current === conversation.phone) return;
     const phone = conversation.phone;
@@ -217,6 +227,7 @@ export function WhatsAppPage() {
         {selected ? (
           <ChatThread
             messages={thread.messages}
+            unreadCount={unreadAtOpen}
             loading={thread.loading}
             error={thread.error}
             onReload={thread.reload}

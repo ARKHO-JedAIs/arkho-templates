@@ -202,7 +202,6 @@ export function CreateTemplatePage() {
   const [original, setOriginal] = useState<WhatsAppTemplate | null>(null);
   const [loadingOriginal, setLoadingOriginal] = useState(Boolean(editingId));
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [accepted, setAccepted] = useState(false);
   const [variableName, setVariableName] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [uploading, setUploading] = useState<number | null>(null);
@@ -271,16 +270,8 @@ export function CreateTemplatePage() {
         label: `WhatsApp rechazó la regla «${id}»`,
         detail: 'Corrígela y vuelve a enviar.',
       })),
-      {
-        id: 'conditions-accepted',
-        level: 'error',
-        ok: accepted,
-        label: editing
-          ? 'Leíste las condiciones para editar plantillas'
-          : 'Leíste las condiciones para crear plantillas',
-      },
     ],
-    [validation, accepted, size, sizeLimit, editing, serverRules]
+    [validation, size, sizeLimit, editing, serverRules]
   );
   const ready =
     checklist.every(result => result.level !== 'error' || result.ok) &&
@@ -459,11 +450,7 @@ export function CreateTemplatePage() {
             void submit();
           }}
         >
-          <TemplateConditions
-            accepted={accepted}
-            onAcceptedChange={setAccepted}
-            editing={editing}
-          />
+          <TemplateConditions editing={editing} />
 
           <Block title='Datos generales'>
             <TextField
