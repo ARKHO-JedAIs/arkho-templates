@@ -1,0 +1,43 @@
+# Deterministic answers for `arkho-cli template validate --full`.
+# Author-facing tooling only - never copied into a generated project.
+#
+# The WIDEST shape: backend and frontend, WhatsApp ids set, the AgentCore agent
+# with every memory strategy, Cognito auth and the optional user-management
+# screen. Narrower answers only remove files, so they cannot introduce a token
+# this run would miss.
+schemaVersion: 1
+
+answers:
+  project_name: sample-whatsapp
+  components: fullstack
+
+  aws_region: us-east-1
+
+  whatsapp_ready: true
+  whatsapp_phone_number_id: arn:aws:social-messaging:us-east-1:123456789012:phone-number-id/0123456789abcdef0123456789abcdef
+  whatsapp_business_account_id: waba-0123456789abcdef0123456789abcdef
+  default_phone_prefix: "56"
+  auto_reply_message: Gracias por escribirnos, en breve te respondemos.
+  media_retention_days: "90"
+
+  agent_runtime: agentcore
+  agent_model: us.anthropic.claude-sonnet-4-6
+  agent_business_description: Tienda de muebles en Santiago; despachos a todo Chile y retiro en tienda.
+  agent_memory: facts_summaries
+  agent_rate_limit_per_hour: "30"
+
+  package_manager: npm
+  brand_color: "#E30613"
+  brand_secondary_color: "#1E293B"
+  login_layout: orbit
+  auth_provider: cognito
+  login_otp: true
+  ses_from_email: no-reply@example.com
+  cognito_user_pool_id: us-east-1_abc123
+  cognito_user_pool_client_id: 1h57kf5cpq17m0eml12eu1s0j3
+  sso_providers: [microsoft, google]
+  api_base_url: https://api.example.com/dev/
+  appsync_url: https://example.appsync-api.us-east-1.amazonaws.com/graphql
+  use_roles: true
+  admin_group: admin
+  include_users_admin: true

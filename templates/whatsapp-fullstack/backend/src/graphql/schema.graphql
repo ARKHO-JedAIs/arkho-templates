@@ -1,0 +1,43 @@
+# Realtime event channel the front subscribes to through aws-amplify.
+#
+# Nothing is stored here: the mutation runs on a NONE data source, so AppSync
+# only forwards the published event to the clients subscribed to its id. The
+# conversations themselves are persisted in DynamoDB by the WhatsApp functions.
+#
+# The backend publishes with IAM (common.whatsapp.realtime) and the front
+# subscribes with its Cognito user pool token, so a browser can listen but
+# never emit. WhatsAppFactory narrows the `# subscribers` directive below to the
+# admin group when the project has one (WHATSAPP_ADMIN_GROUP).
+#
+# Channels: a contact's phone (its conversation) and "inbox" (the conversation
+# list).
+
+type Event @aws_iam @aws_cognito_user_pools {
+  id: ID!
+  type: String!
+  message: String
+  payload: AWSJSON
+  timestamp: AWSDateTime!
+}
+
+type Mutation {
+  publishEvent(id: ID!, type: String!, message: String, payload: AWSJSON): Event @aws_iam
+}
+
+type Subscription {
+  onEvent(id: ID!): Event
+    @aws_subscribe(mutations: ["publishEvent"])
+    @aws_cognito_user_pools # subscribers
+}
+
+# GraphQL requires a query root type and this API only publishes, so the single
+# query is a connectivity check.
+type Query {
+  ping: String! @aws_iam @aws_cognito_user_pools
+}
+
+schema {
+  query: Query
+  mutation: Mutation
+  subscription: Subscription
+}

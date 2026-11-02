@@ -1,0 +1,478 @@
+# yaml-language-server: $schema=https://unpkg.com/@jedais/arkho-cli/schema/arkho.template.schema.json
+
+schemaVersion: 1
+name: whatsapp-fullstack
+title: WhatsApp Fullstack
+description: >
+  WhatsApp inbox on AWS: a CDK serverless backend (aws-cdk-serverless-backend
+  base) that receives and sends WhatsApp messages through AWS End User Messaging
+  Social - SNS ws-handler, DynamoDB conversations, approved templates, human
+  takeover and an AppSync realtime channel - plus a React frontend
+  (frontend-base) with a live WhatsApp section. Generate both, or only one.
+version: 0.1.0
+category: other
+tags: [whatsapp, aws, cdk, serverless, react, appsync, cognito, end-user-messaging]
+
+parameters:
+  # ---------------------------------------------------------------------------
+  # Project
+  # ---------------------------------------------------------------------------
+  - name: project_name
+    type: string
+    group: Project
+    prompt: "Project name?"
+    description: "Prefix of every AWS resource and npm package, e.g. acme-whatsapp."
+    required: true
+    # Feeds PROJECT_NAME of the backend, so it must stay valid inside an S3
+    # bucket name and a Cognito domain prefix.
+    pattern: "^[a-z][a-z0-9-]{1,30}$"
+    patternHint: "lowercase letters, numbers and hyphens; must start with a letter (2-31 chars), e.g. acme-whatsapp"
+
+  - name: components
+    type: choice
+    group: Project
+    prompt: "What do you want to generate?"
+    default: fullstack
+    choices:
+      - value: fullstack
+        label: "Backend + frontend"
+        hint: "backend/ and frontend/, ready to wire together"
+      - value: backend
+        label: "Backend only"
+        hint: "CDK stack with the WhatsApp module"
+      - value: frontend
+        label: "Frontend only"
+        hint: "WhatsApp section for an existing backend with this API"
+
+  # ---------------------------------------------------------------------------
+  # WhatsApp (backend)
+  # ---------------------------------------------------------------------------
+  # Lands only in backend/.env, which is gitignored in the generated project.
+  # The AWS account is not asked: CDK takes it from the profile you deploy with.
+  - name: aws_region
+    type: string
+    group: WhatsApp
+    prompt: "AWS region?"
+    description: "Where the backend is deployed; WhatsApp (End User Messaging Social) must be available there, e.g. us-east-1."
+    when: "components != 'frontend'"
+    default: us-east-1
+    pattern: "^[a-z]{2}(-[a-z]+)+-[0-9]$"
+    patternHint: "an AWS region code, e.g. us-east-1"
+
+  - name: whatsapp_ready
+    type: boolean
+    group: WhatsApp
+    prompt: "Is a WhatsApp number already connected in AWS?"
+    description: "In End User Messaging Social. No = the README walks you through connecting one; the ids can be added later."
+    when: "components != 'frontend'"
+    default: false
+
+  # Empty defaults on purpose: the stack deploys without them and the ids can be
+  # set later in backend/.env (or the Parameter Store parameter).
+  - name: whatsapp_phone_number_id
+    type: string
+    group: WhatsApp
+    prompt: "Phone number id?"
+    description: "End User Messaging Social > Phone numbers: the number's ARN."
+    when: "components != 'frontend' && whatsapp_ready"
+    default: ""
+    pattern: "^(arn:aws:social-messaging:[a-z0-9-]+:[0-9]{12}:phone-number-id/[a-f0-9]+)?$"
+    patternHint: "the phone number ARN, e.g. arn:aws:social-messaging:us-east-1:123456789012:phone-number-id/abc123..."
+
+  - name: whatsapp_business_account_id
+    type: string
+    group: WhatsApp
+    prompt: "WhatsApp Business Account id?"
+    description: "End User Messaging Social > Business accounts, e.g. waba-0a46e718017b4acd927aa5833b4fb13e."
+    when: "components != 'frontend' && whatsapp_ready"
+    default: ""
+    pattern: "^(waba-[a-f0-9]+)?$"
+    patternHint: "the WABA id as AWS shows it, e.g. waba-0a46e718017b4acd927aa5833b4fb13e"
+
+  - name: default_phone_prefix
+    type: string
+    group: WhatsApp
+    prompt: "Default country code?"
+    description: "Added to numbers typed without one: 56 Chile, 51 Peru, 52 Mexico."
+    when: "components != 'frontend'"
+    default: "56"
+    pattern: "^[0-9]{1,3}$"
+    patternHint: "1 to 3 digits, no +, e.g. 56"
+
+  # Written as a double-quoted value in backend/.env, so quotes and backslashes
+  # are rejected.
+  - name: auto_reply_message
+    type: string
+    group: WhatsApp
+    prompt: "Automatic reply to incoming messages?"
+    description: "Sent to every message received. Empty = no automatic reply; your team answers from the web."
+    when: "components != 'frontend'"
+    default: ""
+    pattern: "^[^\"\\\\]{0,500}$"
+    patternHint: "up to 500 characters, without double quotes or backslashes"
+
+  # Written to backend/.env as MEDIA_RETENTION_DAYS: a lifecycle expiration on
+  # the WhatsApp media bucket.
+  - name: media_retention_days
+    type: string
+    group: WhatsApp
+    prompt: "Days to keep WhatsApp files?"
+    description: "Days to keep received/sent files in S3. Empty = keep forever."
+    when: "components != 'frontend'"
+    default: ""
+    pattern: "^([1-9][0-9]{0,4})?$"
+    patternHint: "a whole number of days (1 to 99999), or empty to keep them forever"
+
+  # ---------------------------------------------------------------------------
+  # Agent (backend)
+  # ---------------------------------------------------------------------------
+  # Written to backend/.env as AGENT_RUNTIME; `none` creates no agent resource
+  # and keeps the fixed automatic reply above.
+  - name: agent_runtime
+    type: choice
+    group: Agent
+    prompt: "AI agent to answer WhatsApp?"
+    description: "Where the AI agent runs. Both runtimes use the same agent code (backend/src/agent); none keeps only the fixed automatic reply."
+    when: "components != 'frontend'"
+    default: agentcore
+    choices:
+      - value: agentcore
+        label: "AgentCore (recommended)"
+        hint: "managed runtime: memory, traces, isolated sessions, scales"
+      - value: lambda
+        label: "Lambda"
+        hint: "simpler, low traffic; same agent code"
+      - value: none
+        label: "No agent"
+        hint: "only the fixed auto-reply, as today"
+
+  - name: agent_model
+    type: string
+    group: Agent
+    prompt: "Bedrock model for the agent?"
+    description: "A Bedrock model id or inference profile, e.g. us.anthropic.claude-sonnet-4-6. Enable access to it in the account (Bedrock > Model access)."
+    when: "components != 'frontend' && agent_runtime != 'none'"
+    default: us.anthropic.claude-sonnet-4-6
+    pattern: "^[a-z0-9-]+(\\.[a-z0-9-]+)+(:[0-9]+)?$"
+    patternHint: "a Bedrock model id, e.g. us.anthropic.claude-sonnet-4-6 or anthropic.claude-3-5-haiku-20241022-v1:0"
+
+  # Written as a double-quoted value in backend/.env, like auto_reply_message.
+  - name: agent_business_description
+    type: string
+    group: Agent
+    prompt: "What does the business do, in a sentence or two?"
+    description: "Seeds the agent's base prompt (what it may talk about). Editable later in Parameter Store without a deploy."
+    when: "components != 'frontend' && agent_runtime != 'none'"
+    default: ""
+    pattern: "^[^\"\\\\]{0,500}$"
+    patternHint: "up to 500 characters, without double quotes or backslashes"
+
+  - name: agent_memory
+    type: choice
+    group: Agent
+    prompt: "What should the agent remember?"
+    description: "AgentCore Memory keeps it for 30 days. Long-term modes extract facts or summaries with extra model calls."
+    when: "components != 'frontend' && agent_runtime != 'none'"
+    default: conversation
+    choices:
+      - value: conversation
+        label: "The conversation"
+        hint: "remembers the current conversation"
+      - value: facts
+        label: "Facts"
+        hint: "+ customer facts and preferences across conversations"
+      - value: facts_summaries
+        label: "Facts and summaries"
+        hint: "+ conversation summaries"
+      - value: "off"
+        label: "Nothing"
+        hint: "every message is answered on its own"
+
+  - name: agent_rate_limit_per_hour
+    type: string
+    group: Agent
+    prompt: "Max agent replies per customer per hour?"
+    description: "Beyond it the agent is not called (protects cost); the customer gets one polite notice per hour."
+    when: "components != 'frontend' && agent_runtime != 'none'"
+    default: "30"
+    pattern: "^[1-9][0-9]{0,3}$"
+    patternHint: "a whole number from 1 to 9999, e.g. 30"
+
+  # ---------------------------------------------------------------------------
+  # Frontend
+  # ---------------------------------------------------------------------------
+  - name: package_manager
+    type: choice
+    group: Frontend
+    prompt: "Package manager for the frontend?"
+    when: "components != 'backend'"
+    default: npm
+    choices: [{ value: npm }, { value: pnpm }, { value: yarn }]
+
+  # Written into frontend/src/styles/brand.json, the one place the brand lives:
+  # tailwind.config.ts turns each hex into a full palette at build time.
+  - name: brand_color
+    type: string
+    group: Frontend
+    prompt: "Main brand colour?"
+    description: "A hex such as #E30613, for buttons, highlights and the sign-in screen; editable later in frontend/src/styles/brand.json."
+    when: "components != 'backend'"
+    default: "#3B82F6"
+    pattern: "^#[0-9A-Fa-f]{6}$"
+    patternHint: "a 6-digit hex with #, e.g. #E30613 (red) or #0057A8 (blue)"
+
+  - name: brand_secondary_color
+    type: string
+    group: Frontend
+    prompt: "Secondary colour?"
+    description: "A hex for the sidebar and secondary buttons. Empty = a dark shade of the main colour."
+    when: "components != 'backend'"
+    default: ""
+    pattern: "^(#[0-9A-Fa-f]{6})?$"
+    patternHint: "a 6-digit hex with #, e.g. #1E293B, or empty"
+
+  # Selects one file under frontend/src/features/auth/layouts (see include) and
+  # is written into that folder's index.ts.
+  - name: login_layout
+    type: choice
+    group: Frontend
+    prompt: "Sign-in screen layout?"
+    when: "components != 'backend'"
+    default: basic
+    choices:
+      - value: basic
+        label: "Basic"
+        hint: "a centred card on a soft wash of the brand colour"
+      - value: brand-panel
+        label: "Brand panel"
+        hint: "brand-colour gradient panel with highlights, form card beside it"
+      - value: insights
+        label: "Insights"
+        hint: "dark decorated panel (lines, chart) with feature pills, bare form beside it"
+      - value: orbit
+        label: "Orbit"
+        hint: "big greeting with the form, animated orbits around the logo beside it"
+
+  # ---------------------------------------------------------------------------
+  # Access
+  # ---------------------------------------------------------------------------
+  - name: auth_provider
+    type: choice
+    group: Access
+    prompt: "How will users sign in?"
+    when: "components != 'backend'"
+    default: mock
+    choices:
+      - value: mock
+        label: "Mock (no AWS)"
+        hint: "demo users and demo WhatsApp data; switch to cognito in .env after deploying"
+      - value: cognito
+        label: "Cognito user pool"
+        hint: "real users, from the deployed backend"
+
+  - name: cognito_user_pool_id
+    type: string
+    group: Access
+    prompt: "Cognito user pool id?"
+    description: "Backend output UserPoolId, e.g. us-east-1_abc123. Can be left empty and set in frontend/.env after deploying."
+    when: "components != 'backend' && auth_provider == 'cognito'"
+    default: ""
+    pattern: "^([a-z]{2}-[a-z]+-[0-9]_[A-Za-z0-9]+)?$"
+    patternHint: "a Cognito user pool id such as us-east-1_abc123"
+
+  - name: cognito_user_pool_client_id
+    type: string
+    group: Access
+    prompt: "Cognito app client id?"
+    description: "Backend output of the public app client. Can be left empty and set in frontend/.env after deploying."
+    when: "components != 'backend' && auth_provider == 'cognito'"
+    default: ""
+    pattern: "^[a-z0-9]*$"
+    patternHint: "the public Cognito app client id (lowercase letters and digits)"
+
+  # Both sides: rendered comma-joined into backend SSO_PROVIDERS (the stack
+  # derives each provider from it) and frontend VITE_AUTH_SSO_PROVIDERS (the
+  # sign-in buttons). The empty default keeps both lines empty, not a token.
+  - name: sso_providers
+    type: multichoice
+    group: Access
+    prompt: "Also sign in with Microsoft or Google?"
+    description: "Adds those buttons next to email and password, through Cognito. Needs an app registered at each provider (README). None = email and password only."
+    when: "auth_provider == 'cognito' || components == 'backend'"
+    default: []
+    choices:
+      - value: microsoft
+        label: "Microsoft (Entra ID)"
+      - value: google
+        label: "Google"
+
+  # One answer for both sides: the frontend shows the code step (mock code
+  # 000000 under mock auth) and the backend turns on Cognito email MFA.
+  - name: login_otp
+    type: boolean
+    group: Access
+    prompt: "Require a 2FA code after the password?"
+    description: "A one-time code sent by email. With mock sign-in the code is 000000."
+    default: false
+
+  # With email MFA on, the backend refuses to synth without a sender, so the
+  # pattern rejects an empty answer whenever this is asked. The empty default is
+  # only for the conditioned-out case: without it the literal token would be
+  # left in backend/.env.
+  - name: ses_from_email
+    type: string
+    group: Access
+    prompt: "Email address that sends the 2FA codes?"
+    description: "Must be a verified identity in Amazon SES, in the same region, e.g. no-reply@example.com."
+    when: "components != 'frontend' && login_otp"
+    default: ""
+    pattern: "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$"
+    patternHint: "an email address, e.g. no-reply@example.com"
+
+  # Shared by both sides: the frontend gates its admin screens with the group
+  # and the backend requires it on the WhatsApp API and realtime channel.
+  - name: use_roles
+    type: boolean
+    group: Access
+    prompt: "Will there be admins and regular users?"
+    description: "No = every signed-in user can use WhatsApp and every screen."
+    default: true
+
+  - name: admin_group
+    type: string
+    group: Access
+    prompt: "Name of the admin group?"
+    description: "The Cognito group allowed to use WhatsApp and the admin-only screens."
+    when: "use_roles"
+    default: admin
+    pattern: "^[A-Za-z0-9_-]{1,64}$"
+    patternHint: "a Cognito group name, e.g. admin"
+
+  # Both sides: the Usuarios screen in the frontend and the /admin/users API
+  # (backend USERS_API_ENABLED) it calls.
+  - name: include_users_admin
+    type: boolean
+    group: Access
+    prompt: "Include a user management screen?"
+    description: "Create, disable and reset Cognito users from the web (Usuarios screen and /admin/users API)."
+    default: false
+
+  # ---------------------------------------------------------------------------
+  # Connections (frontend to a deployed backend)
+  # ---------------------------------------------------------------------------
+  - name: api_base_url
+    type: string
+    group: Connections
+    prompt: "Backend API URL?"
+    description: "Backend output RestApiUrl. Leave empty until the backend is deployed; then set it in frontend/.env."
+    when: "components != 'backend'"
+    default: ""
+
+  - name: appsync_url
+    type: string
+    group: Connections
+    prompt: "Realtime (AppSync) URL?"
+    description: "Backend output WhatsAppEventsGraphqlUrl, for live updates. Can be left empty."
+    when: "components != 'backend'"
+    default: ""
+
+templating:
+  engine: token
+
+  # Copied without substitution: it carries WhatsApp template variables in
+  # double braces, which the token engine would otherwise blank out.
+  exclude:
+    - "frontend/src/features/whatsapp/services/mockWhatsApp.ts"
+    - "docs/WHATSAPP_EVENTS.md"
+
+  skip:
+    # Bytecode Python leaves behind when the backend tests run in this folder.
+    - "backend/**/__pycache__/**"
+    # A virtualenv made to run the agent tests locally.
+    - "backend/**/.venv/**"
+    - "frontend/dist/**"
+    - "frontend/.env.local"
+
+  include:
+    # Ordered specific-first: copyTemplate stops at the FIRST matching rule, so
+    # this one must sit above the broad frontend/** rules or it never runs. It
+    # repeats the components condition because, once it matches, the frontend
+    # rules below are not evaluated for these files.
+    - path: "frontend/src/features/admin/**"
+      when: "include_users_admin && components != 'backend'"
+
+    # Only pnpm reads it; npm and yarn run esbuild's postinstall on their own.
+    - path: "frontend/pnpm-workspace.yaml"
+      when: "package_manager == 'pnpm' && components != 'backend'"
+
+    # One sign-in layout per project; layouts/index.ts re-exports the chosen one.
+    - path: "frontend/src/features/auth/layouts/basic.tsx"
+      when: "login_layout == 'basic' && components != 'backend'"
+    - path: "frontend/src/features/auth/layouts/brand-panel.tsx"
+      when: "login_layout == 'brand-panel' && components != 'backend'"
+    - path: "frontend/src/features/auth/layouts/insights.tsx"
+      when: "login_layout == 'insights' && components != 'backend'"
+    - path: "frontend/src/features/auth/layouts/orbit.tsx"
+      when: "login_layout == 'orbit' && components != 'backend'"
+
+    # `**` does not match dotfiles (.gitignore, .husky/...), so each tree needs
+    # the dot patterns too, or a backend-only project would still get them.
+    - path: "backend/**"
+      when: "components != 'frontend'"
+    - path: "backend/.*"
+      when: "components != 'frontend'"
+    - path: "backend/**/.*"
+      when: "components != 'frontend'"
+    - path: "backend/.*/**"
+      when: "components != 'frontend'"
+    - path: "backend/**/.*/**"
+      when: "components != 'frontend'"
+
+    - path: "frontend/**"
+      when: "components != 'backend'"
+    - path: "frontend/.*"
+      when: "components != 'backend'"
+    - path: "frontend/**/.*"
+      when: "components != 'backend'"
+    - path: "frontend/.*/**"
+      when: "components != 'backend'"
+    - path: "frontend/**/.*/**"
+      when: "components != 'backend'"
+
+nextSteps:
+  # Written as "command   # explanation"; a line starting with # is text only and
+  # "## " starts an unnumbered section (numbering restarts).
+  # Not `cd {{ project_name }}`: the folder is named after the CLI's own project-name
+  # answer, which may differ from this parameter when the first one failed its pattern.
+  # One command per step so each can be run on its own; the last step of each part
+  # is the same commands chained, for whoever prefers one line.
+  - "# Open the generated project folder; README.md has the full guide, including connecting a WhatsApp number"
+  - "## BACKEND (if generated) - all local, nothing is deployed"
+  - "cd backend   # Enter the backend"
+  - "npm install   # Install dependencies (skip it if the CLI already installed them)"
+  - "npm test   # Run the CDK tests"
+  - "npx cdk synth --quiet   # Build the CloudFormation template without deploying"
+  - "cd backend && npm install && npm test && npx cdk synth --quiet   # Backend, all in one line"
+  - "## FRONTEND (if generated) - with mock sign-in it runs on demo data"
+  - "cd frontend   # Enter the frontend"
+  - "{{ package_manager }} install   # Install dependencies (skip it if the CLI already installed them)"
+  - "{{ package_manager }} run dev   # Start it at http://localhost:5173 (WhatsApp at /whatsapp)"
+  - "cd frontend && {{ package_manager }} install && {{ package_manager }} run dev   # Frontend, all in one line"
+  - "## SIGN IN WITH MICROSOFT / GOOGLE (if chosen)"
+  - "# Deploy once; output CognitoIdpRedirectUri is the redirect URI to register"
+  - "# Microsoft: Azure portal > Entra ID > App registrations > New (Web)"
+  - "# Add the redirect URI; note Client ID and Tenant ID; create a Client secret"
+  - "# backend/.env: ENTRA_ID_CLIENT_ID, ENTRA_ID_CLIENT_SECRET, ENTRA_ID_ISSUER_URL"
+  - "# Issuer URL: https://login.microsoftonline.com/<tenant-id>/v2.0"
+  - "# Google: Cloud Console > APIs & Services > OAuth consent screen"
+  - "# Credentials > OAuth client ID (Web application), same redirect URI"
+  - "# backend/.env: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET"
+  - "# Redeploy (npx cdk deploy in backend/) to create the providers"
+  - "# frontend/.env: VITE_COGNITO_DOMAIN = output CognitoDomainUrl"
+  - "## AI AGENT (if chosen) - backend/src/agent, deployed with the backend"
+  - "# Bedrock console > Model access: enable the model in AGENT_MODEL_ID (backend/.env) first"
+  - "# Docker must be running for npx cdk deploy: the agent image (ARM64) is built on deploy"
+  - "# Base prompt: Parameter Store, output AgentPromptParameterName (JSON; basePrompt, greeting...)"
+  - "# Edit it there, no deploy needed; a web screen for it comes later"
+  - "# Switch it off: set enabled to false in that parameter (the fixed auto-reply answers)"
+  - "# Remove it: AGENT_RUNTIME=none in backend/.env, then npx cdk deploy"
