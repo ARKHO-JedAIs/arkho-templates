@@ -195,11 +195,12 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict:
             scopes = payload.get('scope', '')
             groups = payload.get('cognito:groups', [])
         else:
-            # ID token claims
+            # ID token claims. Cognito puts group membership here, not on the
+            # access token, so this is the one that actually has to read it.
             username = payload.get('cognito:username', payload.get('username', user_id))
             email = payload.get('email', '')
             scopes = ''
-            groups = []
+            groups = payload.get('cognito:groups', [])
         
         # Build resource ARN pattern to allow all methods/resources
         # Format: arn:aws:execute-api:region:account:api-id/stage/*/*
