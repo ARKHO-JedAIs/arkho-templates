@@ -1,0 +1,32 @@
+# AWS Amplify Hosting build, connected to the repo from the Amplify console.
+#
+# Per environment (branch), set in the console:
+# - Environment variables: VITE_AUTH_PROVIDER, VITE_COGNITO_USER_POOL_ID,
+#   VITE_COGNITO_USER_POOL_CLIENT_ID, VITE_ADMIN_GROUP, VITE_AUTH_SSO_PROVIDERS,
+#   VITE_COGNITO_DOMAIN, VITE_AUTH_REDIRECT_SIGN_IN, VITE_AUTH_REDIRECT_SIGN_OUT,
+#   VITE_API_BASE_URL, VITE_USERS_API_PATH, VITE_APPSYNC_URL (see .env.example).
+#   All VITE_ values end up in the public bundle.
+# - Rewrites and redirects: the SPA rule, so a reload on a route like
+#   /whatsapp serves index.html instead of 404ing (README, "Deploying the
+#   frontend on Amplify").
+version: 1
+frontend:
+  phases:
+    preBuild:
+      commands:
+        - nvm install
+        - nvm use
+        - npm install -g pnpm
+        # The store inside the project, so Amplify can cache it between builds.
+        - pnpm config set store-dir .pnpm-store
+        - pnpm install --no-frozen-lockfile
+    build:
+      commands:
+        - pnpm run build
+  artifacts:
+    baseDirectory: dist
+    files:
+      - '**/*'
+  cache:
+    paths:
+      - .pnpm-store/**/*

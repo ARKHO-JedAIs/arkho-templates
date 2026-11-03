@@ -58,7 +58,7 @@ same realtime path AppSync uses, so the whole screen can be exercised.
 | Brand colours and logo | `frontend/src/styles/brand.json` | `primary` and `secondary` hex (empty secondary = a dark shade of the primary), `logo` and `logoOnDark` paths under `frontend/public/`. Tailwind turns each hex into a full palette at build time; `dev` picks up an edit by itself. |
 | Sign-in layout | `frontend/src/features/auth/layouts/` | One of `basic`, `brand-panel`, `insights`, `orbit`, chosen at generation; `index.ts` re-exports it. |
 | Verification code | `frontend/.env` `VITE_MOCK_AUTH_OTP`, `backend/.env` `EMAIL_MFA_ENABLED` + `SES_FROM_EMAIL` | Mock mode: code `000000`. Real: Cognito email MFA through SES (verified sender, SES out of the sandbox). |
-| Microsoft / Google buttons | `backend/.env` `SSO_PROVIDERS`, `frontend/.env` `VITE_AUTH_SSO_PROVIDERS` | Cognito sign-in only (hidden in mock mode). See [Sign in with Microsoft or Google](#sign-in-with-microsoft-or-google). |
+| Microsoft / Google buttons | `backend/.env` `SSO_PROVIDERS`, `frontend/.env` `VITE_AUTH_SSO_PROVIDERS` | Shown in mock too, as a preview; a click there explains what is still missing instead of signing in. See [Sign in with Microsoft or Google](#sign-in-with-microsoft-or-google). |
 
 ## Deploy and connect a WhatsApp number
 
@@ -151,6 +151,30 @@ same realtime path AppSync uses, so the whole screen can be exercised.
    shows up live. Reply from the web within 24 hours, or send a template
    (create it from Configuración > Plantillas; Meta reviews it before it can
    be sent).
+
+## Deploying the frontend on Amplify
+
+`frontend/amplify.yml` is the build. Connect the GitHub repository from the
+Amplify console, one branch per environment, and set up in the console:
+
+1. **Environment variables** (per branch, from that environment's backend
+   stack outputs and `frontend/.env.example`): `VITE_AUTH_PROVIDER=cognito`,
+   `VITE_COGNITO_USER_POOL_ID`, `VITE_COGNITO_USER_POOL_CLIENT_ID`,
+   `VITE_ADMIN_GROUP`, `VITE_AUTH_SSO_PROVIDERS`, `VITE_COGNITO_DOMAIN`,
+   `VITE_AUTH_REDIRECT_SIGN_IN`, `VITE_AUTH_REDIRECT_SIGN_OUT`,
+   `VITE_API_BASE_URL`, `VITE_USERS_API_PATH`, `VITE_APPSYNC_URL`. They all
+   end up in the public bundle, so nothing secret goes here.
+2. **Rewrites and redirects**: the app routes in the browser, so every path
+   that is not a file serves `index.html`. Without it, reloading a route like
+   `/whatsapp` is a 404.
+
+   | Source | Target | Type |
+   | --- | --- | --- |
+   | `</^[^.]+$\|\.(?!(css\|gif\|ico\|jpg\|js\|png\|txt\|svg\|woff\|woff2\|ttf\|map\|json\|webp)$)([^.]+$)/>` | `/index.html` | 200 (Rewrite) |
+
+The build uses Node from `.nvmrc` (pnpm, installed fresh since there is no
+pinned version yet) and caches the pnpm store between builds. No CodeArtifact
+login needed - this template depends on public npm packages only.
 
 ## Sign in with Microsoft or Google
 
