@@ -149,9 +149,10 @@ export function ChatThread({
     if (unreadCount <= 0) return null;
     let remaining = unreadCount;
     for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].direction === 'in') {
+      const message = messages[i];
+      if (message && message.direction === 'in') {
         remaining -= 1;
-        if (remaining === 0) return messages[i].id;
+        if (remaining === 0) return message.id;
       }
     }
     return messages[0]?.id ?? null;
