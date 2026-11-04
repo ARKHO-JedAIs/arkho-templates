@@ -12,6 +12,27 @@ MAX_HEADER_TEXT_LENGTH = 60
 MAX_URL_SUFFIX_LENGTH = 2000
 MAX_FILENAME_LENGTH = 240
 
+MEDIA_HEADER_PLACEHOLDER = {"IMAGE": "[Imagen]", "VIDEO": "[Video]", "DOCUMENT": "[Documento]"}
+
+
+def render_message(template: dict, header_text: dict | None, has_media_header: bool, parameters: list[str]) -> str:
+    """The template as the contact reads it: its header line, then its body with
+    each variable replaced by the value that was actually sent."""
+    header_format = template["headerFormat"]
+    if header_format == "TEXT" and template.get("header"):
+        header_name = template["headerVariableNames"][0] if template["headerVariableNames"] else None
+        header_value = header_text["text"] if header_text else None
+        header_line = messaging.fill_template(
+            template["header"], {header_name: header_value} if header_name and header_value else {}
+        )
+    elif header_format in MEDIA_HEADER_PLACEHOLDER and has_media_header:
+        header_line = MEDIA_HEADER_PLACEHOLDER[header_format]
+    else:
+        header_line = None
+    body_values = dict(zip(template["variableNames"], parameters))
+    body = messaging.fill_template(template["body"], body_values)
+    return f"{header_line}\n{body}" if header_line else body
+
 
 def get_parameters(body: dict) -> list[str]:
     parameters = body.get("parameters") or []
@@ -172,15 +193,16 @@ def handler(event, context):
         status, code, message = messaging.client_error(error)
         return create_error_response(message, status if status != 404 else 502, code)
 
-    values = ([text["text"]] if text else []) + parameters + [button["text"] for button in buttons]
+    message_text = render_message(template, text, file is not None, parameters)
     try:
         sent = store.save_message(
             phone,
             store.OUTBOUND,
             "template",
-            f"{name} ({language})" + (f": {', '.join(values)}" if values else ""),
+            message_text,
             message_id=message_id,
             template=name,
+            language=language,
             sent_by="human",
             status="sent",
             sent_by_name=caller["email"] or caller["username"],

@@ -223,6 +223,11 @@ class NormalizePhoneTest(unittest.TestCase):
     def test_keeps_a_number_written_with_plus(self):
         self.assertEqual(messaging.normalize_phone("+51 987 654 321", prefix="56"), "51987654321")
 
+    def test_leaves_a_long_number_alone_even_without_a_plus(self):
+        # Someone's full number pasted without the leading "+" must not be read
+        # as a local number and get a second, wrong country code glued on.
+        self.assertEqual(messaging.normalize_phone("573507834094", prefix="56"), "573507834094")
+
     def test_rejects_what_is_not_a_phone(self):
         with self.assertRaises(ValueError):
             messaging.normalize_phone("hola", prefix="56")

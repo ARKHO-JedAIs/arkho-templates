@@ -17,6 +17,14 @@ logger = logging.getLogger(__name__)
 
 PHONE_PATTERN = re.compile(r"^\d{8,15}$")
 
+# A number typed without "+" and this short or shorter reads as a local number
+# missing its country code (Chile's own numbers are 9 digits) and gets the
+# default prefix glued on. Longer than that, it already looks like someone's
+# full international number typed without the "+" - e.g. a Colombian
+# "573507834094" - and gluing the default prefix on would dial a different,
+# nonexistent contact instead of just failing validation.
+LOCAL_NUMBER_MAX_LENGTH = 10
+
 social_messaging = boto3.client("socialmessaging")
 
 
@@ -24,7 +32,9 @@ def normalize_phone(raw: str, prefix: str | None = None) -> str:
     """E.164 digits without "+", completing a local number with the default prefix.
 
     ``"+56 9 1234 5678"`` and ``"912345678"`` (prefix ``56``) both give
-    ``"56912345678"``. Raises ValueError when the result is not dialable.
+    ``"56912345678"``. A longer number typed without "+" is assumed to already
+    carry its own country code and is left alone. Raises ValueError when the
+    result is not dialable.
     """
     value = str(raw or "").strip()
     has_plus = value.startswith("+")
@@ -32,7 +42,8 @@ def normalize_phone(raw: str, prefix: str | None = None) -> str:
     if not digits.isdigit():
         raise ValueError("Expected a phone number")
     prefix = (config.default_phone_prefix() if prefix is None else prefix).lstrip("+")
-    if not has_plus and prefix and not digits.startswith(prefix):
+    looks_local = len(digits) <= LOCAL_NUMBER_MAX_LENGTH
+    if not has_plus and prefix and looks_local and not digits.startswith(prefix):
         digits = f"{prefix}{digits}"
     if PHONE_PATTERN.fullmatch(digits) is None:
         raise ValueError("Expected 8 to 15 digits, country prefix included")
@@ -183,6 +194,11 @@ def variable_names(text: str) -> list[str]:
         if name not in names:
             names.append(name)
     return names
+
+
+def fill_template(text: str, values: dict[str, str]) -> str:
+    """``text`` with each ``{{variable}}`` replaced by its value, as the contact reads it."""
+    return VARIABLE.sub(lambda match: values.get(match.group(1), match.group(0)), text or "")
 
 
 def _template_summaries(waba_id: str) -> list[dict]:

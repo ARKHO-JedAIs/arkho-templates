@@ -273,6 +273,13 @@ class SendTemplateTest(TemplatesTestCase):
         self.assertEqual(status, 422)
         self.assertEqual(body["error"]["code"], "VALIDATION_ERROR")
 
+    def test_stores_the_rendered_body_not_the_template_name(self):
+        fake = self.use([summary("saludo_inicial")], {"meta-saludo_inicial-es_PE": body_only("Hola, bienvenido.")})
+        status, _ = self.send("saludo_inicial")
+        self.assertEqual(status, 200)
+        fake.send_whatsapp_message.assert_called_once()
+        self.assertEqual(self.saved.call_args.args[3], "Hola, bienvenido.")
+
     def test_sends_positional_parameters(self):
         text = f"Hola {var('1')}, tu cita es el {var('2')}"
         fake = self.use([summary("reminder")], {"meta-reminder-es_PE": body_only(text)})
@@ -336,7 +343,9 @@ class SendTemplateTest(TemplatesTestCase):
                 {"type": "button", "sub_type": "url", "index": "1", "parameters": [{"type": "text", "text": "A-1"}]},
             ],
         )
-        self.assertEqual(self.saved.call_args.args[3], "order (es_PE): A-1, Ana, A-1")
+        self.assertEqual(self.saved.call_args.args[3], "Pedido A-1\nHola Ana")
+        self.assertEqual(self.saved.call_args.kwargs["template"], "order")
+        self.assertEqual(self.saved.call_args.kwargs["language"], "es_PE")
 
     def test_requires_exactly_the_parts_the_template_needs(self):
         fake = self.order_template({"type": "HEADER", "format": "TEXT", "text": f"Pedido {var('1')}"})
@@ -368,6 +377,7 @@ class SendTemplateTest(TemplatesTestCase):
             fake.sent_payload()["template"]["components"][0],
             {"type": "header", "parameters": [{"type": "document", "document": {"id": "media-1", "filename": "boleta.pdf"}}]},
         )
+        self.assertEqual(self.saved.call_args.args[3], "[Documento]\nHola Ana")
 
     def test_rejects_a_header_file_of_another_type(self):
         fake = self.order_template({"type": "HEADER", "format": "IMAGE"})
