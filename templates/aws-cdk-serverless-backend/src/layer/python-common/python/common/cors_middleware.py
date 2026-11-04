@@ -14,7 +14,7 @@ def with_cors(
     
     Args:
         origins: Allowed origins (default: from CORS_ALLOWED_ORIGINS env var or '*')
-        methods: Allowed HTTP methods (default: from CORS_ALLOWED_METHODS env var or 'GET,POST,PUT,DELETE,OPTIONS')
+        methods: Allowed HTTP methods (default: from CORS_ALLOWED_METHODS env var or 'GET,POST,PUT,PATCH,DELETE,OPTIONS')
         headers: Allowed headers (default: from CORS_ALLOWED_HEADERS env var or common headers)
         max_age: Max age for preflight cache (default: from CORS_MAX_AGE env var or 86400 seconds)
     
@@ -47,7 +47,7 @@ def with_cors(
         
         resolved_methods = methods if methods is not None else os.environ.get(
             'CORS_ALLOWED_METHODS', 
-            'GET,POST,PUT,DELETE,OPTIONS'
+            'GET,POST,PUT,PATCH,DELETE,OPTIONS'
         )
         
         resolved_headers = headers if headers is not None else os.environ.get(
@@ -176,7 +176,7 @@ def _build_cors_headers(
 def add_cors_headers(
     response: Dict[str, Any],
     origins: Union[str, list] = '*',
-    methods: Union[str, list] = 'GET,POST,PUT,DELETE,OPTIONS',
+    methods: Union[str, list] = 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
     headers: Union[str, list] = 'Content-Type,Authorization,X-Requested-With,Accept,Origin,X-Api-Key',
     max_age: int = 86400,
     request_origin: str = None
@@ -204,7 +204,7 @@ def add_cors_headers(
 
 def create_cors_preflight_response(
     origins: Union[str, list] = '*',
-    methods: Union[str, list] = 'GET,POST,PUT,DELETE,OPTIONS',
+    methods: Union[str, list] = 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
     headers: Union[str, list] = 'Content-Type,Authorization,X-Requested-With,Accept,Origin,X-Api-Key',
     max_age: int = 86400,
     request_origin: str = None

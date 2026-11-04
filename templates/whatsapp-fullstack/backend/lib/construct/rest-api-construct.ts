@@ -365,7 +365,7 @@ export class RestApiConstruct extends Construct {
   private buildCorsOptions(corsConfig: RestApiCorsConfig): CorsOptions {
     return {
       allowOrigins: corsConfig.allowOrigins || ['*'],
-      allowMethods: corsConfig.allowMethods || ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+      allowMethods: corsConfig.allowMethods || ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
       allowHeaders: corsConfig.allowHeaders || [
         'Content-Type',
         'Authorization',
