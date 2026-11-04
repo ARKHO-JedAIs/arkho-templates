@@ -197,7 +197,7 @@ def variable_names(text: str) -> list[str]:
 
 
 def fill_template(text: str, values: dict[str, str]) -> str:
-    """``text`` with each ``{{variable}}`` replaced by its value, as the contact reads it."""
+    """``text`` with each double-brace variable replaced by its value, as the contact reads it."""
     return VARIABLE.sub(lambda match: values.get(match.group(1), match.group(0)), text or "")
 
 
