@@ -1,0 +1,40 @@
+# Spanish words for this template (arkho-cli --lang es). Only words: names, values and rules stay in arkho.template.yaml.
+
+schemaVersion: 1
+title: SPA en React
+description: >
+  SPA en React (TypeScript, Vite) conectada a autenticación con Cognito y a una API de
+  backend, con estructura de atomic design, shadcn/Radix UI, React Query, Axios, Zustand
+  y Zod.
+
+parameters:
+  project_name:
+    prompt: "¿Nombre del proyecto? (se usa como nombre del paquete npm)"
+    patternHint: "letras minúsculas, números y guiones; debe comenzar con una letra (2-41 caracteres)"
+
+  package_manager:
+    prompt: "¿Qué gestor de paquetes usará el proyecto?"
+
+  aws_region:
+    prompt: "¿Región de AWS del user pool de Cognito?"
+    patternHint: "una región de AWS, como us-east-1"
+
+  cognito_user_pool_id:
+    prompt: "¿ID del user pool de Cognito?"
+    patternHint: "un ID de user pool de Cognito, como us-east-1_abc123"
+
+  cognito_user_pool_client_id:
+    prompt: "¿ID del app client de Cognito? (público, sin client secret)"
+    patternHint: "el ID del app client público de Cognito (letras minúsculas y dígitos)"
+
+  cognito_domain:
+    prompt: "¿Dominio de Cognito? (opcional, reservado para futuros flujos hosted/de federación)"
+
+  api_base_url:
+    prompt: "¿URL base de la API del backend?"
+    patternHint: "una URL completa que incluya el esquema, p. ej. https://api.example.com"
+
+nextSteps:
+  - "cd {{ project_name }}"
+  - "{{ package_manager }} install"
+  - "{{ package_manager }} run dev"

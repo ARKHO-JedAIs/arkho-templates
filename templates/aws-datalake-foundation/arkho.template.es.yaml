@@ -1,0 +1,76 @@
+# Spanish words for this template (arkho-cli --lang es). Only words: names, values and rules stay in arkho.template.yaml.
+
+schemaVersion: 1
+title: Base de Data Lake en AWS (CDK)
+description: >
+  Data Lake base en AWS sobre CDK v2 (TypeScript): 4 zonas en S3 (Raw/Clean/Curated
+  con Iceberg/Archive en Glacier), ETL con Glue orquestado por Step Functions, gobierno
+  nativo con Lake Formation + Glue Data Catalog, cifrado KMS de extremo a extremo,
+  auditoría con CloudTrail y retención configurable. Dividido en 7–8 stacks (security,
+  storage, governance, ingestion, processing, consumption, observability y network
+  opcional) con configuración por ambiente (dev/staging/prod), cdk-nag y pruebas.
+
+parameters:
+  project_slug:
+    prompt: "¿Slug del proyecto? (prefijo de todos los recursos y nombre del paquete npm)"
+    patternHint: "letras minúsculas, números y guiones; debe comenzar con una letra (2-31 caracteres), p. ej. acme-datalake"
+
+  client_name:
+    prompt: "¿Nombre visible del cliente / organización? (se usa en descripciones y documentación)"
+
+  environment:
+    prompt: "¿Ambiente de despliegue por defecto?"
+
+  aws_region:
+    prompt: "¿Región de AWS de destino?"
+    patternHint: "una región de AWS, como us-east-1"
+
+  aws_account_id:
+    prompt: "¿ID de la cuenta de AWS (12 dígitos)?"
+    patternHint: "exactamente 12 dígitos numéricos"
+
+  catalog_prefix:
+    prompt: "¿Prefijo de las bases de datos del Glue Data Catalog? (las bases se llaman <prefijo>_<env>_<zona>)"
+    patternHint: "letras minúsculas, dígitos y guiones bajos; debe comenzar con una letra (1-21 caracteres), p. ej. acme"
+
+  admin_email:
+    prompt: "¿Correo del administrador / de alertas? (suscripción SNS para alertas operacionales)"
+    patternHint: "un correo electrónico válido, p. ej. ops@empresa.com"
+
+  raw_retention_days:
+    prompt: "¿Días antes de que la zona Raw pase a Glacier Instant Retrieval?"
+
+  archive_retention_years:
+    prompt: "¿Años que se conservan los objetos en la zona Archive (Glacier) antes de expirar?"
+
+  package_manager:
+    prompt: "¿Qué gestor de paquetes usará el proyecto?"
+
+  enable_ingestion_lambdas:
+    prompt: "¿Habilitar las Lambdas de ingesta (GA4 Data API + Meta Ads + SFTP Connector)?"
+    choices:
+      "true":
+        label: "Sí"
+      "false":
+        label: "No"
+
+  enable_vpc:
+    prompt: "¿Habilitar una VPC con subredes privadas y endpoints de S3/Glue (aislamiento de red)?"
+    choices:
+      "true":
+        label: "Sí"
+      "false":
+        label: "No"
+
+  vpc_cidr:
+    prompt: "¿Bloque CIDR de la VPC?"
+    patternHint: "un bloque CIDR válido, p. ej. 10.0.0.0/16"
+
+nextSteps:
+  - "cd {{ project_slug }}"
+  - "{{ package_manager }} install"
+  - "{{ package_manager }} run build"
+  - "{{ package_manager }} test"
+  - "Inicializa la cuenta una sola vez: npx cdk bootstrap aws://{{ aws_account_id }}/{{ aws_region }}"
+  - "Confirma la suscripción a las alertas SNS enviada a {{ admin_email }}"
+  - "{{ package_manager }} run deploy:{{ environment }}"

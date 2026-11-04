@@ -35,6 +35,8 @@ templating:
   # No excludes needed: no source file carries a literal `{{ }}` sequence
   # (TypeScript interpolates with ${...} and the Python sources use single
   # braces), so flat token substitution is safe across the whole tree.
+  skip:
+    - "arkho.template.es.yaml"   # Spanish words for the CLI, not project content
 
 nextSteps:
   # .env.example is the only versioned env file (placeholders only, PROJECT_NAME

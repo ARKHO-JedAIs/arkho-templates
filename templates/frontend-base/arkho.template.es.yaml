@@ -1,0 +1,80 @@
+# Spanish words for this template (arkho-cli --lang es). Only words: names, values and rules stay in arkho.template.yaml.
+
+schemaVersion: 1
+title: Frontend base
+description: >
+  SPA en React lista para ejecutar (TypeScript, Vite): estructura con barra lateral,
+  inicio de sesión con cambio de contraseña obligatorio, rutas protegidas por rol,
+  39 componentes shadcn/Radix y un sistema de design tokens con temas. Cognito es
+  opcional: un proveedor de autenticación simulado (mock) permite ejecutar la app antes
+  de que exista un user pool. Incluye opcionalmente un CRUD de gestión de usuarios y un
+  asistente de chat con streaming, entrada de voz y adjuntos de imágenes.
+
+parameters:
+  project_name:
+    prompt: "¿Nombre del proyecto? (nombre del paquete npm y título que se muestra en la app)"
+    patternHint: "letras minúsculas, números y guiones; debe comenzar con una letra (2-41 caracteres), p. ej. acme-console"
+
+  package_manager:
+    prompt: "¿Qué gestor de paquetes usará el proyecto?"
+
+  auth_provider:
+    prompt: "¿Autenticación?"
+    choices:
+      mock:
+        label: "Simulada (sin AWS)"
+        hint: "funciona de inmediato; cambia a cognito más adelante editando .env"
+      cognito:
+        label: "User pool de Cognito"
+        hint: "requiere un user pool y un app client existentes"
+
+  cognito_user_pool_id:
+    prompt: "¿ID del user pool de Cognito? (déjalo vacío para completarlo después en .env)"
+    patternHint: "un ID de user pool de Cognito, como us-east-1_abc123"
+
+  cognito_user_pool_client_id:
+    prompt: "¿ID del app client de Cognito? (cliente público, sin secreto; puede quedar vacío)"
+    patternHint: "el ID del app client público de Cognito (letras minúsculas y dígitos)"
+
+  use_roles:
+    prompt: "¿Este proyecto tendrá más de un perfil de usuario? (no = todo usuario autenticado ve todo)"
+
+  admin_group:
+    prompt: "¿Qué grupo da acceso a las pantallas exclusivas de administración?"
+    patternHint: "un nombre de grupo de Cognito, p. ej. admin"
+
+  api_base_url:
+    prompt: "¿URL base de la API del backend? (déjala vacía si aún no tienes una)"
+
+  include_users_admin:
+    prompt: "¿Incluir la pantalla de gestión de usuarios? (CRUD contra tu API de usuarios)"
+
+  include_chat:
+    prompt: "¿Incluir la sección del asistente de chat?"
+
+  chat_capabilities:
+    prompt: "¿Capacidades del chat? (espacio para seleccionar, al menos una)"
+    choices:
+      voice:
+        label: "Entrada de voz"
+        hint: "dictado manteniendo presionado para hablar; luego pide un identity pool de Cognito"
+      images:
+        label: "Adjuntos de imágenes"
+        hint: "carga a S3 con URL prefirmada; luego pide el endpoint de carga"
+
+  agent_chat_api_url:
+    prompt: "¿URL base de la API de chat del agente? (el cliente hace POST a {url}/chat)"
+
+  cognito_identity_pool_id:
+    prompt: "¿ID del identity pool de Cognito? (firma las llamadas a Transcribe para la entrada de voz)"
+
+  chat_images_upload_url:
+    prompt: "¿URL del endpoint de carga prefirmada para las imágenes del chat?"
+
+nextSteps:
+  - "cd {{ project_name }}"
+  - "{{ package_manager }} install"
+  - "{{ package_manager }} run dev   # http://localhost:5173"
+  - "# .env ya está completado con tus respuestas; .env.example es la plantilla versionada con valores de ejemplo"
+  - "# Para aplicar tu marca: abre el proyecto en Claude Code y pide personalizar la marca"
+  - "#   (el skill arkho-branding recorre toda la checklist como una entrevista breve)"

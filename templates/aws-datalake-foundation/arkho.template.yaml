@@ -115,6 +115,8 @@ templating:
   engine: token
   # No excludes needed: TypeScript uses ${...} and Python uses single braces,
   # so no source file carries a literal {{ }} token.
+  skip:
+    - "arkho.template.es.yaml"   # Spanish words for the CLI, not project content
 
 nextSteps:
   - "cd {{ project_slug }}"

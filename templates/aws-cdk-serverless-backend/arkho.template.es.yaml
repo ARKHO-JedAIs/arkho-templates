@@ -1,0 +1,28 @@
+# Spanish words for this template (arkho-cli --lang es). Only words: names, values and rules stay in arkho.template.yaml.
+
+schemaVersion: 1
+title: Backend serverless con AWS CDK
+description: >
+  Backend serverless en AWS CDK v2 (TypeScript): Cognito User Pool con federación
+  opcional con Microsoft Entra ID (OIDC), tabla DynamoDB single-table, bucket privado
+  SSE-S3, Lambdas Python 3.12 con capa compartida y API REST de API Gateway tras un
+  autorizador Lambda JWT, más constructs reutilizables (Glue, WAF, GuardDuty,
+  CloudTrail, Budgets, Access Analyzer, GitHub OIDC). Nombres de recursos con la
+  convención projectName-envName-resourceName; incluye pruebas jest y hook pre-commit
+  de secretlint.
+
+parameters:
+  project_name:
+    prompt: "¿Nombre del proyecto? (nombre del paquete npm y prefijo de cada recurso de AWS)"
+    patternHint: "letras minúsculas, números y guiones; debe comenzar con una letra (2-31 caracteres), p. ej. acme-backend"
+
+nextSteps:
+  - "cd {{ project_name }}"
+  - "cp .env.example .env   # luego completa AWS_ACCOUNT_ID y AWS_REGION (ENV_NAME=dev y PROJECT_NAME={{ project_name }} vienen precompletados)"
+  - "npm install"
+  - "npm run prepare   # instala el hook pre-commit de husky/secretlint"
+  - "npx cdk bootstrap aws://<AWS_ACCOUNT_ID>/<AWS_REGION>   # una vez por cuenta/región"
+  - "npx cdk synth --quiet"
+  - "npm test"
+  - "npx cdk deploy"
+  - "curl <RestApiUrl>hello-world   # ruta pública de prueba rápida; RestApiUrl es un output del stack"

@@ -392,6 +392,9 @@ templating:
     - "backend/**/.venv/**"
     - "frontend/dist/**"
     - "frontend/.env.local"
+    # Spanish words for the CLI's language selector; CLIs that predate it would
+    # otherwise copy the file into the project.
+    - "arkho.template.es.yaml"
 
   include:
     # Ordered specific-first: copyTemplate stops at the FIRST matching rule, so

@@ -67,6 +67,8 @@ templating:
     # Contains literal JSX double-brace syntax (`state={{ ... }}`) that is NOT a
     # template token; copied without substitution so the engine cannot mangle it.
     - "src/app/RequireAuth.tsx"
+  skip:
+    - "arkho.template.es.yaml"   # Spanish words for the CLI, not project content
 
 nextSteps:
   # .env is generated pre-filled with your answers; .env.example stays as the

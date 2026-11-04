@@ -180,6 +180,7 @@ templating:
     # template from a generated copy instead (see the authoring notes).
     - "dist/**"
     - ".env.local"   # only if someone creates one while previewing locally
+    - "arkho.template.es.yaml"   # Spanish words for the CLI, not project content
 
   include:
     # Ordered specific-first: copyTemplate evaluates the FIRST matching rule and
