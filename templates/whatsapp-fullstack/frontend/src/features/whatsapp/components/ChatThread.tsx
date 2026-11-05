@@ -415,8 +415,15 @@ interface BubbleProps {
 function Bubble({ message, quoted, onRetry, retrying, onMediaExpired }: BubbleProps) {
   const inbound = message.direction === 'in';
   const failed = !inbound && message.status === 'failed';
-  const template = message.kind === 'template' ? templateParts(message.text) : null;
-  const text = template ? template.detail : message.text;
+  // The backend has always stored the template's name; `templateLanguage`
+  // is what's new, so its absence - not the name's - is what marks a message
+  // stored before the fix, back when `text` was only "name (language)[: params]"
+  // rather than the rendered body.
+  const legacyTemplate =
+    message.kind === 'template' && !message.templateLanguage ? templateParts(message.text) : null;
+  const templateName = message.templateName ?? legacyTemplate?.name ?? null;
+  const templateLanguage = message.templateLanguage ?? legacyTemplate?.language ?? null;
+  const text = legacyTemplate ? legacyTemplate.detail : message.text;
 
   return (
     <div
@@ -449,7 +456,7 @@ function Bubble({ message, quoted, onRetry, retrying, onMediaExpired }: BubblePr
             <FileText className='h-3 w-3 shrink-0' aria-hidden />
             <span>
               PLANTILLA
-              {template ? ` · ${template.name}` : null}
+              {templateName ? ` · ${templateName}` : null}
             </span>
           </p>
         ) : null}
@@ -460,8 +467,8 @@ function Bubble({ message, quoted, onRetry, retrying, onMediaExpired }: BubblePr
           </p>
         ) : null}
         {message.replyTo ? <QuotedBlock quoted={quoted} /> : null}
-        {template && !text ? (
-          <p className='text-xs text-foreground-secondary'>Idioma: {template.language}</p>
+        {legacyTemplate && !text ? (
+          <p className='text-xs text-foreground-secondary'>Idioma: {templateLanguage}</p>
         ) : (
           <Content message={message} text={text} onMediaExpired={onMediaExpired} />
         )}

@@ -200,6 +200,8 @@ export function toChatMessage(item: unknown): ChatMessage | null {
     ...(reply ? { reply } : {}),
     ...(kind === 'nfm_reply' ? { flow: toFlow(payload) } : {}),
     ...(kind === 'order' ? { order: toOrder(payload) } : {}),
+    ...(kind === 'template' && text(raw.template) ? { templateName: text(raw.template) } : {}),
+    ...(kind === 'template' && text(raw.language) ? { templateLanguage: text(raw.language) } : {}),
     ...(kind === 'event' ? { event: { kind: text(payload.kind), by: text(payload.by) } } : {}),
     ...(reaction ? { reaction } : {}),
     ...(text(raw.reply_to) ? { replyTo: text(raw.reply_to) } : {}),
@@ -324,8 +326,9 @@ export function filterConversations(
 }
 
 /**
- * A template message as the backend stores it - `name (language)` plus
- * `: parameters` when it has any - split for the bubble; `null` otherwise.
+ * A template message in the backend's old storage format - `name (language)`
+ * plus `: parameters` when it had any - from before it started storing the
+ * rendered body instead. Kept to still show old messages; `null` otherwise.
  */
 export function templateParts(
   text: string

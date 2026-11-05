@@ -60,7 +60,10 @@ export function TemplateDialog({ open, onOpenChange, phone, onSend }: TemplateDi
 
   useEffect(() => {
     if (!open) return;
-    setTo(phone ?? '');
+    // `phone` is already a complete number (no "+"): marking it as one keeps
+    // the backend from treating it as a local number and gluing its default
+    // country code onto the front of it.
+    setTo(phone ? `+${phone}` : '');
     setLoading(true);
     setError(null);
     fetchTemplates()
@@ -177,7 +180,13 @@ export function TemplateDialog({ open, onOpenChange, phone, onSend }: TemplateDi
               onChange={event => setTo(event.target.value)}
               placeholder='+56 9 1234 5678'
               disabled={Boolean(phone)}
+              aria-describedby='template-phone-hint'
             />
+            {!phone ? (
+              <p id='template-phone-hint' className='text-xs text-muted-foreground'>
+                Incluye el código de país con «+» (ej. +57 para Colombia); sin él se asume Chile.
+              </p>
+            ) : null}
           </div>
 
           {loading ? (

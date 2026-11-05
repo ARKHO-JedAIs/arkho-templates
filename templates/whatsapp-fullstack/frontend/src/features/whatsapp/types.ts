@@ -140,6 +140,9 @@ export interface ChatMessage {
   status?: MessageStatus;
   /** Why it failed, when `status` is `failed`. */
   error?: string;
+  /** `kind: 'template'` only: which template was sent, for the bubble's badge. */
+  templateName?: string;
+  templateLanguage?: string;
 }
 
 /**

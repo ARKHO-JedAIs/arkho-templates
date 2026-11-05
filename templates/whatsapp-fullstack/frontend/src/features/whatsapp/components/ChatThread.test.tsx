@@ -95,4 +95,31 @@ describe('ChatThread message types', () => {
     expect(onMediaExpired).toHaveBeenCalledTimes(1);
     expect(screen.getByText('Actualizando el enlace del archivo…')).toBeInTheDocument();
   });
+
+  it('shows the template message itself, not just its name', () => {
+    const sent = message(40, {
+      type: 'template',
+      direction: 'outbound',
+      message: 'Hola, bienvenido.',
+      template: 'saludo_inicial',
+      language: 'es',
+    });
+    render(<ChatThread messages={[sent]} />);
+    expect(screen.getByText('Hola, bienvenido.')).toBeInTheDocument();
+    expect(screen.getByText('PLANTILLA · saludo_inicial')).toBeInTheDocument();
+  });
+
+  it('falls back to the old "name (language)" format for messages stored before the fix', () => {
+    // Pre-fix messages already carried `template`, just never `language` - the
+    // field whose absence is what the bubble actually keys the fallback off.
+    const sent = message(41, {
+      type: 'template',
+      direction: 'outbound',
+      message: 'recordatorio_cita (es): Diego, jueves 10:00',
+      template: 'recordatorio_cita',
+    });
+    render(<ChatThread messages={[sent]} />);
+    expect(screen.getByText('Diego, jueves 10:00')).toBeInTheDocument();
+    expect(screen.getByText('PLANTILLA · recordatorio_cita')).toBeInTheDocument();
+  });
 });

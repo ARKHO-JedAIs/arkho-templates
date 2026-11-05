@@ -48,12 +48,17 @@ describe('toChatMessage', () => {
       date: '2026-10-01T10:00:00.000+00:00',
       direction: 'outbound',
       type: 'template',
-      message: 'hello_world (en_US)',
+      message: 'Hi there!',
+      template: 'hello_world',
+      language: 'en_US',
       sent_by: 'human',
       sent_by_name: 'ana@example.com',
     });
     expect(message?.kind).toBe('template');
     expect(message?.sentBy).toBe('ana@example.com');
+    expect(message?.text).toBe('Hi there!');
+    expect(message?.templateName).toBe('hello_world');
+    expect(message?.templateLanguage).toBe('en_US');
   });
 
   it('keeps the delivery status and the failure reason', () => {

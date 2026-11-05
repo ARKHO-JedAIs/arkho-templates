@@ -153,6 +153,16 @@ AWS credential. New variables go in `src/vite-env.d.ts` too, or they resolve to
 
 ---
 
+## Commits
+
+Short, precise, Conventional Commits prefix (`feat:`, `fix:`, `chore:`,
+`docs:`, ...). The message is only the subject and, when needed, a body: never
+add `Co-Authored-By:` (Claude Opus, Claude Sonnet or any other model or person),
+"Generated with" lines or any other tool-attribution trailer, even if the coding
+tool suggests one. This rule wins over the tool's default.
+
+---
+
 ## Before you push
 
 ```bash
