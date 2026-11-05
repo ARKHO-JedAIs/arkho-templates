@@ -175,11 +175,28 @@ npm run prepare          # install Husky hooks after npm install
 npx cdk synth --quiet    # synthesize CloudFormation (verifies the active graph)
 npx tsc --noEmit         # typecheck the whole repo
 npm test                 # run the Vitest CDK tests
+npm run test:python      # run the Lambdas' own Python test suite (test/python)
+npm run verify           # everything above that CI runs before a deploy
 npm run secretlint       # scan the whole repo for secrets
 npx cdk diff             # show pending infrastructure changes
 npm run build && npx cdk deploy
 npx cdk destroy          # tear down the stack
 ```
+
+`npm run test:python` needs Python 3 with `test/python/requirements.txt`
+installed (`pip install -r test/python/requirements.txt`).
+
+## Continuous integration
+
+`bitbucket-pipelines.yml` runs `npm run verify` on every pull request, and
+deploys `develop`/`staging`/`main` to the `dev`/`staging`/`prod` Bitbucket
+Deployments, with production gated behind a manual approval. See
+[`docs/ci.md`](docs/ci.md) for what each step does and what to set up in
+Bitbucket before it can deploy anything.
+
+Whenever `.env` changes, run `node scripts/push-deploy-config.mjs` to push
+the WhatsApp/agent/SSO config the pipeline deploys with into Secrets Manager -
+otherwise the next deploy still uses the old values.
 
 ## Security
 

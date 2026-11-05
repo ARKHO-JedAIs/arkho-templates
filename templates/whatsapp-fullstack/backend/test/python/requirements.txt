@@ -1,0 +1,6 @@
+# Only what test/python needs beyond the standard library. Neither is in any
+# Lambda's own deployment bundle: boto3 ships with the Lambda runtime itself,
+# and PyJWT reaches the authorizer through a public Klayers layer (see
+# lib/stack/lambda/index.ts), resolved by ARN rather than installed by us.
+boto3==1.43.122
+PyJWT==2.12.1

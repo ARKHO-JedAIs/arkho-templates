@@ -12,8 +12,10 @@
     "build": "tsc",
     "watch": "tsc -w",
     "test": "vitest run",
+    "test:python": "python -m unittest discover -s test/python",
     "cdk": "cdk",
     "secretlint": "secretlint --maskSecrets --secretlintignore .gitignore \"**/*\"",
+    "verify": "tsc --noEmit && npm test && npm run test:python && cdk synth --quiet",
     "prepare": "node .husky/install.mjs"
   },
   "lint-staged": {

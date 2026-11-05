@@ -18,7 +18,6 @@ cdk.context.json
 # Others
 .DS_Store
 .claude/settings.local.json
-scripts
 export.zip
 export_full.zip
 export_example.zip
