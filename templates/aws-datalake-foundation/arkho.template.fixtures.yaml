@@ -1,0 +1,21 @@
+# Deterministic answers for `arkho-cli template validate --full`.
+# Author-facing tooling only - never copied into a generated project.
+#
+# Exercises the widest shape: ingestion Lambdas and the optional VPC both on,
+# so every token (including vpc_cidr) is substituted in the dry-run.
+schemaVersion: 1
+
+answers:
+  project_slug: acme-datalake
+  client_name: Acme Corp
+  environment: dev
+  aws_region: us-east-1
+  aws_account_id: "111111111111"
+  catalog_prefix: acme
+  admin_email: ops@example.com
+  raw_retention_days: 90
+  archive_retention_years: 7
+  package_manager: pnpm
+  enable_ingestion_lambdas: "true"
+  enable_vpc: "true"
+  vpc_cidr: 10.0.0.0/16

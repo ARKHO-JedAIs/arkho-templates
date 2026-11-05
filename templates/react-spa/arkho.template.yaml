@@ -6,7 +6,7 @@ title: React SPA
 description: >
   React SPA (TypeScript, Vite) wired to Cognito auth and a backend API, with
   atomic-design structure, shadcn/Radix UI, React Query, Axios, Zustand, and Zod.
-version: 1.1.0
+version: 1.1.1
 category: frontend
 tags: [react, spa, typescript, vite, cognito]
 

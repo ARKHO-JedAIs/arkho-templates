@@ -9,7 +9,7 @@ description: >
   design-token system. Cognito is optional - a mock auth provider lets the app
   run before a user pool exists. Optional user-management CRUD and an optional
   streaming chat assistant with voice and image attachments.
-version: 0.1.0
+version: 0.1.1
 category: frontend
 tags: [react, spa, typescript, vite, cognito, shadcn, tailwind, chat]
 
