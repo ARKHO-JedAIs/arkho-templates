@@ -44,11 +44,16 @@ CONVERSATION_EVENT = "CONVERSATION_EVENT"
 CONVERSATION_UPDATED = "CONVERSATION_UPDATED"
 TIMEOUT_SECONDS = 5
 
+# AppSync sends subscribers only the fields this mutation selects: a field
+# left out here (payload, message) reaches the web as null, and the web
+# drops an event without its payload - live updates silently stop.
 PUBLISH_EVENT = """
 mutation PublishEvent($id: ID!, $type: String!, $message: String, $payload: AWSJSON) {
   publishEvent(id: $id, type: $type, message: $message, payload: $payload) {
     id
     type
+    message
+    payload
     timestamp
   }
 }
