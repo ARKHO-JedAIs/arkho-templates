@@ -1,0 +1,231 @@
+# Spanish words for this template (arkho-cli --lang es). Only words: names, values and rules stay in arkho.template.yaml.
+
+schemaVersion: 1
+title: WhatsApp Fullstack
+description: >
+  Bandeja de WhatsApp en AWS: un backend serverless con CDK (base
+  aws-cdk-serverless-backend) que recibe y envía mensajes de WhatsApp a través de
+  AWS End User Messaging Social - ws-handler por SNS, conversaciones en DynamoDB,
+  plantillas aprobadas, toma de control por una persona y un canal en tiempo real
+  con AppSync - más un frontend React (frontend-base) con una sección de WhatsApp
+  en vivo. Genera ambos, o solo uno.
+
+groups:
+  Project: Proyecto
+  WhatsApp: WhatsApp
+  Agent: Agente IA
+  Frontend: Frontend
+  Access: Acceso
+  Connections: Conexiones
+
+parameters:
+  project_name:
+    prompt: "¿Nombre del proyecto?"
+    description: "Prefijo de cada recurso de AWS y paquete npm, p. ej. acme-whatsapp."
+    patternHint: "letras minúsculas, números y guiones; debe empezar con una letra (2 a 31 caracteres), p. ej. acme-whatsapp"
+
+  components:
+    prompt: "¿Qué quieres generar?"
+    choices:
+      fullstack:
+        label: "Backend + frontend"
+        hint: "backend/ y frontend/, listos para conectarse"
+      backend:
+        label: "Solo backend"
+        hint: "stack de CDK con el módulo de WhatsApp"
+      frontend:
+        label: "Solo frontend"
+        hint: "sección de WhatsApp para un backend existente con esta API"
+
+  aws_region:
+    prompt: "¿Región de AWS?"
+    description: "Dónde se despliega el backend; WhatsApp (End User Messaging Social) debe estar disponible ahí, p. ej. us-east-1."
+    patternHint: "un código de región de AWS, p. ej. us-east-1"
+
+  whatsapp_ready:
+    prompt: "¿Ya hay un número de WhatsApp conectado en AWS?"
+    description: "En End User Messaging Social. No = el README te guía para conectar uno; los ids se pueden agregar después."
+
+  whatsapp_phone_number_id:
+    prompt: "¿Id del número de teléfono?"
+    description: "End User Messaging Social > Phone numbers: el ARN del número."
+    patternHint: "el ARN del número, con el id completo de 32 caracteres, p. ej. arn:aws:social-messaging:us-east-1:123456789012:phone-number-id/0123456789abcdef0123456789abcdef"
+
+  whatsapp_business_account_id:
+    prompt: "¿Id de la cuenta de WhatsApp Business?"
+    description: "End User Messaging Social > Business accounts, p. ej. waba-0a46e718017b4acd927aa5833b4fb13e."
+    patternHint: "el id WABA completo de 32 caracteres, tal como lo muestra AWS, p. ej. waba-0a46e718017b4acd927aa5833b4fb13e"
+
+  default_phone_prefix:
+    prompt: "¿Código de país por defecto?"
+    description: "Se agrega a los números escritos sin él: 56 Chile, 51 Perú, 52 México."
+    patternHint: "1 a 3 dígitos, sin +, p. ej. 56"
+
+  auto_reply_message:
+    prompt: "¿Respuesta automática a los mensajes entrantes?"
+    description: "Se envía a cada mensaje recibido. Vacío = sin respuesta automática; tu equipo responde desde la web."
+    patternHint: "hasta 500 caracteres, sin comillas dobles ni barras invertidas"
+
+  media_retention_days:
+    prompt: "¿Cuántos días guardar los archivos de WhatsApp?"
+    description: "Días que se guardan en S3 los archivos recibidos y enviados. Vacío = para siempre."
+    patternHint: "un número entero de días (1 a 99999), o vacío para guardarlos para siempre"
+
+  agent_runtime:
+    prompt: "¿Agente de IA para responder WhatsApp?"
+    description: "Dónde corre el agente de IA. Ambos usan el mismo código del agente (backend/src/agent)."
+    choices:
+      agentcore:
+        label: "AgentCore (recomendado)"
+        hint: "runtime administrado: memoria, trazas, sesiones aisladas, escala solo"
+      lambda:
+        label: "Lambda"
+        hint: "más simple, para poco tráfico; mismo código del agente"
+      none:
+        label: "Sin agente"
+        hint: "solo la respuesta automática fija, como hoy"
+
+  agent_model:
+    prompt: "¿Modelo de Bedrock para el agente?"
+    description: "Un id de modelo o perfil de inferencia de Bedrock, p. ej. us.anthropic.claude-sonnet-4-6. Habilita el acceso en la cuenta (Bedrock > Model access)."
+    patternHint: "un id de modelo de Bedrock, p. ej. us.anthropic.claude-sonnet-4-6 o anthropic.claude-3-5-haiku-20241022-v1:0"
+
+  agent_business_description:
+    prompt: "¿Qué hace el negocio, en una o dos frases?"
+    description: "Base del prompt del agente (de qué puede hablar). Se puede editar después en Parameter Store sin desplegar."
+    patternHint: "hasta 500 caracteres, sin comillas dobles ni barras invertidas"
+
+  agent_memory:
+    prompt: "¿Qué debe recordar el agente?"
+    description: "AgentCore Memory lo guarda 30 días. Los modos de largo plazo extraen datos o resúmenes con llamadas extra al modelo."
+    choices:
+      conversation:
+        label: "La conversación"
+        hint: "recuerda la conversación actual"
+      facts:
+        label: "Datos"
+        hint: "+ datos y preferencias del cliente entre conversaciones"
+      facts_summaries:
+        label: "Datos y resúmenes"
+        hint: "+ resúmenes de las conversaciones"
+      "off":
+        label: "Nada"
+        hint: "cada mensaje se responde por separado"
+
+  agent_rate_limit_per_hour:
+    prompt: "¿Máximo de respuestas del agente por cliente por hora?"
+    description: "Pasado ese límite no se llama al agente (cuida el costo); el cliente recibe un aviso amable por hora."
+    patternHint: "un número entero de 1 a 9999, p. ej. 30"
+
+  package_manager:
+    prompt: "¿Gestor de paquetes para el frontend?"
+
+  brand_color:
+    prompt: "¿Color principal de la marca?"
+    description: "Un hex como #E30613, para botones, destacados y la pantalla de inicio de sesión; se puede cambiar después en frontend/src/styles/brand.json."
+    patternHint: "un hex de 6 dígitos con #, p. ej. #E30613 (rojo) o #0057A8 (azul)"
+
+  brand_secondary_color:
+    prompt: "¿Color secundario?"
+    description: "Un hex para la barra lateral y los botones secundarios. Vacío = un tono oscuro del color principal."
+    patternHint: "un hex de 6 dígitos con #, p. ej. #1E293B, o vacío"
+
+  login_layout:
+    prompt: "¿Diseño de la pantalla de inicio de sesión?"
+    choices:
+      basic:
+        label: "Básico"
+        hint: "una tarjeta centrada sobre un fondo suave del color de la marca"
+      brand-panel:
+        label: "Panel de marca"
+        hint: "panel con degradado del color de la marca y destacados, con el formulario al lado"
+      insights:
+        label: "Insights"
+        hint: "panel oscuro decorado (líneas, gráfico) con etiquetas de funciones, formulario simple al lado"
+      orbit:
+        label: "Órbita"
+        hint: "saludo grande con el formulario, órbitas animadas alrededor del logo al lado"
+
+  auth_provider:
+    prompt: "¿Cómo iniciarán sesión los usuarios?"
+    choices:
+      mock:
+        label: "Simulado (sin AWS)"
+        hint: "usuarios y datos de WhatsApp de demostración; cambia a cognito en .env después de desplegar"
+      cognito:
+        label: "User pool de Cognito"
+        hint: "usuarios reales, del backend desplegado"
+
+  cognito_user_pool_id:
+    prompt: "¿Id del user pool de Cognito?"
+    description: "Output UserPoolId del backend, p. ej. us-east-1_abc123. Puede quedar vacío y completarse en frontend/.env después de desplegar."
+    patternHint: "un id de user pool de Cognito como us-east-1_abc123"
+
+  cognito_user_pool_client_id:
+    prompt: "¿Id del app client de Cognito?"
+    description: "Output del app client público del backend. Puede quedar vacío y completarse en frontend/.env después de desplegar."
+    patternHint: "el id del app client público de Cognito (letras minúsculas y dígitos)"
+
+  sso_providers:
+    prompt: "¿Iniciar sesión también con Microsoft o Google?"
+    description: "Agrega esos botones junto al correo y contraseña, a través de Cognito. Requiere una app registrada en cada proveedor (README). Ninguno = solo correo y contraseña."
+    choices:
+      microsoft:
+        label: "Microsoft (Entra ID)"
+      google:
+        label: "Google"
+
+  login_otp:
+    prompt: "¿Pedir un código 2FA después de la contraseña?"
+    description: "Un código de un solo uso enviado por correo. Con el inicio de sesión simulado el código es 000000."
+
+  ses_from_email:
+    prompt: "¿Correo que envía los códigos 2FA?"
+    description: "Debe ser una identidad verificada en Amazon SES, en la misma región, p. ej. no-reply@example.com."
+    patternHint: "una dirección de correo, p. ej. no-reply@example.com"
+
+  developer_emails:
+    prompt: "¿Correos de los developers?"
+    description: "Correos separados por coma de los usuarios que el despliegue deja como developer (deben existir en Cognito; se puede completar después en DEVELOPER_EMAILS de backend/.env)."
+    patternHint: "correos separados por coma, p. ej. ana@example.com,luis@example.com"
+
+
+  api_base_url:
+    prompt: "¿URL de la API del backend?"
+    description: "Output RestApiUrl del backend. Déjalo vacío hasta desplegar el backend; después complétalo en frontend/.env."
+
+  appsync_url:
+    prompt: "¿URL de tiempo real (AppSync)?"
+    description: "Output WhatsAppEventsGraphqlUrl del backend, para las actualizaciones en vivo. Puede quedar vacío."
+
+nextSteps:
+  - "# Abre la carpeta del proyecto generado; README.md tiene la guía completa, incluido cómo conectar un número de WhatsApp"
+  - "## BACKEND (si se generó) - todo local, no se despliega nada"
+  - "cd backend   # Entra al backend"
+  - "npm install   # Instala las dependencias (sáltalo si el CLI ya las instaló)"
+  - "npm test   # Corre los tests de CDK"
+  - "npx cdk synth --quiet   # Genera la plantilla de CloudFormation sin desplegar"
+  - "cd backend && npm install && npm test && npx cdk synth --quiet   # Backend, todo en una línea"
+  - "## FRONTEND (si se generó) - con el inicio de sesión simulado funciona con datos de demostración"
+  - "cd frontend   # Entra al frontend"
+  - "{{ package_manager }} install   # Instala las dependencias (sáltalo si el CLI ya las instaló)"
+  - "{{ package_manager }} run dev   # Levántalo en http://localhost:5173 (WhatsApp en /whatsapp)"
+  - "cd frontend && {{ package_manager }} install && {{ package_manager }} run dev   # Frontend, todo en una línea"
+  - "## INICIO DE SESIÓN CON MICROSOFT / GOOGLE (si se eligió)"
+  - "# Despliega una vez; el output CognitoIdpRedirectUri es la redirect URI que debes registrar"
+  - "# Microsoft: portal de Azure > Entra ID > App registrations > New (Web)"
+  - "# Agrega la redirect URI; anota el Client ID y el Tenant ID; crea un Client secret"
+  - "# backend/.env: ENTRA_ID_CLIENT_ID, ENTRA_ID_CLIENT_SECRET, ENTRA_ID_ISSUER_URL"
+  - "# Issuer URL: https://login.microsoftonline.com/<tenant-id>/v2.0"
+  - "# Google: Cloud Console > APIs & Services > OAuth consent screen"
+  - "# Credentials > OAuth client ID (Web application), con la misma redirect URI"
+  - "# backend/.env: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET"
+  - "# Vuelve a desplegar (npx cdk deploy en backend/) para crear los proveedores"
+  - "# frontend/.env: VITE_COGNITO_DOMAIN = output CognitoDomainUrl"
+  - "## AGENTE DE IA (si se eligió) - backend/src/agent, se despliega con el backend"
+  - "# Consola de Bedrock > Model access: primero habilita el modelo de AGENT_MODEL_ID (backend/.env)"
+  - "# Docker debe estar corriendo para npx cdk deploy: la imagen del agente (ARM64) se construye al desplegar"
+  - "# Prompt base: Parameter Store, output AgentPromptParameterName (JSON; basePrompt, greeting...)"
+  - "# Edítalo ahí, sin desplegar; más adelante habrá una pantalla web para esto"
+  - "# Para apagarlo: pon enabled en false en ese parámetro (responde la respuesta automática fija)"
+  - "# Para quitarlo: AGENT_RUNTIME=none en backend/.env, luego npx cdk deploy"

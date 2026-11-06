@@ -1,0 +1,169 @@
+# Deploy steps run under the Bitbucket deployments named dev, staging, and prod.
+# A new repository ships with Test, Staging, and Production, so those three must
+# be renamed in Repository settings > Deployments before any deploy step can
+# resolve its environment. See docs/ci.md.
+image: node:24
+
+x-install-aws-cli: &install-aws-cli |
+  # python-is-python3: Debian only ships `python3`, but `npm run test:python`
+  # (and every contributor's local machine) calls plain `python`.
+  apt-get update && apt-get install -y curl gnupg unzip python3 python3-pip python-is-python3
+  # $(uname -m), not a hardcoded x86_64: these steps run on ARM64 hardware (see
+  # `runtime` below), where AWS CLI's own zip is named
+  # awscli-exe-linux-aarch64.zip.
+  curl -s "https://awscli.amazonaws.com/awscli-exe-linux-$(uname -m).zip" -o "awscliv2.zip"
+  unzip -q awscliv2.zip && ./aws/install && rm -rf aws awscliv2.zip
+  aws --version
+
+# Static access keys, supplied by the Bitbucket Deployment as
+# AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY and picked up from the environment by
+# the standard credential chain.
+
+x-resolve-branch-env: &resolve-branch-env |
+  case "$BITBUCKET_BRANCH" in
+    develop) export ENV_NAME=dev ;;
+    staging) export ENV_NAME=staging ;;
+    main)    export ENV_NAME=prod ;;
+    *) echo "Branch '$BITBUCKET_BRANCH' is not mapped to a deployable environment." >&2; exit 1 ;;
+  esac
+  export AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+  # Fixed here, not left as a Bitbucket variable: it never changes across
+  # dev/staging/prod (only ENV_NAME does), and a wrong value in the Bitbucket UI
+  # (the repository's own name is an easy mix-up) silently deploys a second,
+  # unrelated stack instead of updating `<ProjectName><EnvName>Stack`.
+  export PROJECT_NAME={{ project_name }}
+
+x-ensure-bootstrap: &ensure-bootstrap |
+  aws cloudformation describe-stacks --stack-name CDKToolkit --region $AWS_REGION >/dev/null 2>&1 \
+    || npx cdk bootstrap aws://$AWS_ACCOUNT_ID/$AWS_REGION
+
+definitions:
+  caches:
+    npm: ~/.npm
+  services:
+    # Default Docker service memory (1024MB) is too tight once synth/test
+    # bundles the agent's DockerImageAsset (ECR asset) in the same run.
+    docker:
+      memory: 3072
+  steps:
+    - step: &verify
+        name: Verify
+        # Default step memory (4096MB) is shared with the docker service above
+        # (3072MB reserved for it) - too little left for tsc/vitest/unittest to
+        # run alongside building the container image without OOMing. 2x doubles
+        # the total to 8192MB.
+        size: 2x
+        # With the AI agent (AGENT_RUNTIME agentcore or lambda), `cdk synth`
+        # builds its DockerImageAsset - linux/arm64, the only architecture
+        # Bedrock AgentCore Runtime accepts. Bitbucket Cloud's default x86_64
+        # runners cannot build that without QEMU emulation, which needs
+        # --privileged (unavailable on cloud runners), so this runs on real ARM64
+        # hardware instead (Standard/Premium Bitbucket plan). Without the agent
+        # nothing is built for a given architecture, so ARM changes nothing.
+        runtime:
+          cloud:
+            arch: arm
+        caches:
+          - node
+        services:
+          # Bitbucket only mounts the Docker CLI into the step's container when
+          # a step declares this service - without it `docker` does not exist
+          # at all, which breaks DockerImageAsset's bundling.
+          - docker
+        script:
+          # python-is-python3: Debian only ships `python3`; `npm run test:python`
+          # calls plain `python`, same as everyone's local machine.
+          - apt-get update && apt-get install -y python3 python3-pip python-is-python3
+          - pip3 install --break-system-packages -q -r test/python/requirements.txt
+          # Placeholders only. Resource names in the synthesized template come
+          # from these two variables, and this step never contacts AWS.
+          - export ENV_NAME=dev
+          - export PROJECT_NAME={{ project_name }}
+          - npm ci
+          - npm run verify
+          - npm run secretlint
+
+    # Read-only preview. Runs automatically so a reviewer can read the diff
+    # before triggering the manual deploy that follows it.
+    - step: &diff-step
+        name: CDK Diff
+        size: 2x
+        runtime:
+          cloud:
+            arch: arm
+        caches:
+          - node
+        services:
+          - docker
+        script:
+          - *install-aws-cli
+          - pip3 install --break-system-packages -q -r test/python/requirements.txt
+          - *resolve-branch-env
+          - npm ci
+          # Plain `npm run verify`, not wrapped: it runs the Python test suite,
+          # which must stay hermetic - the real WHATSAPP_ADMIN_GROUP merged in
+          # by with-deploy-config.mjs would make is_allowed() reject every
+          # test's unprivileged fake caller. Only `cdk diff`/`cdk deploy`
+          # actually need the real config (WhatsApp/agent/SSO - see
+          # scripts/with-deploy-config.mjs and docs/ci.md).
+          - npm run verify
+          - node scripts/with-deploy-config.mjs npx cdk diff
+
+    - step: &deploy-step
+        name: Deploy
+        size: 2x
+        runtime:
+          cloud:
+            arch: arm
+        caches:
+          - node
+        services:
+          - docker
+        script:
+          - *install-aws-cli
+          - pip3 install --break-system-packages -q -r test/python/requirements.txt
+          - *resolve-branch-env
+          - npm ci
+          - npm run verify
+          - *ensure-bootstrap
+          # CDK has no saved-plan artifact, so the deploy re-synthesizes instead
+          # of consuming a reviewed plan. The diff is printed as the last thing
+          # in the log before the change is applied.
+          - node scripts/with-deploy-config.mjs npx cdk diff
+          - node scripts/with-deploy-config.mjs npx cdk deploy --require-approval never
+
+pipelines:
+  pull-requests:
+    '**':
+      - step: *verify
+
+  branches:
+    develop:
+      - step:
+          <<: *deploy-step
+          name: Deploy to Dev
+          deployment: dev
+
+    staging:
+      - step:
+          <<: *deploy-step
+          name: Deploy to Staging
+          deployment: staging
+
+    # Production is the only environment with a manual gate. The first step of a
+    # Bitbucket pipeline cannot be manual, so the diff runs automatically and the
+    # deploy waits for an explicit trigger.
+    main:
+      - step:
+          <<: *diff-step
+          name: Diff (Production)
+          # `environment` and not `deployment`: Bitbucket rejects a pipeline that
+          # references the same deployment twice, and this step only reads. It
+          # still gets the prod environment's variables; the deploy below keeps
+          # the deployment, its lock, and the tracking entry.
+          environment: prod
+      - step:
+          <<: *deploy-step
+          name: Deploy to Production (manual)
+          deployment: prod
+          trigger: manual

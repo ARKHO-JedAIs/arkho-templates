@@ -1,0 +1,2 @@
+# Runs from the git root; lint-staged reads its config from the backend folder.
+cd "$(dirname "$0")/.." && npx lint-staged

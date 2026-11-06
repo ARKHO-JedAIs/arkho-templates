@@ -1,0 +1,33 @@
+name: CI
+
+# Guards the baseline the template ships with: zero lint errors, zero warnings,
+# a clean typecheck and a working build. Without this, the first commit that
+# breaks any of them does so silently.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      # `npm install`, not `npm ci`: the template ships without a lockfile, so a
+      # freshly generated project has none until its first install. Once you
+      # commit package-lock.json, switch this to `npm ci` for reproducible runs.
+      - run: npm install --no-audit --no-fund
+
+      # Runs ESLint with the Prettier plugin, so formatting is covered here too.
+      - run: npm run lint
+
+      - run: npm test
+
+      # `build` is `tsc -b && vite build`, so this typechecks as well.
+      - run: npm run build

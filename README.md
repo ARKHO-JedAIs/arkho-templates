@@ -15,6 +15,7 @@ version produced it.
 | [`aws-cdk-serverless-backend`](templates/aws-cdk-serverless-backend/) | `aws-cdk-serverless-backend@1.1.1` | Serverless backend on CDK v2 (TypeScript) — Cognito User Pool with optional Microsoft Entra ID (OIDC) federation, single-table DynamoDB, private SSE-S3 bucket, Python 3.12 Lambdas on a shared layer, JWT Lambda authorizer, plus a library of reusable service constructs (REST API, Glue, WAF, GuardDuty, CloudTrail, Budgets, Access Analyzer, GitHub OIDC). |
 
 | [`whatsapp-fullstack`](templates/whatsapp-fullstack/) | unreleased (`0.1.0`) | WhatsApp inbox on AWS: `aws-cdk-serverless-backend` plus a WhatsApp module (End User Messaging Social, SNS ws-handler, DynamoDB, templates, human takeover, AppSync realtime) and `frontend-base` with a live WhatsApp section. Backend + frontend, or only one. |
+| [`whatsapp-agent-fullstack`](templates/whatsapp-agent-fullstack/) | unreleased (`0.1.0`) | `whatsapp-fullstack` plus an AI agent configured from the web: roles and permissions (hidden developer role, admin, member, Entra ID as member, per-permission realtime) and the Agente IA screen, a prompt manager on Amazon Bedrock Prompt Management (instructions, model, variables, versions with author, rollback, AWS console sync). |
 
 > Latest versions are the source of truth in git tags: `git tag -l '<name>@*'`.
 

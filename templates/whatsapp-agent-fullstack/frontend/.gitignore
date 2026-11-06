@@ -1,0 +1,27 @@
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+# Local environment - never commit real values.
+.env
+.env.*
+!.env.example
+node_modules
+build
+dist
+dist-ssr
+*.local
+.claude/settings.local.json
+
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+build

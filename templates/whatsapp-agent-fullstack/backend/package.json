@@ -1,0 +1,41 @@
+{
+  "name": "{{ project_name }}-backend",
+  "version": "0.1.0",
+  "bin": {
+    "main": "bin/main.js"
+  },
+  "engines": {
+    "node": ">=24.0.0",
+    "npm": ">=11.0.0"
+  },
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc -w",
+    "test": "vitest run",
+    "test:python": "python -m unittest discover -s test/python",
+    "cdk": "cdk",
+    "secretlint": "secretlint --maskSecrets --secretlintignore .gitignore \"**/*\"",
+    "verify": "tsc --noEmit && npm test && npm run test:python && cdk synth --quiet",
+    "prepare": "node .husky/install.mjs"
+  },
+  "lint-staged": {
+    "*": "secretlint --secretlintignore .gitignore --maskSecrets"
+  },
+  "devDependencies": {
+    "@secretlint/secretlint-rule-preset-recommend": "^9.3.4",
+    "@types/dotenv": "^6.1.1",
+    "@types/node": "^24.10.1",
+    "aws-cdk": "^2.1126.0",
+    "dotenv": "^17.3.1",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.1.2",
+    "secretlint": "^9.3.4",
+    "ts-node": "^10.9.2",
+    "typescript": "~5.9.3",
+    "vitest": "^5.0.5"
+  },
+  "dependencies": {
+    "aws-cdk-lib": "^2.258.1",
+    "constructs": "^10.6.0"
+  }
+}

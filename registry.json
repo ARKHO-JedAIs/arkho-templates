@@ -41,6 +41,14 @@
       "description": "WhatsApp inbox on AWS: CDK backend that receives and sends WhatsApp messages through End User Messaging Social (SNS ws-handler, DynamoDB conversations, approved templates, human takeover, AppSync realtime) plus a React frontend with a live WhatsApp section. Generate backend + frontend, or only one of them.",
       "path": "templates/whatsapp-fullstack",
       "status": "available"
+    },
+    {
+      "name": "whatsapp-agent-fullstack",
+      "type": "project:fullstack",
+      "categories": ["whatsapp", "aws", "cdk", "serverless", "react", "appsync", "cognito", "end-user-messaging", "bedrock", "prompt-management", "agentcore", "rbac"],
+      "description": "whatsapp-fullstack plus an AI agent configured from the web: roles and permissions (hidden developer role, admin, member, Entra ID users as member, per-permission realtime) and the Agente IA screen, a prompt manager on Amazon Bedrock Prompt Management (instructions, model, inference parameters, variables, drafts, versions with author, rollback, AWS console sync).",
+      "path": "templates/whatsapp-agent-fullstack",
+      "status": "available"
     }
   ]
 }

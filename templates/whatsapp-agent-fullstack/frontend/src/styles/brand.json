@@ -1,0 +1,6 @@
+{
+  "primary": "{{ brand_color }}",
+  "secondary": "{{ brand_secondary_color }}",
+  "logo": "",
+  "logoOnDark": ""
+}
