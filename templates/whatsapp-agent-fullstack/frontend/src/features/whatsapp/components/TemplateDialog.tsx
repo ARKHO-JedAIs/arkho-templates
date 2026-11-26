@@ -14,6 +14,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ATTACHMENT_ACCEPT, checkAttachment } from '../services/attachments';
 import { fillTemplate, isSendable, templateNeeds } from '../services/mappers';
+import { ListRowsSkeleton } from '@/components/skeletons';
 import { fetchTemplates } from '../services/whatsappService';
 import type { SendTemplateInput, WhatsAppTemplate } from '../types';
 
@@ -190,10 +191,7 @@ export function TemplateDialog({ open, onOpenChange, phone, onSend }: TemplateDi
           </div>
 
           {loading ? (
-            <p className='flex items-center gap-2 text-sm text-muted-foreground'>
-              <Loader2 className='h-4 w-4 animate-spin' aria-hidden />
-              Cargando plantillas…
-            </p>
+            <ListRowsSkeleton rows={3} label='Cargando plantillas' />
           ) : error ? (
             <p className='text-sm text-destructive'>{error}</p>
           ) : templates.length === 0 ? (

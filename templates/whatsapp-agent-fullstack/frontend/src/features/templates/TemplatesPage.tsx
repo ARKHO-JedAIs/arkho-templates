@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from '@tanstack/react-router';
-import { FileText, Loader2, Plus, RefreshCw, Search } from 'lucide-react';
+import { FileText, Plus, RefreshCw, Search } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -12,6 +12,7 @@ import {
 } from '@/features/whatsapp/services/whatsappService';
 import type { WhatsAppTemplate } from '@/features/whatsapp/types';
 import { cn } from '@/lib/utils';
+import { ListRowsSkeleton } from '@/components/skeletons';
 import { QualityLabel, StatusBadge } from './components/StatusBadge';
 import { TemplateDetailSheet } from './components/TemplateDetailSheet';
 import { TEMPLATE_PATHS, templateEditPath } from './paths';
@@ -218,10 +219,7 @@ export function TemplatesPage() {
 
       <div className='overflow-hidden rounded-2xl border border-border bg-card'>
         {loading && templates.length === 0 ? (
-          <p className='flex items-center justify-center gap-2 px-4 py-12 text-sm text-foreground-secondary'>
-            <Loader2 className='h-4 w-4 animate-spin' aria-hidden />
-            Cargando plantillas…
-          </p>
+          <ListRowsSkeleton label='Cargando plantillas' />
         ) : error ? (
           <div className='flex flex-col items-center gap-3 px-4 py-12 text-center'>
             <p className='text-sm text-destructive-strong'>{error}</p>

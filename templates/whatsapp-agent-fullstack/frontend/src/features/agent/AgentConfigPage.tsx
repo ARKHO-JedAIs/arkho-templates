@@ -21,6 +21,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
@@ -192,10 +193,10 @@ export function AgentConfigPage() {
 
   if (!state || !form) {
     return (
-      <div className='flex flex-col gap-4 animate-pulse'>
-        <div className='h-8 w-48 rounded bg-muted' />
-        <div className='h-4 w-80 rounded bg-muted' />
-        <div className='h-72 rounded-xl bg-muted' />
+      <div className='flex flex-col gap-4' role='status' aria-label='Cargando agente'>
+        <Skeleton className='h-8 w-48' />
+        <Skeleton className='h-4 w-80' />
+        <Skeleton className='h-72 rounded-xl' />
       </div>
     );
   }

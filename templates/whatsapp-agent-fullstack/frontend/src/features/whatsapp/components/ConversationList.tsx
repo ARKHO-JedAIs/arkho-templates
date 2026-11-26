@@ -3,6 +3,7 @@ import { Loader2, Search } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useConversationSearch } from '../hooks/useConversationSearch';
 import { type InboxFilter, filterConversations, isWindowOpen } from '../services/mappers';
+import { AvatarRowsSkeleton } from '@/components/skeletons';
 import type { Conversation } from '../types';
 import { ContactAvatar } from './ContactAvatar';
 
@@ -83,19 +84,9 @@ export function ConversationList({
 
   let body: ReactNode;
   if (search.searching && !search.results) {
-    body = (
-      <p className='flex items-center justify-center gap-2 py-10 text-sm text-foreground-secondary'>
-        <Loader2 className='h-4 w-4 animate-spin' aria-hidden />
-        Buscando…
-      </p>
-    );
+    body = <AvatarRowsSkeleton label='Buscando conversaciones' />;
   } else if (loading && conversations.length === 0) {
-    body = (
-      <p className='flex items-center justify-center gap-2 py-10 text-sm text-foreground-secondary'>
-        <Loader2 className='h-4 w-4 animate-spin' aria-hidden />
-        Cargando…
-      </p>
-    );
+    body = <AvatarRowsSkeleton label='Cargando conversaciones' />;
   } else if (conversations.length === 0) {
     body = (
       <p className='px-4 py-10 text-center text-sm text-foreground-secondary'>

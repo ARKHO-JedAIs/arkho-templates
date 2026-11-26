@@ -24,6 +24,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { isMediaKind, templateParts } from '../services/mappers';
+import { ChatSkeleton } from '@/components/skeletons';
 import type { ChatMessage, MessageStatus } from '../types';
 import { formatMessage } from './formatMessage';
 import {
@@ -219,10 +220,7 @@ export function ChatThread({
         aria-busy={loading}
       >
         {loading && messages.length === 0 ? (
-          <p className='mx-auto flex w-fit items-center justify-center gap-2 rounded-lg bg-card px-3 py-2 text-sm text-foreground-secondary shadow-sm'>
-            <Loader2 className='h-4 w-4 animate-spin' aria-hidden />
-            Cargando mensajes…
-          </p>
+          <ChatSkeleton />
         ) : error ? (
           <div className='flex flex-col items-center gap-3 py-10 text-center'>
             <p className='flex items-start gap-2 rounded-lg bg-card px-3 py-2 text-sm text-destructive-strong shadow-sm'>

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
 import { ArrowLeft, FilePen, FilePlus2, Loader2, Upload } from 'lucide-react';
 import { toast } from 'sonner';
+import { FormSkeleton } from '@/components/skeletons';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -395,10 +396,7 @@ export function CreateTemplatePage() {
           Plantillas
         </Link>
         {loadingOriginal ? (
-          <p className='flex items-center gap-2 text-sm text-foreground-secondary'>
-            <Loader2 className='h-4 w-4 animate-spin' aria-hidden />
-            Cargando la plantilla…
-          </p>
+          <FormSkeleton fields={5} label='Cargando la plantilla' />
         ) : (
           <p className='text-sm text-destructive-strong'>
             {loadError ?? 'No encontramos esa plantilla.'}

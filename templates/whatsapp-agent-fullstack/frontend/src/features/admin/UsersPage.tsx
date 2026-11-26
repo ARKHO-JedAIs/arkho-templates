@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
 import {
   Table,
@@ -203,27 +204,27 @@ export function UsersPage() {
             </TableHeader>
             <TableBody>
               {Array.from({ length: 5 }, (_, i) => (
-                <TableRow key={i} className='animate-pulse'>
+                <TableRow key={i}>
                   <TableCell>
                     <div className='flex flex-col gap-1.5'>
-                      <div className='h-4 w-32 rounded bg-muted' />
-                      <div className='h-3 w-40 rounded bg-muted' />
+                      <Skeleton className='h-4 w-32 rounded' />
+                      <Skeleton className='h-3 w-40 rounded' />
                     </div>
                   </TableCell>
                   <TableCell>
-                    <div className='h-5 w-20 rounded-full bg-muted' />
+                    <Skeleton className='h-5 w-20 rounded-full' />
                   </TableCell>
                   <TableCell>
-                    <div className='h-3.5 w-16 rounded bg-muted' />
+                    <Skeleton className='h-3.5 w-16 rounded' />
                   </TableCell>
                   <TableCell>
-                    <div className='h-5 w-9 rounded-full bg-muted' />
+                    <Skeleton className='h-5 w-9 rounded-full' />
                   </TableCell>
                   <TableCell>
                     <div className='flex items-center justify-end gap-1'>
-                      <div className='h-9 w-9 rounded-md bg-muted' />
-                      <div className='h-9 w-9 rounded-md bg-muted' />
-                      <div className='h-9 w-9 rounded-md bg-muted' />
+                      <Skeleton className='h-9 w-9 rounded-md' />
+                      <Skeleton className='h-9 w-9 rounded-md' />
+                      <Skeleton className='h-9 w-9 rounded-md' />
                     </div>
                   </TableCell>
                 </TableRow>
