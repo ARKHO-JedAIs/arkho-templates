@@ -23,13 +23,14 @@ so SQS retries the job; after two attempts it lands in the dead-letter queue.
 """
 import json
 import os
+import time
 from traceback import format_exc
 
 import boto3
 from botocore.config import Config
 
 from common import get_logger
-from common.whatsapp import agent, config, messaging, realtime, store
+from common.whatsapp import agent, config, messaging, realtime, store, usage
 
 logger = get_logger(__name__)
 
@@ -157,8 +158,28 @@ def fail(job: dict) -> None:
         logger.error(format_exc())
 
 
+# What process() returns for a turn the agent took, as "Uso y costos" counts it.
+RECORDED_OUTCOMES = {"answered": "answered", "handoff": "handoff", "blocked": "blocked", "blocked_handoff": "handoff", "failed": "failed"}
+
+
 def process(job: dict) -> str:
-    """Answers one job; returns what happened, for the log and the tests."""
+    """Answers one job and records the turn for the usage page; returns what happened."""
+    turn = {"started": time.perf_counter(), "usage": None}
+    outcome = answer_job(job, turn)
+    recorded = RECORDED_OUTCOMES.get(outcome)
+    if recorded:
+        usage.record(
+            usage.AGENT_TURN,
+            outcome=recorded,
+            model=os.environ.get("AGENT_MODEL_ID", ""),
+            duration_ms=int((time.perf_counter() - turn["started"]) * 1000),
+            **usage.tokens_of(turn["usage"]),
+        )
+    return outcome
+
+
+def answer_job(job: dict, turn: dict) -> str:
+    """Answers one job; ``turn`` collects what the usage record needs."""
     phone = job["phone"]
     conversation = store.get_conversation(phone)
     if store.is_answered_by_person(conversation):
@@ -166,6 +187,7 @@ def process(job: dict) -> str:
     if not store.window_open(conversation):
         return "skipped_window"
 
+    turn["started"] = time.perf_counter()
     try:
         result = invoke_agent(job)
     except Exception:  # noqa: BLE001
@@ -174,6 +196,7 @@ def process(job: dict) -> str:
         fail(job)
         return "failed"
 
+    turn["usage"] = result.get("usage")
     status = str(result.get("status") or "")
     reply = str(result.get("response") or "").strip()
     handoff = result.get("handoff") is True

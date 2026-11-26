@@ -338,6 +338,31 @@ At deploy they become the Parameter Store parameter the Lambdas read.
 Inbound notifications that still fail after Lambda's retries are kept 14 days
 in the `WhatsAppDeadLetterQueueUrl` queue: fix the cause, then redrive them.
 
+## Dashboard and usage
+
+The **Dashboard** page (sidebar and title) is a set of tabs; the template ships
+one, **Uso y costos**: agent queries by outcome (answered, off-topic, handed to
+a person, failed), average response time, tokens, messages, templates sent and
+the estimated USD per service (Bedrock, AgentCore, WhatsApp, and Polly and
+Transcribe once the project uses voice), per day and against the previous
+period. A project adds its own tab with one entry in
+`frontend/src/features/dashboard/tabs.ts`; we configure those per client.
+
+- Every billable event is one item of the `whatsapp-usage` table (partition =
+  local day, kept 400 days): `ws-handler` records received messages,
+  `agent-worker` each agent turn (outcome, tokens, duration), and
+  `send-template` and every outgoing message the rest. Writing is best effort:
+  a failed write never breaks an answer.
+- The costs are **estimates** from the list prices in
+  `common/whatsapp/usage.py` (`PRICES`, with the date they were checked, shown
+  on the page), for a Chilean number; they are not the AWS or Meta bill.
+  Update `PRICES` for other countries. The model priced is `AGENT_MODEL_ID` of
+  the deploy, so a model chosen later from the prompt manager is still priced
+  as the deployed one.
+- Days use `USAGE_TIMEZONE` (default `America/Santiago`).
+- `GET /whatsapp/usage` needs the `dashboard` page permission, which the admin
+  role has by default.
+
 ## Backend API (all behind the Cognito authorizer)
 
 Every route requires the `WHATSAPP_ADMIN_GROUP` group (403 otherwise), unless

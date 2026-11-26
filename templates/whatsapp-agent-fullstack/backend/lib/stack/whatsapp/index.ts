@@ -77,6 +77,11 @@ export interface WhatsAppFunction {
   routes?: { path: string; method: string }[];
   tables: 'read' | 'write';
   sends?: boolean;
+  /**
+   * The usage table ("Uso y costos"): `read` serves the page; a function that
+   * `sends` records its messages without asking, so `write` is implied.
+   */
+  usage?: 'read' | 'write';
   readsTemplates?: boolean;
   /** Creates, edits and deletes templates (and their header samples). */
   managesTemplates?: boolean;
@@ -116,6 +121,7 @@ const FUNCTIONS: WhatsAppFunction[] = [
     managesTemplates: true,
     media: 'read-upload',
   },
+  { name: 'usage-metrics', description: 'Usage of the assistant and its estimated cost, per day', routes: [{ path: '/whatsapp/usage', method: 'GET' }], tables: 'read', usage: 'read' },
   { name: 'put-control', description: 'Hands a conversation to a person or back to the automatic replies', routes: [{ path: '/whatsapp/control', method: 'PUT' }], tables: 'write' },
 ];
 
@@ -163,6 +169,7 @@ export function schemaFor(adminGroup: string, lambdaAuthorizer = false): string 
  */
 export class WhatsAppFactory extends Construct {
   public readonly conversationsTable: DynamoConstruct;
+  public readonly usageTable: DynamoConstruct;
   public readonly messagesTable: DynamoConstruct;
   public readonly topic: SnsConstruct;
   public readonly deadLetterQueue: sqs.Queue;
@@ -206,6 +213,19 @@ export class WhatsAppFactory extends Construct {
             sortKey: { name: 'last_message_at', type: dynamodb.AttributeType.STRING },
           },
         ],
+      },
+    });
+
+    // One item per billable event (an agent answer, a message, a template),
+    // partitioned by local day; DynamoDB removes them after 400 days.
+    this.usageTable = new DynamoConstruct(this, 'UsageTable', {
+      params,
+      tableConfig: {
+        tableName: `${prefix}-whatsapp-usage`,
+        partitionKey: { name: 'day', type: dynamodb.AttributeType.STRING },
+        sortKey: { name: 'id', type: dynamodb.AttributeType.STRING },
+        billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+        timeToLiveAttribute: 'expires_at',
       },
     });
 
@@ -451,6 +471,7 @@ export class WhatsAppFactory extends Construct {
    */
   public addFunction(definition: WhatsAppFunction, environment: Record<string, string> = {}): LambdaConstruct {
     const { whatsapp } = this;
+    const usageAccess = definition.usage ?? (definition.sends ? 'write' : undefined);
     const fn = new LambdaConstruct(this, `${definition.name}-lambda`, {
       functionName: `${this.prefix}-whatsapp-${definition.name}`,
       description: definition.description,
@@ -462,6 +483,7 @@ export class WhatsAppFactory extends Construct {
       environment: {
         WHATSAPP_CONVERSATIONS_TABLE_NAME: this.conversationsTable.tableName,
         WHATSAPP_MESSAGES_TABLE_NAME: this.messagesTable.tableName,
+        ...(usageAccess ? { WHATSAPP_USAGE_TABLE_NAME: this.usageTable.tableName } : {}),
         WHATSAPP_CONFIGURATION_PARAMETER_NAME: this.parameters.getParameterName(CONFIGURATION_KEY),
         WHATSAPP_ADMIN_GROUP: whatsapp.adminGroup,
         APPSYNC_GRAPHQL_URL: this.eventsApi.graphqlUrl,
@@ -485,6 +507,8 @@ export class WhatsAppFactory extends Construct {
       this.conversationsTable.table.grantReadData(fn.function);
       this.messagesTable.table.grantReadData(fn.function);
     }
+    if (usageAccess === 'write') this.usageTable.table.grantWriteData(fn.function);
+    if (usageAccess === 'read') this.usageTable.table.grantReadData(fn.function);
     this.parameters.grantRead(fn.function, CONFIGURATION_KEY);
     this.eventsApi.grantMutation(fn.function, PUBLISH_EVENT_FIELD);
     if (definition.sends) fn.function.addToRolePolicy(this.statements.send);

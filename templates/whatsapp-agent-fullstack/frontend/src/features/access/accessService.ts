@@ -25,7 +25,7 @@ const mockOverview: AccessOverview = {
       system: true,
       locked: true,
       permissions: {
-        menu: ['whatsapp', 'templates', 'users', 'agent', 'access'],
+        menu: ['dashboard', 'whatsapp', 'templates', 'users', 'agent', 'access'],
         actions: [
           'whatsapp.reply',
           'templates.manage',
@@ -42,7 +42,7 @@ const mockOverview: AccessOverview = {
       system: true,
       locked: false,
       permissions: {
-        menu: ['whatsapp', 'templates', 'users', 'access'],
+        menu: ['dashboard', 'whatsapp', 'templates', 'users', 'access'],
         actions: ['whatsapp.reply', 'templates.manage', 'users.manage', 'access.manage'],
       },
     },
@@ -56,6 +56,7 @@ const mockOverview: AccessOverview = {
     },
   ],
   menu: [
+    { id: 'dashboard', label: 'Dashboard' },
     { id: 'whatsapp', label: 'Bandeja WhatsApp' },
     { id: 'templates', label: 'Plantillas' },
     { id: 'users', label: 'Usuarios' },

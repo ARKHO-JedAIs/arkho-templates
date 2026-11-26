@@ -38,6 +38,7 @@ ROLE_LABELS = {
 
 # Pages of the sidebar. A project adds its own pages with register_menu().
 MENUS = {
+    "dashboard": "Dashboard",
     "whatsapp": "Bandeja WhatsApp",
     "templates": "Plantillas",
     "users": "Usuarios",
@@ -65,7 +66,7 @@ ACTIONS = {
 DEFAULT_PERMISSIONS = {
     # The agent screen (prompt manager) is for developers only, for now.
     ADMIN: {
-        "menu": ["whatsapp", "templates", "users", "access"],
+        "menu": ["dashboard", "whatsapp", "templates", "users", "access"],
         "actions": [
             "whatsapp.reply",
             "whatsapp.agent_toggle",

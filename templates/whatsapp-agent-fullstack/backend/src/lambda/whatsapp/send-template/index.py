@@ -3,7 +3,7 @@ from traceback import format_exc
 from botocore.exceptions import ClientError
 
 from common import create_error_response, create_success_response, get_logger, with_cors
-from common.whatsapp import config, http, media, messaging, realtime, store
+from common.whatsapp import config, http, media, messaging, realtime, store, usage
 
 logger = get_logger(__name__)
 
@@ -193,6 +193,7 @@ def handler(event, context):
         status, code, message = messaging.client_error(error)
         return create_error_response(message, status if status != 404 else 502, code)
 
+    usage.record(usage.TEMPLATE, category=str(template.get("category") or ""), template=name)
     message_text = render_message(template, text, file is not None, parameters)
     try:
         sent = store.save_message(

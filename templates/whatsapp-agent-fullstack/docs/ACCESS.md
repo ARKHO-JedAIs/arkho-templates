@@ -45,7 +45,7 @@ El menú de la barra lateral y las rutas siguen estos permisos: una página apar
 
 ## Permisos
 
-**Páginas (`menu`):** `whatsapp`, `templates`, `users`, `agent`, `agent_advanced` y `access`.
+**Páginas (`menu`):** `dashboard`, `whatsapp`, `templates`, `users`, `agent`, `agent_advanced` y `access`.
 
 **Acciones (`actions`):**
 

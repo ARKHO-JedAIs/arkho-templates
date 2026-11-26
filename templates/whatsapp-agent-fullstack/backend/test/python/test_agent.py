@@ -302,6 +302,28 @@ class AgentWorkerTest(unittest.TestCase):
         self.mocks["announce_message"].assert_called_once()
         self.mocks["hand_to_person"].assert_not_called()
 
+    def test_a_turn_is_recorded_with_its_outcome_and_tokens(self):
+        with mock.patch.object(agent_worker.usage, "record") as record:
+            self.run_job()
+        kind = record.call_args.args[0]
+        fields = record.call_args.kwargs
+        self.assertEqual(kind, agent_worker.usage.AGENT_TURN)
+        self.assertEqual(fields["outcome"], "answered")
+        self.assertEqual(fields["input_tokens"], 10)
+        self.assertGreaterEqual(fields["duration_ms"], 0)
+
+    def test_a_failed_turn_is_recorded_as_failed(self):
+        self.mocks["invoke_agent"].side_effect = RuntimeError("down")
+        with mock.patch.object(agent_worker.usage, "record") as record:
+            self.assertEqual(self.run_job(), "failed")
+        self.assertEqual(record.call_args.kwargs["outcome"], "failed")
+
+    def test_a_skipped_job_is_not_a_turn(self):
+        self.conversation = open_conversation(mode="human")
+        with mock.patch.object(agent_worker.usage, "record") as record:
+            self.assertEqual(self.run_job(), "skipped_human")
+        record.assert_not_called()
+
     def test_skips_a_conversation_a_person_took(self):
         self.conversation = open_conversation(mode="human")
         self.assertEqual(self.run_job(), "skipped_human")

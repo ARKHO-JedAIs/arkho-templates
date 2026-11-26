@@ -11,7 +11,7 @@ import re
 import boto3
 from botocore.exceptions import ClientError
 
-from . import config
+from . import config, usage
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +56,10 @@ def _send(payload: dict, origination_phone_number_id: str | None = None) -> str 
         metaApiVersion=config.meta_api_version(),
         message=json.dumps(payload).encode("utf-8"),
     )
+    kind = payload.get("type")
+    # A template is recorded with its category by send-template; a read receipt has no type.
+    if kind and kind != "template":
+        usage.record(usage.MESSAGE, direction="out", type=str(kind))
     return response.get("messageId")
 
 

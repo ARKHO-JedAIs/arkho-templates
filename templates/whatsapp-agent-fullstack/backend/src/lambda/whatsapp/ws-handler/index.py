@@ -37,7 +37,7 @@ import json
 from traceback import format_exc
 
 from common import get_logger
-from common.whatsapp import agent, config, media, messaging, realtime, store
+from common.whatsapp import agent, config, media, messaging, realtime, store, usage
 
 logger = get_logger(__name__)
 
@@ -413,6 +413,7 @@ def handle_message(message: dict, origination_phone_number_id: str) -> None:
         logger.info("Duplicate delivery of %s ignored", message["message_id"])
         return
 
+    usage.record(usage.MESSAGE, direction="in", type=str(message["type"]))
     stored_media = store_media(message.get("media"), origination_phone_number_id)
     saved = store.save_message(
         phone,

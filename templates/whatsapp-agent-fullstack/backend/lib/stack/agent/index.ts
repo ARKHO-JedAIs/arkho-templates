@@ -235,7 +235,7 @@ export class AgentFactory extends Construct {
         },
       });
       agentRole = this.runtime.role;
-      invokeTarget = { AGENT_RUNTIME_ARN: this.runtime.agentRuntimeArn };
+      invokeTarget = { AGENT_RUNTIME_ARN: this.runtime.agentRuntimeArn, AGENT_MODEL_ID: agent.modelId };
     } else {
       const functionName = `${prefix}-agent`;
       this.agentFunction = new lambda.DockerImageFunction(this, 'AgentFunction', {
@@ -256,7 +256,7 @@ export class AgentFactory extends Construct {
         }),
       });
       agentRole = this.agentFunction.role!;
-      invokeTarget = { AGENT_FUNCTION_NAME: this.agentFunction.functionName };
+      invokeTarget = { AGENT_FUNCTION_NAME: this.agentFunction.functionName, AGENT_MODEL_ID: agent.modelId };
     }
 
     this.grantAgent(agentRole, agent.modelId, whatsappFactory);

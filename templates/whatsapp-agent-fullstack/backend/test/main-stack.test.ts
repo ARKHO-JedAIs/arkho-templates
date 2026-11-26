@@ -135,4 +135,23 @@ describe('MainStack', () => {
       },
     });
   });
+
+  it('keeps the usage events in a table that expires them, and serves them to the dashboard', () => {
+    const template = getTemplate();
+    template.hasResourceProperties('AWS::DynamoDB::Table', {
+      TableName: `${PREFIX}-whatsapp-usage`,
+      KeySchema: [
+        { AttributeName: 'day', KeyType: 'HASH' },
+        { AttributeName: 'id', KeyType: 'RANGE' },
+      ],
+      TimeToLiveSpecification: { AttributeName: 'expires_at', Enabled: true },
+    });
+    template.hasResourceProperties('AWS::ApiGateway::Resource', { PathPart: 'usage' });
+    for (const name of ['usage-metrics', 'ws-handler', 'send-message', 'send-template']) {
+      template.hasResourceProperties('AWS::Lambda::Function', {
+        FunctionName: `${PREFIX}-whatsapp-${name}`,
+        Environment: { Variables: Match.objectLike({ WHATSAPP_USAGE_TABLE_NAME: Match.anyValue() }) },
+      });
+    }
+  });
 });
