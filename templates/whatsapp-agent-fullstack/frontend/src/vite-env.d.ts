@@ -30,6 +30,8 @@ interface ImportMetaEnv {
 
   // WhatsApp
   readonly VITE_APPSYNC_URL?: string;
+  /** `polly` shows the Voz screen; `none` (or unset) hides it. Same value as the backend's VOICE_PROVIDER. */
+  readonly VITE_VOICE_PROVIDER?: string;
 }
 
 interface ImportMeta {

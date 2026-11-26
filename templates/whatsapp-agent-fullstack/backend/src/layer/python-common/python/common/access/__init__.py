@@ -43,6 +43,7 @@ MENUS = {
     "templates": "Plantillas",
     "users": "Usuarios",
     "agent": "Agente IA",
+    "voice": "Voz del agente",
     "agent_advanced": "Agente IA: técnico",
     "access": "Roles y permisos",
 }
@@ -66,7 +67,7 @@ ACTIONS = {
 DEFAULT_PERMISSIONS = {
     # The agent screen (prompt manager) is for developers only, for now.
     ADMIN: {
-        "menu": ["dashboard", "whatsapp", "templates", "users", "access"],
+        "menu": ["dashboard", "whatsapp", "templates", "users", "voice", "access"],
         "actions": [
             "whatsapp.reply",
             "whatsapp.agent_toggle",

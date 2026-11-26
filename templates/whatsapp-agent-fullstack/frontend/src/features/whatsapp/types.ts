@@ -130,6 +130,8 @@ export interface ChatMessage {
   replyTo?: string;
   referral?: Referral;
   forwarded?: boolean;
+  /** The text of an audio, from Amazon Transcribe (received) or what Polly read (sent). */
+  transcript?: string;
   /** The contact deleted it. */
   deleted?: boolean;
   /** ISO-8601. */

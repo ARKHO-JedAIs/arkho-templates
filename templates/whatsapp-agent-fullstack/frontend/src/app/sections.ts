@@ -64,6 +64,11 @@ export interface AppSection {
   requiresAdmin?: boolean;
   /** Restrict both to the hidden developer role (implies requiresAdmin). */
   requiresDeveloper?: boolean;
+  /**
+   * False leaves the section out of this build (route and sidebar), for an optional
+   * feature a deployment may not have: it reads an env flag when the module loads.
+   */
+  enabled?: boolean;
   /** Sidebar ordering; lower comes first. Defaults to 100. */
   order?: number;
 }
@@ -96,5 +101,5 @@ const modules = import.meta.glob<{ section: AppSection }>('../features/*/section
 export const sections: AppSection[] = sortSections(
   Object.values(modules)
     .map(module => module.section)
-    .filter(Boolean)
+    .filter(section => Boolean(section) && section.enabled !== false)
 );

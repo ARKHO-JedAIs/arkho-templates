@@ -117,6 +117,17 @@ parameters:
     description: "Pasado ese límite no se llama al agente (cuida el costo); el cliente recibe un aviso amable por hora."
     patternHint: "un número entero de 1 a 9999, p. ej. 30"
 
+  voice:
+    prompt: "¿Voz para el agente?"
+    description: "Las notas de voz se transcriben (Amazon Transcribe) y las respuestas pueden enviarse como audio (Amazon Polly). La pantalla Voz permite elegir la voz y cuándo responder con audio; cada uso se cobra."
+    choices:
+      none:
+        label: "Ninguna"
+        hint: "solo texto; las notas de voz llegan al agente como [Audio]"
+      polly:
+        label: "Amazon Polly"
+        hint: "transcribe notas de voz y puede responder con audio"
+
   package_manager:
     prompt: "¿Gestor de paquetes para el frontend?"
 

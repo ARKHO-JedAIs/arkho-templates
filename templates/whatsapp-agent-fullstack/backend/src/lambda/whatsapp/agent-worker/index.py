@@ -30,7 +30,7 @@ import boto3
 from botocore.config import Config
 
 from common import get_logger
-from common.whatsapp import agent, config, messaging, realtime, store, usage
+from common.whatsapp import agent, config, media, messaging, realtime, speech, store, transcription, usage, voice
 
 logger = get_logger(__name__)
 
@@ -149,6 +149,64 @@ def send_reply(job: dict, text: str, sent_by: str = agent.SENT_BY_AGENT) -> None
         logger.error(format_exc())
 
 
+def transcribe_audio(job: dict) -> str:
+    """The text of the job's voice note, stored on the received message; empty if none."""
+    audio = job["audio"]
+    phone = job["phone"]
+    try:
+        text = transcription.transcribe(str(audio.get("key") or ""), str(audio.get("mimeType") or ""))
+    except Exception:  # noqa: BLE001
+        logger.error("The audio of %s could not be transcribed", phone[-4:])
+        logger.error(format_exc())
+        return ""
+    if text and job.get("message_id"):
+        # Only for the web, which shows it under the audio: a failure is logged.
+        try:
+            updated = store.mark_message(job["message_id"], transcript=text)
+            if updated:
+                realtime.publish(phone, realtime.MESSAGE_UPDATED, payload=media.exposed(updated))
+        except Exception:  # noqa: BLE001
+            logger.error("Transcript of %s not stored", phone[-4:])
+            logger.error(format_exc())
+    return text
+
+
+def wants_audio_reply(job: dict) -> bool:
+    """Whether the voice settings ask for this answer to be sent as audio too."""
+    settings = voice.read()
+    if settings[voice.PROVIDER_KEY] != "polly":
+        return False
+    mode = settings[voice.REPLY_KEY]
+    return mode == "always" or (mode == "voice_notes" and bool(job.get("audio")))
+
+
+def send_audio_reply(job: dict, text: str) -> None:
+    """The answer read aloud, after the text one. Never fails the turn: the text already went."""
+    phone = job["phone"]
+    origination = job.get("origination_phone_number_id") or None
+    try:
+        audio = speech.synthesize(text)
+        key = media.upload_outbound(audio, speech.MIME_TYPE)
+        message_id = messaging.send_media(phone, "audio", media.post_to_whatsapp(key, origination), origination_phone_number_id=origination)
+        sent = store.save_message(
+            phone,
+            store.OUTBOUND,
+            "audio",
+            "[Audio]",
+            message_id=message_id,
+            sent_by=agent.SENT_BY_AGENT,
+            status="sent",
+            media={"key": key, "mimeType": speech.MIME_TYPE, "size": len(audio)},
+            transcript=speech.speakable(text),
+        )
+        realtime.announce_message(realtime.MESSAGE_SENT, media.exposed(sent), store.touch_conversation(sent))
+    except ValueError:
+        logger.info("Nothing to read aloud for %s", phone[-4:])
+    except Exception:  # noqa: BLE001
+        logger.error("The audio answer for %s could not be sent", phone[-4:])
+        logger.error(format_exc())
+
+
 def fail(job: dict) -> None:
     """Hands the conversation to a person; the customer gets nothing technical."""
     try:
@@ -159,6 +217,8 @@ def fail(job: dict) -> None:
 
 
 # What process() returns for a turn the agent took, as "Uso y costos" counts it.
+# Said to a customer whose voice note could not be turned into text.
+AUDIO_UNREADABLE_TEXT = "No pude entender tu audio. ¿Puedes escribirme tu consulta o enviarlo de nuevo?"
 RECORDED_OUTCOMES = {"answered": "answered", "handoff": "handoff", "blocked": "blocked", "blocked_handoff": "handoff", "failed": "failed"}
 
 
@@ -186,6 +246,13 @@ def answer_job(job: dict, turn: dict) -> str:
         return "skipped_human"
     if not store.window_open(conversation):
         return "skipped_window"
+
+    if isinstance(job.get("audio"), dict) and voice.enabled():
+        text = transcribe_audio(job)
+        if not text:
+            send_reply(job, AUDIO_UNREADABLE_TEXT)
+            return "audio_unreadable"
+        job = {**job, "text": text}
 
     turn["started"] = time.perf_counter()
     try:
@@ -228,6 +295,8 @@ def answer_job(job: dict, turn: dict) -> str:
             logger.error(format_exc())
             fail(job)
             return "failed"
+        if wants_audio_reply(job):
+            send_audio_reply(job, reply)
 
     if status == "blocked" and not handoff:
         if result.get("blocked_category") not in OFFENSE_CATEGORIES:

@@ -370,8 +370,7 @@ def hand_to_agent(message: dict, origination_phone_number_id: str) -> str:
         logger.info("Agent rate limit reached for %s", phone[-4:])
         return agent.RATE_LIMITED_TEXT if agent.claim_rate_notice(phone) else ""
     session = agent.resolve_session(phone, message["message_id"])
-    agent.enqueue(
-        {
+    job = {
             "phone": phone,
             "message_id": message["message_id"],
             "text": message["text"],
@@ -381,7 +380,9 @@ def hand_to_agent(message: dict, origination_phone_number_id: str) -> str:
             "actor_id": agent.actor_id(phone),
             "origination_phone_number_id": origination_phone_number_id,
         }
-    )
+    if message.get("audio"):
+        job["audio"] = message["audio"]
+    agent.enqueue(job)
     return ""
 
 
@@ -452,6 +453,14 @@ def handle_message(message: dict, origination_phone_number_id: str) -> None:
     if store.is_answered_by_person(conversation):
         logger.info("Conversation answered by a person: no automatic reply")
         return
+
+    # A voice note travels with the job; the worker transcribes it when voice is on.
+    if message["type"] == "audio" and stored_media and stored_media.get("key"):
+        message["audio"] = {
+            "key": stored_media["key"],
+            "mimeType": stored_media.get("mimeType", ""),
+            "voice": bool(stored_media.get("voice")),
+        }
 
     # The message is stored: from here on a failure must not fail the
     # invocation, or the retry would skip it as a duplicate and never answer.

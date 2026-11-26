@@ -338,6 +338,32 @@ At deploy they become the Parameter Store parameter the Lambdas read.
 Inbound notifications that still fail after Lambda's retries are kept 14 days
 in the `WhatsAppDeadLetterQueueUrl` queue: fix the cause, then redrive them.
 
+## Voice
+
+`VOICE_PROVIDER` (asked as "Voice for the agent?" at generation, and as
+`VITE_VOICE_PROVIDER` in `frontend/.env`) is `none` or `polly`:
+
+- **none** (default): nothing of this is deployed; a voice note reaches the agent as
+  "[Audio]" and answers are text only.
+- **polly**: a voice note is transcribed with Amazon Transcribe (batch job, up to
+  60 s) and the agent answers the text; the answer can also go as audio read by
+  Amazon Polly (MP3, which WhatsApp accepts as an audio message). The transcript
+  is stored with the audio, and the inbox shows it under "Ver transcripcion".
+
+The **Configuracion > Voz** screen (permission `voice`, admin by default) chooses,
+without a deploy: the provider (including turning voice off again), the Polly voice
+and engine with a sample to listen to, the Transcribe language (es-US or es-ES) and
+when an answer also goes as audio: only to a customer who wrote by voice note
+(default), always, or never. They live in the `<project>-<env>-voice-settings`
+parameter (a deploy that changes its seed overwrites them). Polly and Transcribe are
+billed per use and appear in the Dashboard's "Uso y costos". With voice the agent
+worker waits for Transcribe, so its timeout is 210 s instead of 150 s.
+
+The voice answer is not a button: there is no "Convertir a voz" on each reply as in
+the AquaChile assistant, which needs WhatsApp interactive buttons. Amazon Nova Sonic
+(speech to speech) is not included: it would replace Transcribe, the agent and Polly
+for voice notes and skip the prompt manager, tools and safety rules.
+
 ## Dashboard and usage
 
 The **Dashboard** page (sidebar and title) is a set of tabs; the template ships

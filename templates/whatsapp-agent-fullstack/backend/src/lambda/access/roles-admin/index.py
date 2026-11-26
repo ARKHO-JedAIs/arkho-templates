@@ -39,6 +39,8 @@ logger = get_logger(__name__)
 
 TABLE_NAME = os.environ.get("ACCESS_TABLE_NAME", "")
 USER_POOL_ID = os.environ.get("USER_POOL_ID", "")
+# The Voz page exists only where voice was deployed (VOICE_PROVIDER=polly).
+VOICE_ENABLED = os.environ.get("VOICE_PROVIDER", "none") == "polly"
 NEEDED = "access.manage"
 # Whoever edits roles keeps this screen: it cannot be taken from their own role.
 SELF_KEEP = ("access", "access.manage")
@@ -121,6 +123,11 @@ def stored_permissions(role: str) -> dict:
     return access.role_permissions(role)
 
 
+def catalog_menu() -> dict:
+    """The pages a role may be given here: every one except those this deployment lacks."""
+    return {key: label for key, label in access.MENUS.items() if key != "voice" or VOICE_ENABLED}
+
+
 def describe(role: str) -> dict:
     name, description = access.role_label(role)
     developer = role == access.DEVELOPER
@@ -132,7 +139,7 @@ def describe(role: str) -> dict:
         "system": role in access.SYSTEM_ROLES,
         "locked": developer,
         "permissions": {
-            "menu": [item for item in permissions["menu"] if item in access.MENUS],
+            "menu": [item for item in permissions["menu"] if item in catalog_menu()],
             "actions": [item for item in permissions["actions"] if item in access.ACTIONS],
         },
     }
@@ -188,7 +195,7 @@ def editable_role(event: dict, role: str) -> str:
 def list_access(event: dict) -> dict:
     return {
         "roles": [describe(role) for role in visible_roles(event)],
-        "menu": [{"id": key, "label": label} for key, label in access.MENUS.items()],
+        "menu": [{"id": key, "label": label} for key, label in catalog_menu().items()],
         "actions": [{"id": key, "label": label} for key, label in access.ACTIONS.items()],
     }
 
@@ -201,7 +208,7 @@ def create_role(event: dict, body: dict) -> dict:
         raise ApiError(409, "ROLE_EXISTS", "A role with that id already exists")
     name = text_of(body, "name", 60, required=True)
     description = text_of(body, "description", 200) or ""
-    menu = ids_of(body, "menu", access.MENUS) or []
+    menu = ids_of(body, "menu", catalog_menu()) or []
     actions = ids_of(body, "actions", access.ACTIONS) or []
     check_grants(event, role, menu, actions)
     try:
@@ -228,7 +235,7 @@ def create_role(event: dict, body: dict) -> dict:
 
 def update_role(event: dict, role: str, body: dict) -> dict:
     editable_role(event, role)
-    menu = ids_of(body, "menu", access.MENUS)
+    menu = ids_of(body, "menu", catalog_menu())
     actions = ids_of(body, "actions", access.ACTIONS)
     name = text_of(body, "name", 60, required="name" in body)
     description = text_of(body, "description", 200)

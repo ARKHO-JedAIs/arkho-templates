@@ -32,6 +32,7 @@ export const TEST_AGENT: AgentConfig = {
   businessDescription: 'Tienda de muebles en Santiago.',
   memoryMode: 'conversation',
   rateLimitPerHour: 30,
+  voiceProvider: 'none',
 };
 
 let _template: Template | undefined;

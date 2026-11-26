@@ -22,6 +22,8 @@ export interface AccessFactoryProps {
   apiFactory: ApiFactory;
   /** Users the seed puts in the developer group (by email). */
   developerEmails: string[];
+  /** VOICE_PROVIDER: the Voz page is offered to roles only when it is polly. */
+  voiceProvider?: string;
 }
 
 export const DEVELOPER_GROUP = 'developer';
@@ -48,7 +50,7 @@ export class AccessFactory extends Construct {
   constructor(scope: Construct, id: string, props: AccessFactoryProps) {
     super(scope, id);
 
-    const { params, layerFactory, jwtLayers, cognitoFactory, apiFactory, developerEmails } = props;
+    const { params, layerFactory, jwtLayers, cognitoFactory, apiFactory, developerEmails, voiceProvider } = props;
     const { envName, projectName, isProd } = params;
     const prefix = `${projectName}-${envName}`;
     const userPool = cognitoFactory.cognitoConstruct.userPool;
@@ -122,7 +124,7 @@ export class AccessFactory extends Construct {
       handler: 'index.handler',
       runtime: PYTHON_RUNTIME,
       layers: [commonLayer],
-      environment: { USER_POOL_ID: userPool.userPoolId },
+      environment: { USER_POOL_ID: userPool.userPoolId, VOICE_PROVIDER: voiceProvider ?? 'none' },
       logging,
     });
     this.grantRead(rolesAdmin.function);

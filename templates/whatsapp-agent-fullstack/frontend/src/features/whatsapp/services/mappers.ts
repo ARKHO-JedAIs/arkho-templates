@@ -207,6 +207,7 @@ export function toChatMessage(item: unknown): ChatMessage | null {
     ...(text(raw.reply_to) ? { replyTo: text(raw.reply_to) } : {}),
     ...(referral ? { referral } : {}),
     ...(raw.forwarded === true ? { forwarded: true } : {}),
+    ...(kind === 'audio' && text(raw.transcript) ? { transcript: text(raw.transcript) } : {}),
     ...(raw.deleted === true ? { deleted: true } : {}),
   };
 }

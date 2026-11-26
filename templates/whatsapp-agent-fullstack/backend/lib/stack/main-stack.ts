@@ -65,6 +65,7 @@ export class MainStack extends cdk.Stack {
       cognitoFactory,
       apiFactory,
       developerEmails,
+      voiceProvider: agent?.voiceProvider,
     });
 
     const whatsappFactory = new WhatsAppFactory(this, 'WhatsAppFactory', {

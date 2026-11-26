@@ -204,6 +204,60 @@ describe('AgentFactory', () => {
     });
   });
 
+  describe('VOICE_PROVIDER', () => {
+    const voiceOn = () => variant('voice-polly', { voiceProvider: 'polly' });
+
+    it('deploys no voice by default: no parameter, no Voz API, no Polly or Transcribe permission', () => {
+      const template = agentcore();
+      template.resourcePropertiesCountIs('AWS::SSM::Parameter', { Name: `/${PREFIX}-voice-settings` }, 0);
+      template.resourcePropertiesCountIs('AWS::Lambda::Function', { FunctionName: `${PREFIX}-whatsapp-voice-config` }, 0);
+      const policies = JSON.stringify(template.findResources('AWS::IAM::Policy'));
+      expect(policies).not.toContain('polly:');
+      expect(policies).not.toContain('transcribe:');
+    });
+
+    it('seeds the voice settings once and serves them to the Voz screen', () => {
+      const template = voiceOn();
+      const parameter = Object.values(
+        template.findResources('AWS::SSM::Parameter', { Properties: { Name: `/${PREFIX}-voice-settings` } })
+      )[0] as any;
+      expect(JSON.parse(parameter.Properties.Value)).toEqual({
+        provider: 'polly',
+        replyWithAudio: 'voice_notes',
+        voiceId: 'Lupe',
+        engine: 'neural',
+        transcribeLanguage: 'es-US',
+      });
+      template.hasResourceProperties('AWS::Lambda::Function', {
+        FunctionName: `${PREFIX}-whatsapp-voice-config`,
+        Environment: { Variables: Match.objectLike({ VOICE_SETTINGS_PARAMETER_NAME: Match.anyValue() }) },
+      });
+      template.hasResourceProperties('AWS::ApiGateway::Resource', { PathPart: 'voice' });
+      template.hasResourceProperties('AWS::ApiGateway::Resource', { PathPart: 'preview' });
+    });
+
+    it('lets the worker transcribe voice notes and read answers aloud, scoped as far as AWS allows', () => {
+      const all = JSON.stringify(
+        Object.values(voiceOn().findResources('AWS::IAM::Policy')).flatMap((policy: any) => policy.Properties.PolicyDocument.Statement)
+      );
+      expect(all).toContain('polly:SynthesizeSpeech');
+      expect(all).toContain('transcribe:StartTranscriptionJob');
+      expect(all).toContain('transcription-job/wa-transcribe-*');
+      expect(all).toContain('outbound/*');
+    });
+
+    it('gives the worker the longer timeout a voice note needs', () => {
+      voiceOn().hasResourceProperties('AWS::Lambda::Function', {
+        FunctionName: `${PREFIX}-whatsapp-agent-worker`,
+        Timeout: 210,
+      });
+      agentcore().hasResourceProperties('AWS::Lambda::Function', {
+        FunctionName: `${PREFIX}-whatsapp-agent-worker`,
+        Timeout: 150,
+      });
+    });
+  });
+
   describe('memory', () => {
     it('conversation keeps only the short-term events, 30 days, deleted outside prod', () => {
       const template = agentcore();

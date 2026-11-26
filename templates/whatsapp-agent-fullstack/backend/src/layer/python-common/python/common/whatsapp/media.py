@@ -200,6 +200,13 @@ def new_outbound_key(mime_type: str) -> str:
     return f"{OUTBOUND_PREFIX}{uuid.uuid4()}.{extension_for(mime_type)}"
 
 
+def upload_outbound(body: bytes, mime_type: str) -> str:
+    """Stores a file the backend itself made (an audio answer) as an outbound upload; its key."""
+    key = new_outbound_key(mime_type)
+    s3.put_object(Bucket=_bucket(), Key=key, Body=body, ContentType=base_mime(mime_type))
+    return key
+
+
 def presign_upload(key: str, mime_type: str) -> str:
     """A PUT URL bound to ``key`` and its Content-Type (a different one is refused)."""
     return s3.generate_presigned_url(

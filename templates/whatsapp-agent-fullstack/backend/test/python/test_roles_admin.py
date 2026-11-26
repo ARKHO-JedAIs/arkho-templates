@@ -119,7 +119,22 @@ class RolesAdminTest(unittest.TestCase):
         _, data, _ = call(self.module, "GET", "/admin/access", groups="developer")
         developer = next(role for role in data["roles"] if role["id"] == "developer")
         self.assertTrue(developer["locked"])
-        self.assertEqual(developer["permissions"]["menu"], list(access.MENUS))
+        self.assertEqual(developer["permissions"]["menu"], [page for page in access.MENUS if page != "voice"])
+
+    def test_the_voice_page_is_offered_only_where_voice_was_deployed(self):
+        _, data, _ = call(self.module, "GET", "/admin/access")
+        self.assertNotIn("voice", [item["id"] for item in data["menu"]])
+        status, _, _ = call(
+            self.module, "POST", "/admin/access/roles", body={"id": "vox", "name": "Vox", "menu": ["voice"]}, groups="developer"
+        )
+        self.assertEqual(status, 422)
+        with mock.patch.object(self.module, "VOICE_ENABLED", True):
+            _, data, _ = call(self.module, "GET", "/admin/access")
+            self.assertIn("voice", [item["id"] for item in data["menu"]])
+            status, _, _ = call(
+                self.module, "POST", "/admin/access/roles", body={"id": "vox", "name": "Vox", "menu": ["voice"]}, groups="developer"
+            )
+            self.assertEqual(status, 201)
 
     def test_creates_a_role_as_a_group_with_its_permissions(self):
         status, data, _ = call(

@@ -32,8 +32,8 @@ const MOCK_ACTIONS: Record<string, string[]> = {
 };
 
 const MOCK_MENU: Record<string, string[]> = {
-  developer: ['dashboard', 'whatsapp', 'templates', 'users', 'agent', 'access'],
-  admin: ['dashboard', 'whatsapp', 'templates', 'users', 'access'],
+  developer: ['dashboard', 'whatsapp', 'templates', 'users', 'agent', 'voice', 'access'],
+  admin: ['dashboard', 'whatsapp', 'templates', 'users', 'voice', 'access'],
   member: ['whatsapp'],
 };
 

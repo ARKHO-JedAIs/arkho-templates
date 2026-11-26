@@ -24,6 +24,7 @@ answers:
   agent_business_description: Tienda de muebles en Santiago; despachos a todo Chile y retiro en tienda.
   agent_memory: facts_summaries
   agent_rate_limit_per_hour: "30"
+  voice: polly
 
   package_manager: npm
   brand_color: "#E30613"

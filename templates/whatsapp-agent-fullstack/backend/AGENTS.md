@@ -225,6 +225,8 @@ Set in `.env` (gitignored; see `.env.example`):
 - `AGENT_RATE_LIMIT_PER_HOUR`: initial agent replies per customer per hour (1-9999);
   the web edits it (and the memory window) from then on in the `agent-settings`
   parameter, and a deploy that changes this value overwrites those edits.
+- `VOICE_PROVIDER`: `none` (default) or `polly`: transcribes voice notes (Amazon Transcribe) and
+  can answer with audio (Amazon Polly); adds the `voice-settings` parameter and the Voz API.
 - `AGENT_BUSINESS_API_URL`: optional https URL the agent's tools may call.
 
 ## Workflow (Spec Kit)

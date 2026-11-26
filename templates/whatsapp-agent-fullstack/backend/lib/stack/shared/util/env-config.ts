@@ -75,6 +75,9 @@ export type AgentRuntimeName = (typeof AGENT_RUNTIMES)[number];
 export const AGENT_MEMORY_MODES = ['off', 'conversation', 'facts', 'facts_summaries'] as const;
 export type AgentMemoryMode = (typeof AGENT_MEMORY_MODES)[number];
 
+export const VOICE_PROVIDERS = ['none', 'polly'] as const;
+export type VoiceProviderName = (typeof VOICE_PROVIDERS)[number];
+
 export const DEFAULT_AGENT_MODEL_ID = 'us.anthropic.claude-sonnet-4-6';
 export const DEFAULT_AGENT_RATE_LIMIT_PER_HOUR = 30;
 export const AGENT_BUSINESS_DESCRIPTION_MAX_LENGTH = 500;
@@ -96,6 +99,11 @@ export interface AgentConfig {
   rateLimitPerHour: number;
   /** AGENT_BUSINESS_API_URL: optional HTTPS API the agent tools may call. */
   businessApiUrl?: string;
+  /**
+   * VOICE_PROVIDER: `polly` adds voice notes (Amazon Transcribe) and audio answers
+   * (Amazon Polly) and the Voz screen; `none` (the default) deploys none of it.
+   */
+  voiceProvider?: VoiceProviderName;
 }
 
 /** A Bedrock model id (`anthropic.claude-...`) or inference profile id (`us.anthropic.claude-...`). */
@@ -169,6 +177,8 @@ function agentEnv(): AgentConfig {
     process.exit(1);
   }
 
+  const voiceProvider = choiceEnv('VOICE_PROVIDER', VOICE_PROVIDERS, 'none');
+
   const businessApiUrl = optionalEnv('AGENT_BUSINESS_API_URL');
   if (businessApiUrl !== undefined && !/^https:\/\/[^\s]+$/.test(businessApiUrl)) {
     console.error('Error: AGENT_BUSINESS_API_URL must be empty or an https:// URL');
@@ -182,6 +192,7 @@ function agentEnv(): AgentConfig {
     memoryMode,
     rateLimitPerHour: rateLimit !== undefined ? Number(rateLimit) : DEFAULT_AGENT_RATE_LIMIT_PER_HOUR,
     businessApiUrl,
+    voiceProvider,
   };
 }
 

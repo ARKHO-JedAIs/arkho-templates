@@ -35,6 +35,7 @@ export const AGENT_LAMBDA_CMD = ['lambda_handler.handler'];
 
 const PROMPT_KEY = 'agentPrompt';
 const SETTINGS_KEY = 'agentSettings';
+const VOICE_KEY = 'voiceSettings';
 const DEFAULT_MEMORY_WINDOW_MINUTES = 60;
 const DEFAULT_TIMEZONE = 'America/Santiago';
 const MODEL_MAX_TOKENS = 1024;
@@ -46,6 +47,18 @@ const AGENT_LAMBDA_MEMORY_MB = 2048;
 const AGENT_LAMBDA_TIMEOUT = Duration.seconds(120);
 /** Longer than the agent call (worker read timeout ~110 s / Lambda 120 s) plus the send. */
 const WORKER_TIMEOUT_SECONDS = 150;
+// A voice note waits for Amazon Transcribe (up to 60 s) before the agent runs.
+const VOICE_WORKER_TIMEOUT_SECONDS = 210;
+const TRANSCRIBE_JOB_NAME_PREFIX = 'wa-transcribe-';
+
+// Polly has no Chilean Spanish: es-US Lupe (neural) is the closest neutral voice.
+const DEFAULT_VOICE_SETTINGS = {
+  provider: 'polly',
+  replyWithAudio: 'voice_notes',
+  voiceId: 'Lupe',
+  engine: 'neural',
+  transcribeLanguage: 'es-US',
+};
 /** Concurrent agent turns at most: protects the Bedrock quotas of the account. */
 export const WORKER_MAX_CONCURRENCY = 10;
 
@@ -173,10 +186,26 @@ export class AgentFactory extends Construct {
           dataType: ssm.ParameterDataType.TEXT,
           description: 'AI agent: memory window and answer limit, edited from the web',
         },
+        ...(agent.voiceProvider === 'polly'
+          ? [
+              {
+                key: VOICE_KEY,
+                parameterName: `/${prefix}-voice-settings`,
+                simpleName: false,
+                // The seed only: the Voz screen edits it; a deploy that changes it overwrites those edits.
+                stringValue: JSON.stringify(DEFAULT_VOICE_SETTINGS),
+                dataType: ssm.ParameterDataType.TEXT,
+                description: 'AI agent voice: provider, Polly voice and engine, Transcribe language, when to answer by audio',
+              },
+            ]
+          : []),
       ],
     });
     const promptParameterName = this.promptParameter.getParameterName(PROMPT_KEY);
     const settingsParameterName = this.promptParameter.getParameterName(SETTINGS_KEY);
+    const voiceOn = agent.voiceProvider === 'polly';
+    const voiceParameterName = voiceOn ? this.promptParameter.getParameterName(VOICE_KEY) : '';
+    const workerTimeoutSeconds = voiceOn ? VOICE_WORKER_TIMEOUT_SECONDS : WORKER_TIMEOUT_SECONDS;
 
     if (agent.memoryMode !== 'off') {
       this.memory = new AgentCoreMemoryConstruct(this, 'Memory', {
@@ -275,7 +304,7 @@ export class AgentFactory extends Construct {
     this.jobsQueue = new sqs.Queue(this, 'JobsQueue', {
       queueName: `${prefix}-agent-jobs.fifo`,
       fifo: true,
-      visibilityTimeout: Duration.seconds(WORKER_TIMEOUT_SECONDS * 6),
+      visibilityTimeout: Duration.seconds(workerTimeoutSeconds * 6),
       retentionPeriod: Duration.hours(24),
       enforceSSL: true,
       deadLetterQueue: { queue: this.jobsDeadLetterQueue, maxReceiveCount: 2 },
@@ -287,10 +316,13 @@ export class AgentFactory extends Construct {
         description: 'Answers queued WhatsApp messages with the AI agent',
         tables: 'write',
         sends: true,
-        timeoutSeconds: WORKER_TIMEOUT_SECONDS,
+        // Voice: it stores and sends the audio answers and reads the received voice notes.
+        ...(voiceOn ? { media: 'send' as const } : {}),
+        timeoutSeconds: workerTimeoutSeconds,
       },
-      invokeTarget
+      { ...invokeTarget, ...(voiceOn ? { VOICE_SETTINGS_PARAMETER_NAME: voiceParameterName } : {}) }
     );
+    if (voiceOn) this.addVoice(worker.function, whatsappFactory, voiceParameterName, prefix);
     // Maximum concurrency on the event source instead of reserved concurrency:
     // it caps the agent turns without throttling the poller or reserving
     // account capacity.
@@ -353,6 +385,58 @@ export class AgentFactory extends Construct {
       value: this.jobsDeadLetterQueue.queueUrl,
       description: 'Agent jobs that failed twice (the worker could not even start them)',
       exportName: `${prefix}-AgentJobsDeadLetterQueueUrl`,
+    });
+  }
+
+  /**
+   * Voice (VOICE_PROVIDER=polly): the worker transcribes received voice notes with
+   * Amazon Transcribe and reads answers aloud with Amazon Polly, and the Voz
+   * screen API (voice-config) edits the settings in Parameter Store.
+   *
+   * Polly and Transcribe have no resource-level permissions for these actions,
+   * so they are on `*`; reading and deleting a transcription job is scoped to
+   * the jobs this worker names (`wa-transcribe-*`).
+   */
+  private addVoice(worker: lambda.Function, whatsappFactory: WhatsAppFactory, parameterName: string, prefix: string): void {
+    const stack = Stack.of(this);
+    const bucket = whatsappFactory.mediaBucket.bucket;
+    this.promptParameter.grantRead(worker, VOICE_KEY);
+    worker.addToRolePolicy(new iam.PolicyStatement({ sid: 'ReadAnswersAloud', actions: ['polly:SynthesizeSpeech'], resources: ['*'] }));
+    worker.addToRolePolicy(new iam.PolicyStatement({ sid: 'StartAudioTranscriptions', actions: ['transcribe:StartTranscriptionJob'], resources: ['*'] }));
+    worker.addToRolePolicy(
+      new iam.PolicyStatement({
+        sid: 'ReadAudioTranscriptions',
+        actions: ['transcribe:GetTranscriptionJob', 'transcribe:DeleteTranscriptionJob'],
+        resources: [`arn:${stack.partition}:transcribe:${stack.region}:${stack.account}:transcription-job/${TRANSCRIBE_JOB_NAME_PREFIX}*`],
+      })
+    );
+    // Transcribe reads the voice note with the worker's own permissions.
+    worker.addToRolePolicy(new iam.PolicyStatement({ sid: 'ReadReceivedVoiceNotes', actions: ['s3:GetObject'], resources: [bucket.arnForObjects('media/*')] }));
+    worker.addToRolePolicy(new iam.PolicyStatement({ sid: 'StoreAudioAnswers', actions: ['s3:PutObject'], resources: [bucket.arnForObjects('outbound/*')] }));
+
+    const config = whatsappFactory.addFunction(
+      {
+        name: 'voice-config',
+        description: 'The Voz screen: voice settings, Spanish Polly voices and a sample to listen to',
+        routes: [
+          { path: '/whatsapp/voice', method: 'GET' },
+          { path: '/whatsapp/voice', method: 'PUT' },
+          { path: '/whatsapp/voice/preview', method: 'POST' },
+        ],
+        tables: 'read',
+        usage: 'write',
+      },
+      { VOICE_SETTINGS_PARAMETER_NAME: parameterName }
+    );
+    this.promptParameter.grantRead(config.function, VOICE_KEY);
+    this.promptParameter.grantWrite(config.function, VOICE_KEY);
+    config.function.addToRolePolicy(
+      new iam.PolicyStatement({ sid: 'ListAndPreviewVoices', actions: ['polly:DescribeVoices', 'polly:SynthesizeSpeech'], resources: ['*'] })
+    );
+    new CfnOutput(this, 'VoiceSettingsParameterName', {
+      value: parameterName,
+      description: 'Parameter Store JSON with the voice settings the Voz screen edits',
+      exportName: `${prefix}-VoiceSettingsParameterName`,
     });
   }
 

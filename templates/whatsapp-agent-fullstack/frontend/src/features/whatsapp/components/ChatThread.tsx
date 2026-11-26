@@ -27,6 +27,7 @@ import { isMediaKind, templateParts } from '../services/mappers';
 import { ChatSkeleton } from '@/components/skeletons';
 import type { ChatMessage, MessageStatus } from '../types';
 import { formatMessage } from './formatMessage';
+import { Transcript } from './Transcript';
 import {
   ContactCards,
   FlowCard,
@@ -500,6 +501,11 @@ function Bubble({ message, quoted, onRetry, retrying, onMediaExpired }: BubblePr
           </span>
         ) : null}
       </div>
+      {message.transcript ? (
+        <div className='px-1'>
+          <Transcript text={message.transcript} />
+        </div>
+      ) : null}
       {failed && onRetry ? (
         <button
           type='button'

@@ -197,6 +197,23 @@ parameters:
     pattern: "^[1-9][0-9]{0,3}$"
     patternHint: "a whole number from 1 to 9999, e.g. 30"
 
+  # Written to backend/.env as VOICE_PROVIDER and to frontend/.env as
+  # VITE_VOICE_PROVIDER: the backend deploys the voice resources and the frontend
+  # shows the Voz screen only with polly. Asked in both parts of the project.
+  - name: voice
+    type: choice
+    group: Agent
+    prompt: "Voice for the agent?"
+    description: "Voice notes are transcribed (Amazon Transcribe) and answers can be sent as audio (Amazon Polly). The Voz screen then picks the voice and when to answer by audio; each one is billed per use."
+    default: none
+    choices:
+      - value: none
+        label: "None"
+        hint: "text only; voice notes reach the agent as [Audio]"
+      - value: polly
+        label: "Amazon Polly"
+        hint: "transcribes voice notes and can answer with audio"
+
   # ---------------------------------------------------------------------------
   # Frontend
   # ---------------------------------------------------------------------------
