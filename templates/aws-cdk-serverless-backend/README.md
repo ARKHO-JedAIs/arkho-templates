@@ -1,191 +1,211 @@
 # {{ project_name }}
 
-ARKHO serverless backend, scaffolded from the `aws-cdk-serverless-backend`
-template. AWS CDK v2 (TypeScript) infrastructure that owns the authentication,
-storage, and supporting services the rest of the system talks to.
+Serverless backend on AWS CDK v2 (TypeScript): a Cognito User Pool (optional
+Microsoft Entra ID federation), a single-table DynamoDB table, a private S3
+bucket, Python 3.12 Lambda functions on a shared layer, and an API Gateway REST
+API behind a Lambda JWT authorizer, all in one CloudFormation stack.
 
-## What it provisions
-
-`MainStack` is the single root stack. Active (instantiated) today:
-
-| Resource | Factory | Purpose |
-|---|---|---|
-| DynamoDB | `DynamoFactory` | One single-table-design table (`PK`/`SK`, on-demand): `usage-stats`, which stores arkho-cli usage statistics. Installer telemetry (`INSTALL#...`) and CLI command telemetry (`USAGE#...`) are separated by PK prefix; no TTL, so all events are retained |
-| S3 | `S3Factory` | The `templates` bucket (private, SSE-S3, SSL-only) that stores the project templates the CLI scaffolds from |
-| Lambda layer | `LayerFactory` | `python-common` layer (logging, standardized responses, CORS helpers) |
-| Lambda | `LambdaFactory` | One function per folder under `src/lambda`: hello-world, pre-signup, post-confirmation-signup, not-found, presigned-url-template, authorizer |
-| Cognito | `CognitoFactory` | User Pool + app client for the CLI, with optional Microsoft Entra ID (OIDC) federation |
-| API Gateway | `ApiFactory` | Regional REST API exposing the Lambdas: public `GET /hello-world`, `GET /presigned-url` behind the Lambda authorizer, and a `{proxy+}` catch-all served by `not-found` |
-| Setup | `SetupFactory` | Post-creation wiring: injects `USER_POOL_ID` / `APP_CLIENT_ID` into the authorizer once the pool exists |
-
-Authentication and storage notes:
-
-- `pre-signup` and `post-confirmation-signup` are wired as Cognito triggers.
-- **Entra ID SSO is optional**, off by default, and gated by `ENTRA_ID_ENABLED`.
-  When enabled it creates an OIDC identity provider plus a Hosted UI domain. The
-  domain prefix is derived in code from the resource-name convention
-  (`${projectName}-${envName}`); it is **not** a manual environment variable.
-- The REST API is deployed to a stage named after `ENV_NAME` and every route is
-  a Lambda proxy integration. Routes are protected by the `authorizer` function
-  (Cognito JWT validation) by default; `GET /hello-world` opts out with
-  `requireAuth: false` so `curl <api-url>hello-world` verifies the deploy before
-  any token exists. Add new routes in `ApiFactory` (`lib/stack/api`) so the URL
-  surface stays in one place.
-- `presigned-url-template` reads/writes the `templates` bucket (`S3Factory`),
-  whose name is passed into the Lambda environment as `TEMPLATES_BUCKET_NAME`.
-  The presigned-URL TTL is a constant in `LambdaFactory`.
-
-Everything else under `lib/construct` (glue, plus governance: cloudtrail,
-guardduty, waf, budget, access-analyzer, github-oidc) stays as generic, reusable
-building blocks and is wired in only when a service is actually needed.
+Generated from the ARKHO `aws-cdk-serverless-backend` template (see `arkho.json`
+for the exact version and answers).
 
 ## Prerequisites
 
-- [Node.js](https://nodejs.org/) 24+
-- npm 11+
-- [AWS CLI](https://aws.amazon.com/cli/) configured with credentials
-- [AWS CDK v2](https://docs.aws.amazon.com/cdk/v2/guide/getting_started.html)
-- Python 3.12 (runtime of the Lambda functions; optional for local development)
-- An AWS account with permissions to create IAM roles, Lambda, API Gateway,
-  DynamoDB, S3, and Cognito
+| Tool | Version | Source |
+|---|---|---|
+| Node.js | 24+ | `.nvmrc` (`24`), `package.json` `engines.node` |
+| npm | 11+ | `package.json` `engines.npm`; `.npmrc` sets `engine-strict=true`, so older versions fail `npm install` |
+| AWS CDK CLI | bundled (`aws-cdk` devDependency) | run it with `npx cdk`, no global install needed |
+| AWS CLI | v2 | credentials for the target account (profile, SSO or env vars) |
+| Git | any | the pre-commit hook needs a Git repository |
+| Python | 3.12 (optional) | only to run the Lambda code locally; CDK packages it as-is |
 
-## Installation
+The deploying identity needs permissions to bootstrap CDK and to create IAM
+roles, Lambda, API Gateway, DynamoDB, S3, Cognito and CloudWatch Logs resources.
 
-### 1. Install dependencies
-
-```bash
-npm install
-npm run prepare
-```
-
-After `npm install`, running `npm run prepare` installs the Husky pre-commit
-hooks (secretlint runs on staged files to block committed credentials).
-
-### 2. Configure environment variables
+## Getting started
 
 ```bash
-cp .env.example .env
+cd {{ project_name }}
+git init                 # husky needs .git, otherwise the hook is not installed
+npm install              # also runs "prepare" (husky) to install the pre-commit hook
+cp .env.example .env     # then set AWS_ACCOUNT_ID and AWS_REGION
+npx cdk synth --quiet    # synthesize the stack
+npm test                 # jest assertions over the synthesized template
 ```
 
-`.env` is gitignored and must never be committed; `.env.example` is the only
-versioned copy and ships placeholders only. `PROJECT_NAME` comes pre-filled;
-edit the rest:
+If you ran `npm install` before `git init`, run `npm run prepare` once afterwards.
 
-```env
-# Core app
-ENV_NAME=dev
-PROJECT_NAME={{ project_name }}
-AWS_ACCOUNT_ID=          # 12 digits; empty = account-agnostic synth
-AWS_REGION=us-east-1
+## Configuration
 
-# Microsoft Entra ID SSO (optional, OIDC federation)
-ENTRA_ID_ENABLED=false
-ENTRA_ID_CLIENT_ID=
-ENTRA_ID_CLIENT_SECRET=
-ENTRA_ID_ISSUER_URL=https://login.microsoftonline.com/<tenant-id>/v2.0
-```
+`bin/main.ts` loads `.env` with `dotenv` (`lib/stack/shared/util/env-config.ts`).
+`.env` is gitignored; `.env.example` is the only versioned copy and holds
+placeholders only.
 
-`ENTRA_ID_CLIENT_ID`, `ENTRA_ID_CLIENT_SECRET`, and `ENTRA_ID_ISSUER_URL` are
-required only when `ENTRA_ID_ENABLED=true`. The Cognito Hosted UI domain prefix
-and the templates bucket name are derived in code, and the presigned-URL TTL is
-a constant in `LambdaFactory` - none of them are environment variables.
+| Variable | Default in `.env.example` | Purpose |
+|---|---|---|
+| `ENV_NAME` | `dev` | **Required.** Environment name: part of every resource name and the API stage name. `prod` switches on production behavior (see below) |
+| `PROJECT_NAME` | `{{ project_name }}` | **Required.** Prefix of every resource name. Pre-filled from the CLI parameter `project_name` |
+| `AWS_ACCOUNT_ID` | empty | Target account (12 digits). Empty = environment-agnostic synth |
+| `AWS_REGION` | `us-east-1` | Target region |
+| `ENTRA_ID_ENABLED` | `false` | `true` enables Microsoft Entra ID OIDC federation in Cognito |
+| `ENTRA_ID_CLIENT_ID` | empty | Entra ID app registration client ID (required when enabled) |
+| `ENTRA_ID_CLIENT_SECRET` | empty | Entra ID client secret (required when enabled) |
+| `ENTRA_ID_ISSUER_URL` | `https://login.microsoftonline.com/<tenant-id>/v2.0` | OIDC issuer of your tenant (required when enabled) |
 
-To find your AWS account ID:
+Synth exits with an error if `ENV_NAME` or `PROJECT_NAME` is missing, or if
+`ENTRA_ID_ENABLED=true` without the three `ENTRA_ID_*` values. `project_name` is
+the template's only CLI parameter; everything else is set by hand.
 
-```bash
-aws sts get-caller-identity --query Account --output text
-```
+Not environment variables: the Cognito Hosted UI domain prefix (derived as
+`<PROJECT_NAME>-<ENV_NAME>`), the bucket name, and the presigned-URL TTL
+(`PRESIGNED_URL_EXPIRY_SECONDS = 3600` in `lib/stack/lambda/index.ts`).
 
-### 3. Bootstrap CDK (first time only)
+## What's included
 
-CDK needs to provision some resources in your account before deploying. Run this
-once per account/region:
+`MainStack` (`lib/stack/main-stack.ts`) wires these factories. Every physical
+name follows `<PROJECT_NAME>-<ENV_NAME>-<resource>`; the stack is tagged
+`Project` and `Environment`.
 
-```bash
-npx cdk bootstrap aws://YOUR_ACCOUNT_ID/YOUR_REGION
-```
+| Factory (`lib/stack/*`) | Resources |
+|---|---|
+| `DynamoFactory` | Table `<prefix>-usage-stats`: `PK`/`SK` strings, on-demand billing, no TTL |
+| `S3Factory` | Bucket `<prefix>-templates`: private (block all public access), SSE-S3, SSL-only |
+| `LayerFactory` | Layer `python-common` from `src/layer/python-common` (logger, standardized responses, CORS decorator), Python 3.12, x86_64 and arm64 |
+| `LambdaFactory` | Six Python 3.12 functions, one per `src/lambda` folder, logs kept one month (see below) |
+| `CognitoFactory` | User Pool `<prefix>-user-pool` and app client `<prefix>-cli-client`, resource server `<prefix>-api` with `read`/`write` scopes |
+| `ApiFactory` | Regional REST API `<prefix>-api`, stage = `ENV_NAME`, TOKEN Lambda authorizer `<prefix>-lambda-authorizer` |
+| `SetupFactory` | Injects `USER_POOL_ID` and `APP_CLIENT_ID` into the authorizer after the pool exists |
 
-### 4. Verify, preview, deploy
+**Lambda functions** (`src/lambda`)
 
-```bash
-npx cdk synth --quiet   # synthesize and verify the active graph
-npx cdk diff            # preview changes
-npx cdk deploy          # deploy
-```
+| Function | Role |
+|---|---|
+| `core/hello-world` | Public `GET /hello-world`, static payload. Reference example: delete it once real routes exist |
+| `core/presigned-url-template` | `GET /presigned-url` (authorized): returns a presigned PUT URL for `templates/<user-id>/<timestamp>.zip` in the bucket, valid 3600 s. Has read/write on the whole bucket |
+| `core/not-found` | `ANY /{proxy+}` catch-all, standardized 404 body |
+| `core/authorizer` | Validates Cognito access or ID tokens (JWKS signature, issuer, app client) from `Authorization: Bearer <token>`; results cached 5 min. Uses public Klayers layers `Klayers-p312-PyJWT:4` and `Klayers-p312-cryptography:25` resolved in the deploy region |
+| `user/pre-signup` | Cognito pre-sign-up trigger (placeholder for custom validation; does not auto-confirm) |
+| `user/post-confirmation-signup` | Cognito post-confirmation trigger (logs the confirmed user) |
 
-After a successful deploy, the stack outputs:
+**API behavior** (`lib/construct/rest-api-construct.ts`): every route is a Lambda
+proxy integration protected by the authorizer unless it sets
+`requireAuth: false`; CORS preflight (`OPTIONS`) and the `{proxy+}` catch-all are
+unauthenticated. CORS allows all origins by default. Stage throttling is 100
+burst / 50 rps, with JSON access logs in
+`/aws/apigateway/<prefix>-access-logs`. Add new routes in `ApiFactory`
+(`lib/stack/api/index.ts`).
 
-- **Cognito User Pool ID** and **App Client ID** (frontend / CLI auth config)
-- **`usage-stats` DynamoDB table name**
-- **`templates` S3 bucket name**
-- **REST API id, URL, and ARN**
+**Cognito**: self sign-up with email as the sign-in alias and email
+verification, password minimum 8 chars with upper, lower and digits, email-only
+account recovery, no client secret, SRP and user-password auth, authorization
+code grant. Callback/logout URLs are `http://localhost:8976` and
+`http://localhost:3000` (`/callback`, `/logout`) outside `prod`, and the
+placeholder `https://example.com/...` in `prod`: set real URLs in
+`lib/stack/cognito/index.ts` before a production deploy.
 
-Smoke-test the API with the public route:
+**Optional: Entra ID SSO** (`ENTRA_ID_ENABLED=true`): adds an OIDC identity
+provider and a Cognito Hosted UI domain `<PROJECT_NAME>-<ENV_NAME>`.
 
-```bash
-curl "$(aws cloudformation describe-stacks \
-  --stack-name <StackName> \
-  --query "Stacks[0].Outputs[?ends_with(OutputKey,'RestApiUrl')].OutputValue" \
-  --output text)hello-world"
-```
+**Production behavior** (`ENV_NAME=prod`): DynamoDB point-in-time recovery and
+deletion protection on; table, bucket, user pool, layer and API log group are
+retained on stack deletion, as are the Lambda log groups. Outside `prod` they are destroyed (the bucket is
+emptied automatically) and API Gateway X-Ray tracing and data trace logging are
+on.
+
+**Not wired (reusable constructs)**: `lib/construct` also contains `glue`,
+`cloudtrail`, `guardduty`, `waf`, `budget`, `access-analyzer` and `github-oidc`
+constructs. They create nothing until you instantiate them from a factory.
+
+**Stack outputs** (export names): `<prefix>-UsageStatsTableName`,
+`<prefix>-TemplateBucketName`, `<prefix>-python-common-LayerArn`,
+`<prefix>-python-common-LayerVersionArn`, `<prefix>-UserPoolId`,
+`<prefix>-UserPoolClientId`, `<prefix>-UserPoolArn`, `<prefix>-RestApiId`,
+`<prefix>-RestApiUrl`, `<prefix>-RestApiArn`.
+
+**Security tooling**: `secretlint` (recommended preset, `.secretlintrc.json`)
+runs on staged files through `husky` + `lint-staged` on every commit.
 
 ## Project structure
 
 ```
-/bin
-  main.ts               # CDK app entry: builds MainStack from env config
-/lib
-  /construct            # Generic, reusable L2/L3 constructs (one per service)
-  /stack
-    main-stack.ts       # Root stack: wires the active factories
-    /cognito            # Cognito + optional Entra ID federation + triggers
-    /dynamo             # usage-stats table
-    /s3                 # templates bucket
-    /lambda             # one function per src/lambda folder
-    /layer              # python-common layer
-    /api                # REST API: routes, authorizer, 404 fallback
-    /setup              # post-creation wiring (authorizer <- Cognito ids)
-    /shared/util        # environment config + helpers
-/src
-  /lambda/core/*        # hello-world, not-found, presigned-url-template, authorizer
-  /lambda/user/*        # Cognito triggers: pre-signup, post-confirmation-signup
-  /layer/python-common  # shared Python layer (logger, response, cors)
-/test                   # Jest (aws-cdk-lib/assertions) tests
+{{ project_name }}/
+├── bin/main.ts                  # CDK app entry: reads .env, creates MainStack
+├── lib/
+│   ├── construct/               # generic, reusable constructs (one per service)
+│   └── stack/
+│       ├── main-stack.ts        # root stack wiring the factories
+│       ├── api/  cognito/  dynamo/  lambda/  layer/  s3/  setup/
+│       └── shared/util/         # env-config.ts, runtime.ts, capitalize.ts
+├── src/
+│   ├── lambda/core/             # authorizer, hello-world, not-found, presigned-url-template
+│   ├── lambda/user/             # pre-signup, post-confirmation-signup
+│   └── layer/python-common/     # python/common: logger, response, cors_middleware
+├── test/
+│   ├── helpers/setup.ts         # getTemplate(), TEST_PARAMS, TEST_ENV
+│   └── main-stack.test.ts       # MainStack assertions
+├── .env.example  .nvmrc  .npmrc  .secretlintrc.json  .husky/pre-commit
+├── cdk.json  jest.config.js  tsconfig.json  package.json
+├── AGENTS.md  CLAUDE.md         # agent instructions (AGENTS.md is the source of truth)
+└── arkho.json                   # generation provenance (written by the CLI)
 ```
 
-## Common commands
+## Scripts
+
+| Command | What it does |
+|---|---|
+| `npm run build` | `tsc`: compile TypeScript into `build/` (not needed for CDK, which runs `bin/main.ts` with `ts-node`) |
+| `npm run watch` | `tsc -w` |
+| `npm test` | `jest` over `test/**/*.test.ts` |
+| `npm run cdk -- <args>` | Run the project's CDK CLI (same as `npx cdk <args>`) |
+| `npm run secretlint` | Scan the whole repo for secrets |
+| `npm run prepare` | `husky`: install the Git hooks (runs automatically on `npm install`) |
+
+## Deploy
 
 ```bash
-npm install              # install dependencies
-npm run prepare          # install Husky hooks after npm install
-npx cdk synth --quiet    # synthesize CloudFormation (verifies the active graph)
-npx tsc --noEmit         # typecheck the whole repo
-npm test                 # run jest
-npm run secretlint       # scan the whole repo for secrets
-npx cdk diff             # show pending infrastructure changes
-npm run build && npx cdk deploy
-npx cdk destroy          # tear down the stack
+# once per account/region
+npx cdk bootstrap aws://<AWS_ACCOUNT_ID>/<AWS_REGION>
+
+npx cdk diff      # review changes
+npx cdk deploy    # deploy the single stack
 ```
 
-## Security
+The stack is named `<ProjectName><EnvName>Stack` with the first letter of each
+part capitalized (`bin/main.ts`), e.g. `Acme-backendDevStack` for
+`PROJECT_NAME=acme-backend` and `ENV_NAME=dev`. Use another `ENV_NAME` in `.env`
+to deploy a separate environment.
 
-- DynamoDB default encryption at rest; point-in-time recovery and deletion
-  protection enabled in production.
-- S3 `templates` bucket is private, SSE-S3 encrypted, and SSL-only.
-- Least-privilege IAM scoped per Lambda function.
-- Cognito JWT validation in the Lambda authorizer; every REST API route is
-  protected by it unless it explicitly opts out with `requireAuth: false`.
-- No secrets in source: `.env` is gitignored and `.env.example` ships
-  placeholders only. A secretlint pre-commit hook blocks committed credentials.
-  The Entra ID client secret comes from the environment at synth time; move it to
-  AWS Secrets Manager before production use.
+Smoke test the public route (replace `dev` if you changed `ENV_NAME`):
 
-## Conventions
+```bash
+API_URL=$(aws cloudformation list-exports \
+  --query "Exports[?Name=='{{ project_name }}-dev-RestApiUrl'].Value" --output text)
+curl "${API_URL}hello-world"
+```
 
-`AGENTS.md` is the single source of truth for repository rules, conventions, and
-architecture; `CLAUDE.md` is a thin bootstrap that defers to it. Read `AGENTS.md`
-before contributing.
+`GET /presigned-url` needs `Authorization: Bearer <Cognito access or ID token>`.
 
-## License
+Region note: the authorizer's Klayers layer versions are region-local and
+Klayers does not publish to `ap-northeast-3`; re-check the pins in
+`lib/stack/lambda/index.ts` before deploying to a new region.
 
-MIT.
+Tear down with `npx cdk destroy` (in `prod` the retained resources stay).
+
+## Testing & quality
+
+```bash
+npm test                # jest + aws-cdk-lib/assertions (fixed test env, independent of .env)
+npx tsc --noEmit        # typecheck everything, including constructs not in the synth graph
+npx cdk synth --quiet   # synthesize the active graph
+npm run secretlint      # secret scan
+```
+
+There is no linter or formatter configured. `AGENTS.md` asks to run the first
+three commands before finishing any change.
+
+## Regenerating / upgrading
+
+`arkho.json` records the template name, version, Git tag and commit plus your
+answers (`project_name`). The template version is pinned there; to compare with
+a newer template release, generate a fresh project with the same answers and the
+desired `--template-version`, then port the differences.
