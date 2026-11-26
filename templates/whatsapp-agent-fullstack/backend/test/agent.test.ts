@@ -37,7 +37,8 @@ describe('AgentFactory', () => {
         template.resourceCountIs('AWS::BedrockAgentCore::Memory', 0);
         template.resourcePropertiesCountIs('AWS::SQS::Queue', { QueueName: Match.stringLikeRegexp('agent-jobs') }, 0);
         template.resourcePropertiesCountIs('AWS::SSM::Parameter', { Name: `/${PREFIX}-agent-prompt` }, 0);
-        template.resourcePropertiesCountIs('AWS::Lambda::Function', { FunctionName: Match.stringLikeRegexp('agent') }, 0);
+        // The agent's functions only: a project may have "agent" in its own name.
+        template.resourcePropertiesCountIs('AWS::Lambda::Function', { FunctionName: Match.stringLikeRegexp(`^${PREFIX}-(whatsapp-)?agent`) }, 0);
         const wsHandler = Object.values(
           template.findResources('AWS::Lambda::Function', { Properties: { FunctionName: `${PREFIX}-whatsapp-ws-handler` } })
         )[0] as any;
