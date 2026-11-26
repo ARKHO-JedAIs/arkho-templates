@@ -21,6 +21,12 @@ export interface AgentConfigApiProps {
   /** The agent-prompt parameter: publishing writes the version there. */
   promptParameter: SsmParametersConstruct;
   promptKey: string;
+  /** The same construct's agent-settings parameter (memory window and answer limit). */
+  settingsKey: string;
+  /** What AgentCore Memory keeps beyond a conversation, shown next to the memory setting. */
+  longTermMemoryMode: string;
+  /** Seeds the settings the function reads before the parameter exists. */
+  rateLimitPerHour: number;
   /** What the agent uses until a model is chosen from the web. */
   defaultModel: { id: string; temperature: number; maxTokens: number };
 }
@@ -37,6 +43,11 @@ const ROUTES = [
   { path: '/admin/agent/models', method: 'GET' },
 ];
 
+const SETTINGS_ROUTES = [
+  { path: '/admin/agent/settings', method: 'GET' },
+  { path: '/admin/agent/settings', method: 'PUT' },
+];
+
 /**
  * The prompt manager (the web's "Agente IA" screen). The instructions, model
  * and inference parameters live in an Amazon Bedrock Prompt Management prompt
@@ -48,11 +59,23 @@ const ROUTES = [
 export class AgentConfigApi extends Construct {
   public readonly table: DynamoConstruct;
   public readonly function: LambdaConstruct;
+  public readonly settingsFunction: LambdaConstruct;
 
   constructor(scope: Construct, id: string, props: AgentConfigApiProps) {
     super(scope, id);
 
-    const { params, layerFactory, apiFactory, access, promptParameter, promptKey, defaultModel } = props;
+    const {
+      params,
+      layerFactory,
+      apiFactory,
+      access,
+      promptParameter,
+      promptKey,
+      settingsKey,
+      longTermMemoryMode,
+      rateLimitPerHour,
+      defaultModel,
+    } = props;
     const { envName, projectName, isProd } = params;
     const prefix = `${projectName}-${envName}`;
     const { account, partition, region } = Stack.of(this);
@@ -124,6 +147,30 @@ export class AgentConfigApi extends Construct {
 
     for (const route of ROUTES) {
       apiFactory.restApi.addRoute({ ...route, lambda: this.function.function });
+    }
+
+    this.settingsFunction = new LambdaConstruct(this, 'SettingsAdminLambda', {
+      functionName: `${prefix}-agent-settings-admin`,
+      description: 'Agent settings API: memory window and answer limit',
+      code: Code.fromAsset('src/lambda/agent/settings-admin'),
+      handler: 'index.handler',
+      runtime: PYTHON_RUNTIME,
+      layers: [layerFactory.pythonCommonLayer.layer],
+      environment: {
+        AGENT_SETTINGS_PARAMETER_NAME: promptParameter.getParameterName(settingsKey),
+        AGENT_MEMORY_MODE: longTermMemoryMode,
+        AGENT_RATE_LIMIT_PER_HOUR: String(rateLimitPerHour),
+      },
+      logging: {
+        logRetention: RetentionDays.ONE_MONTH,
+        removalPolicy: isProd ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
+      },
+    });
+    promptParameter.grantRead(this.settingsFunction.function, settingsKey);
+    promptParameter.grantWrite(this.settingsFunction.function, settingsKey);
+    access.grantRead(this.settingsFunction.function);
+    for (const route of SETTINGS_ROUTES) {
+      apiFactory.restApi.addRoute({ ...route, lambda: this.settingsFunction.function });
     }
   }
 }

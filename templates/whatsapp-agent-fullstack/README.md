@@ -316,7 +316,7 @@ not even read the conversation) wait 14 days in `AgentJobsDeadLetterQueueUrl`.
 | `AGENT_MODEL_ID` | Bedrock model id or inference profile id. |
 | `AGENT_BUSINESS_DESCRIPTION` | One or two sentences that seed the base prompt. |
 | `AGENT_MEMORY_MODE` | `off`, `conversation`, `facts`, `facts_summaries`. |
-| `AGENT_RATE_LIMIT_PER_HOUR` | Agent replies per customer per hour (default 30). |
+| `AGENT_RATE_LIMIT_PER_HOUR` | Initial agent replies per customer per hour (default 30). Configuración > Agente IA > Memoria y límites changes it afterwards; a deploy that changes this value overwrites those edits. |
 | `AGENT_BUSINESS_API_URL` | Optional HTTPS API the agent's tools may call. |
 
 ## WhatsApp configuration

@@ -96,6 +96,7 @@ def invoke_agent(job: dict) -> dict:
             "prompt": job.get("text", ""),
             "actor_id": job.get("actor_id") or agent.actor_id(job["phone"]),
             "session_id": job["session_id"],
+            "memory": job.get("memory", True) is not False,
             "channel": CHANNEL,
             "user_name": job.get("user_name", ""),
             # Not part of the memory identity (actor_id is a hash): only the

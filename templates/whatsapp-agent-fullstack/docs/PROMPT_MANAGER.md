@@ -291,6 +291,26 @@ El prompt manager no depende de las herramientas del agente: un proyecto con her
 
 ---
 
+## Memoria y límite de respuestas
+
+La pestaña **Memoria y límites** no es parte del borrador: se guarda y se aplica en menos de un minuto, sin publicar. Necesita el permiso `agent.settings`. Se guardan en el parámetro `/<proyecto>-<entorno>-agent-settings` (JSON), que `ws-handler` relee cada minuto; la API es `/admin/agent/settings` (`agent/settings-admin`).
+
+**Memoria.** Qué es una conversación para el agente lo decide `ws-handler` al encolar cada mensaje:
+
+| Opción | Qué pasa |
+|---|---|
+| Mantener un tiempo (por defecto, 60 min) | La conversación sigue mientras el cliente escriba; tras N minutos sin mensajes, el siguiente empieza limpio. |
+| Limpio en cada consulta | Cada mensaje es una sesión nueva, sin historial. Lo que AgentCore Memory guarda a largo plazo (`AGENT_MEMORY_MODE` = `facts` o `facts_summaries`) sigue aplicando. |
+| Sin memoria | La sesión es nueva y el agente ni lee ni guarda memoria en ese turno. |
+
+Antes, la sesión era una por cliente y por día UTC: todo lo escrito en el día se recuperaba como historial y nada lo limpiaba, y el corte caía a medianoche UTC y no a la local. El tiempo se mide desde el último mensaje del cliente (`agent_session_at` en la conversación).
+
+**Límite.** Respuestas del agente por cliente y hora, o sin límite. Pasado el máximo el cliente recibe un aviso una vez por hora.
+
+El despliegue solo siembra el valor inicial (`AGENT_RATE_LIMIT_PER_HOUR` y 60 minutos): un deploy que cambie ese valor sobrescribe lo editado en la web.
+
+---
+
 ## 12. Decisiones y por qué
 
 - **Bedrock Prompt Management en vez de un sistema propio:** es el servicio de AWS para esto, se puede usar desde la consola y sigue la misma línea del resto del proyecto (WhatsApp con End User Messaging, AgentCore).

@@ -61,6 +61,7 @@ El menú de la barra lateral y las rutas siguen estos permisos: una página apar
 | `agent.test` | Probar el borrador |
 | `agent.publish` | Publicar, activar versiones y encender o apagar el agente |
 | `agent.model` | Cambiar el modelo y sus parámetros |
+| `agent.settings` | Cambiar la memoria y el límite de respuestas del agente |
 | `access.manage` | Crear roles y editar sus permisos (pantalla Roles y permisos) |
 
 ## Tareas comunes

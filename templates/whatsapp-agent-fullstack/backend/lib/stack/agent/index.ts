@@ -34,6 +34,8 @@ export const AGENT_DIRECTORY = 'src/agent';
 export const AGENT_LAMBDA_CMD = ['lambda_handler.handler'];
 
 const PROMPT_KEY = 'agentPrompt';
+const SETTINGS_KEY = 'agentSettings';
+const DEFAULT_MEMORY_WINDOW_MINUTES = 60;
 const DEFAULT_TIMEZONE = 'America/Santiago';
 const MODEL_MAX_TOKENS = 1024;
 const MODEL_TEMPERATURE = 0.3;
@@ -158,9 +160,23 @@ export class AgentFactory extends Construct {
           tier: ssm.ParameterTier.INTELLIGENT_TIERING,
           description: 'AI agent: base prompt, greeting, refusal, handoff message, on/off',
         },
+        {
+          key: SETTINGS_KEY,
+          parameterName: `/${prefix}-agent-settings`,
+          simpleName: false,
+          // The seed only: the web edits it from here on (Agente IA), and a deploy
+          // that changes this value (or AGENT_RATE_LIMIT_PER_HOUR) overwrites those edits.
+          stringValue: JSON.stringify({
+            memory: { mode: 'window', minutes: DEFAULT_MEMORY_WINDOW_MINUTES },
+            rateLimit: { enabled: true, perHour: agent.rateLimitPerHour },
+          }),
+          dataType: ssm.ParameterDataType.TEXT,
+          description: 'AI agent: memory window and answer limit, edited from the web',
+        },
       ],
     });
     const promptParameterName = this.promptParameter.getParameterName(PROMPT_KEY);
+    const settingsParameterName = this.promptParameter.getParameterName(SETTINGS_KEY);
 
     if (agent.memoryMode !== 'off') {
       this.memory = new AgentCoreMemoryConstruct(this, 'Memory', {
@@ -290,9 +306,10 @@ export class AgentFactory extends Construct {
     const wsHandler = whatsappFactory.functions['ws-handler'].function;
     wsHandler.addEnvironment('AGENT_JOBS_QUEUE_URL', this.jobsQueue.queueUrl);
     wsHandler.addEnvironment('AGENT_PROMPT_PARAMETER_NAME', promptParameterName);
+    wsHandler.addEnvironment('AGENT_SETTINGS_PARAMETER_NAME', settingsParameterName);
     wsHandler.addEnvironment('AGENT_RATE_LIMIT_PER_HOUR', String(agent.rateLimitPerHour));
     this.jobsQueue.grantSendMessages(wsHandler);
-    this.promptParameter.grantRead(wsHandler, PROMPT_KEY);
+    this.promptParameter.grantRead(wsHandler, PROMPT_KEY, SETTINGS_KEY);
 
     if (configApi) {
       new AgentConfigApi(this, 'ConfigApi', {
@@ -300,6 +317,9 @@ export class AgentFactory extends Construct {
         ...configApi,
         promptParameter: this.promptParameter,
         promptKey: PROMPT_KEY,
+        settingsKey: SETTINGS_KEY,
+        longTermMemoryMode: agent.memoryMode,
+        rateLimitPerHour: agent.rateLimitPerHour,
         defaultModel: { id: agent.modelId, temperature: MODEL_TEMPERATURE, maxTokens: MODEL_MAX_TOKENS },
       });
     }

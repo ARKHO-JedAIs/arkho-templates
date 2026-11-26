@@ -369,13 +369,15 @@ def hand_to_agent(message: dict, origination_phone_number_id: str) -> str:
     if not agent.take_turn(phone):
         logger.info("Agent rate limit reached for %s", phone[-4:])
         return agent.RATE_LIMITED_TEXT if agent.claim_rate_notice(phone) else ""
+    session = agent.resolve_session(phone, message["message_id"])
     agent.enqueue(
         {
             "phone": phone,
             "message_id": message["message_id"],
             "text": message["text"],
             "user_name": message["name"],
-            "session_id": agent.session_id(phone),
+            "session_id": session["session_id"],
+            "memory": session["memory"],
             "actor_id": agent.actor_id(phone),
             "origination_phone_number_id": origination_phone_number_id,
         }

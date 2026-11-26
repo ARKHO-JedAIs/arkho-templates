@@ -172,6 +172,11 @@ class ToolsInTurnTest(unittest.TestCase):
         self.assertEqual(turn.parse_request({"actor_id": ACTOR, "phone": "56 9 abc"}).phone, "")
         self.assertEqual(turn.parse_request({"actor_id": ACTOR, "phone": PHONE, "channel": "web"}).phone, "")
 
+    def test_memory_is_on_unless_the_payload_turns_it_off(self):
+        self.assertTrue(turn.parse_request({"actor_id": ACTOR}).memory)
+        self.assertTrue(turn.parse_request({"actor_id": ACTOR, "memory": True}).memory)
+        self.assertFalse(turn.parse_request({"actor_id": ACTOR, "memory": False}).memory)
+
     def test_missing_phone_on_whatsapp_disables_the_handoff_tool(self):
         model = FakeModel([text("ok")])
         request = payload("necesito ayuda con el modo de pago")

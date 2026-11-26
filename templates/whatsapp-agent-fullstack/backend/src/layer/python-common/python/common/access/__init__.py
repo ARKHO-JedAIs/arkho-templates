@@ -57,6 +57,7 @@ ACTIONS = {
     "agent.test": "Probar el borrador del agente",
     "agent.publish": "Publicar y volver a una versión anterior del agente",
     "agent.model": "Cambiar modelo, respaldos, temperatura y tokens",
+    "agent.settings": "Cambiar la memoria y el límite de respuestas del agente",
     "agent.tools": "Activar herramientas y cambiar parámetros de negocio",
     "access.manage": "Crear y editar roles y sus permisos",
 }

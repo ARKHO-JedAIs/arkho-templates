@@ -56,6 +56,8 @@ class TurnRequest:
     user_name: str | None
     stream: bool = False
     raw_phone: str = ""
+    # False: this turn neither reads nor writes memory (the "no memory" setting).
+    memory: bool = True
 
     @property
     def phone(self) -> str:
@@ -86,6 +88,7 @@ def parse_request(payload) -> TurnRequest:
         user_name=str(user_name) if user_name else None,
         stream=data.get("stream") is True,
         raw_phone=str(data.get("phone") or ""),
+        memory=data.get("memory") is not False,
     )
 
 
@@ -201,8 +204,9 @@ def prepare_turn(request: TurnRequest) -> dict | PreparedTurn:
     if request.channel == WHATSAPP and not request.phone:
         logger.warning("WhatsApp turn without a valid phone field: the handoff tool is disabled")
     tools = build_tools(config, settings, request.channel, request.phone)
-    session_manager = build_session_manager(config, request.actor_id, request.session_id)
-    model_config = with_model(config, settings)
+    session_manager = (
+        build_session_manager(config, request.actor_id, request.session_id) if request.memory else None
+    )    model_config = with_model(config, settings)
     agent = build_agent(model_config, tools.tools, session_manager, system_prompt=system_prompt.blocks, hooks=[guard])
     return PreparedTurn(
         request=request,

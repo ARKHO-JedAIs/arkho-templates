@@ -25,6 +25,12 @@ interface PermissionsState {
 const API_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/+$/, '');
 
 // Mock mode has no backend: the same defaults the seed writes, so the demo shows what a real deploy would.
+const MOCK_ACTIONS: Record<string, string[]> = {
+  developer: ['agent.edit', 'agent.publish', 'agent.settings', 'access.manage'],
+  admin: ['access.manage'],
+  member: [],
+};
+
 const MOCK_MENU: Record<string, string[]> = {
   developer: ['whatsapp', 'templates', 'users', 'agent', 'access'],
   admin: ['whatsapp', 'templates', 'users', 'access'],
@@ -35,7 +41,8 @@ function mockPermissions(groups: string[]): Permissions {
   const roles = groups.filter(group => !group.includes('_'));
   const effective = roles.length > 0 ? roles : ['member'];
   const menu = [...new Set(effective.flatMap(role => MOCK_MENU[role] ?? []))];
-  return { roles: effective, menu, actions: [] };
+  const actions = [...new Set(effective.flatMap(role => MOCK_ACTIONS[role] ?? []))];
+  return { roles: effective, menu, actions };
 }
 
 async function fetchPermissions(groups: string[]): Promise<Permissions> {

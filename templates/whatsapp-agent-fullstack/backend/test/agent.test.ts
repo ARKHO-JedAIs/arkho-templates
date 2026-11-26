@@ -107,6 +107,25 @@ describe('AgentFactory', () => {
       expect(parameter.Properties.Tier).toBe('Intelligent-Tiering');
     });
 
+    it('keeps the memory window and the answer limit in a parameter the web edits', () => {
+      const template = agentcore();
+      const parameter = Object.values(
+        template.findResources('AWS::SSM::Parameter', { Properties: { Name: `/${PREFIX}-agent-settings` } })
+      )[0] as any;
+      const settings = JSON.parse(parameter.Properties.Value);
+      expect(settings.memory).toEqual({ mode: 'window', minutes: 60 });
+      expect(settings.rateLimit.enabled).toBe(true);
+      template.hasResourceProperties('AWS::Lambda::Function', {
+        FunctionName: `${PREFIX}-agent-settings-admin`,
+        Environment: { Variables: Match.objectLike({ AGENT_SETTINGS_PARAMETER_NAME: Match.anyValue() }) },
+      });
+      template.hasResourceProperties('AWS::ApiGateway::Resource', { PathPart: 'settings' });
+      template.hasResourceProperties('AWS::Lambda::Function', {
+        FunctionName: `${PREFIX}-whatsapp-ws-handler`,
+        Environment: { Variables: Match.objectLike({ AGENT_SETTINGS_PARAMETER_NAME: Match.anyValue() }) },
+      });
+    });
+
     it('omits the business line from the base prompt when there is no description', () => {
       expect(initialPrompt('acme', '').basePrompt).not.toContain('Sobre el negocio');
     });

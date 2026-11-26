@@ -7,7 +7,9 @@ customer lives on the conversation item:
 
 * ``agent_turn_hour`` / ``agent_turns`` - the hourly rate limit counter,
 * ``agent_rate_notice_hour`` - the hour the "too many messages" notice went out,
-* ``agent_blocked_since`` / ``agent_blocked_count`` - off-topic turns in 24 h.
+* ``agent_blocked_since`` / ``agent_blocked_count`` - off-topic turns in 24 h,
+* ``agent_session_id`` / ``agent_session_at`` - the conversation the agent is
+  in and when the customer last wrote (the memory window, see agent_settings).
 
 The agent is switched on and off with ``enabled`` in its prompt parameter,
 without a deploy; when it is off, the fixed automatic reply answers again.
@@ -22,13 +24,12 @@ from datetime import datetime, timedelta, timezone
 import boto3
 from botocore.exceptions import ClientError
 
-from . import realtime, store
+from . import agent_settings, realtime, store
 
 logger = logging.getLogger(__name__)
 
 JOBS_QUEUE_URL = os.environ.get("AGENT_JOBS_QUEUE_URL", "")
 PROMPT_PARAMETER_NAME = os.environ.get("AGENT_PROMPT_PARAMETER_NAME", "")
-DEFAULT_RATE_LIMIT_PER_HOUR = 30
 
 # A prompt parameter edit (the on/off switch) is picked up within this time.
 ENABLED_CACHE_SECONDS = 60
@@ -75,11 +76,10 @@ def configured() -> bool:
     return bool(JOBS_QUEUE_URL)
 
 
-def rate_limit_per_hour() -> int:
-    try:
-        return max(int(os.environ.get("AGENT_RATE_LIMIT_PER_HOUR") or DEFAULT_RATE_LIMIT_PER_HOUR), 1)
-    except ValueError:
-        return DEFAULT_RATE_LIMIT_PER_HOUR
+def rate_limit_per_hour() -> int | None:
+    """Agent turns per customer per hour from the live settings; None when there is no limit."""
+    limit = agent_settings.read()["rateLimit"]
+    return limit["perHour"] if limit["enabled"] else None
 
 
 def enabled() -> bool:
@@ -106,13 +106,55 @@ def _digest(phone: str) -> str:
     return hashlib.sha256(phone.encode("utf-8")).hexdigest()
 
 
-def session_id(phone: str, moment: datetime | None = None) -> str:
-    """One agent session per customer and UTC day (36 characters).
+def _session_base(phone: str) -> str:
+    return f"wa-{_digest(phone)[:24]}"
+
+
+def resolve_session(phone: str, message_id: str = "", moment: datetime | None = None) -> dict:
+    """The agent session of this message and whether it may use memory: ``{"session_id", "memory"}``.
 
     AgentCore requires a runtimeSessionId of at least 33 characters; the phone
-    is hashed so it never reaches the runtime's logs.
+    is hashed so it never reaches the runtime's logs. The live memory setting
+    decides what a session is: nothing kept (``off``), a clean one per message
+    (``each_message``) or one that lasts until the customer is silent for the
+    configured minutes (``window``).
     """
-    return f"wa-{_digest(phone)[:24]}-{_now(moment):%Y%m%d}"
+    memory = agent_settings.read()["memory"]
+    now = _now(moment)
+    base = _session_base(phone)
+    if memory["mode"] in (agent_settings.MEMORY_OFF, agent_settings.MEMORY_EACH_MESSAGE):
+        token = hashlib.sha256((message_id or f"{phone}-{time.time_ns()}").encode("utf-8")).hexdigest()[:12]
+        return {"session_id": f"{base}-{token}", "memory": memory["mode"] != agent_settings.MEMORY_OFF}
+
+    table = store._require(store.conversations_table, "WHATSAPP_CONVERSATIONS_TABLE_NAME")
+    epoch = int(now.timestamp())
+    names = {"#id": "agent_session_id", "#at": "agent_session_at"}
+    # Atomic: of two messages arriving together, one starts the new session and
+    # the other joins it instead of starting a second one.
+    try:
+        table.update_item(
+            Key={"phone": phone},
+            UpdateExpression="SET #id = :id, #at = :now",
+            ConditionExpression="attribute_not_exists(#at) OR #at < :cutoff",
+            ExpressionAttributeNames=names,
+            ExpressionAttributeValues={
+                ":id": f"{base}-{now:%Y%m%d%H%M%S}",
+                ":now": epoch,
+                ":cutoff": epoch - memory["minutes"] * 60,
+            },
+        )
+        return {"session_id": f"{base}-{now:%Y%m%d%H%M%S}", "memory": True}
+    except ClientError as error:
+        if not _conditional_failed(error):
+            raise
+    current = table.update_item(
+        Key={"phone": phone},
+        UpdateExpression="SET #at = :now",
+        ExpressionAttributeNames=names,
+        ExpressionAttributeValues={":now": epoch},
+        ReturnValues="ALL_NEW",
+    )
+    return {"session_id": current["Attributes"]["agent_session_id"], "memory": True}
 
 
 def actor_id(phone: str) -> str:
@@ -124,8 +166,12 @@ def take_turn(phone: str, moment: datetime | None = None) -> bool:
     """Counts one agent turn for this customer; False when the hour's limit is spent.
 
     Atomic: the counter moves only through conditional updates, so two
-    messages processed at once cannot both take the last turn.
+    messages processed at once cannot both take the last turn. Without a limit
+    (switched off in the settings) every turn is allowed and nothing is counted.
     """
+    limit = rate_limit_per_hour()
+    if limit is None:
+        return True
     table = store._require(store.conversations_table, "WHATSAPP_CONVERSATIONS_TABLE_NAME")
     hour = _now(moment).strftime("%Y%m%d%H")
     names = {"#hour": "agent_turn_hour", "#turns": "agent_turns"}
@@ -137,7 +183,7 @@ def take_turn(phone: str, moment: datetime | None = None) -> bool:
                 UpdateExpression="SET #turns = #turns + :one",
                 ConditionExpression="#hour = :hour AND #turns < :limit",
                 ExpressionAttributeNames=names,
-                ExpressionAttributeValues={":one": 1, ":hour": hour, ":limit": rate_limit_per_hour()},
+                ExpressionAttributeValues={":one": 1, ":hour": hour, ":limit": limit},
             )
             return True
         except ClientError as error:

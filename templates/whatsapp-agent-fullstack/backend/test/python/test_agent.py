@@ -26,6 +26,14 @@ spec.loader.exec_module(agent_worker)
 
 PHONE = "56911111111"
 NOW = datetime(2026, 10, 1, 14, 30, tzinfo=timezone.utc)
+SESSION = "wa-" + "a" * 24 + "-20261001143000"
+
+
+def settings(mode="window", minutes=60, limit_enabled=True, per_hour=30) -> dict:
+    return {
+        "memory": {"mode": mode, "minutes": minutes},
+        "rateLimit": {"enabled": limit_enabled, "perHour": per_hour},
+    }
 
 
 def client_error(code: str) -> Exception:
@@ -48,7 +56,7 @@ def job(**extra) -> dict:
         "message_id": "wamid.1",
         "text": "Hola, ¿tienen despacho?",
         "user_name": "Camila",
-        "session_id": agent.session_id(PHONE, NOW),
+        "session_id": SESSION,
         "actor_id": agent.actor_id(PHONE),
         "origination_phone_number_id": "arn:phone",
         **extra,
@@ -66,13 +74,48 @@ class AgentHelpersTest(unittest.TestCase):
         patcher.start()
         self.addCleanup(mock.patch.stopall)
 
-    def test_session_ids_meet_agentcore_minimum_and_rotate_daily(self):
-        today = agent.session_id(PHONE, NOW)
-        self.assertGreaterEqual(len(today), 33)
-        self.assertTrue(today.startswith("wa-") and today.endswith("-20261001"))
-        self.assertNotIn(PHONE, today)
-        self.assertNotEqual(today, agent.session_id(PHONE, NOW + timedelta(days=1)))
-        self.assertEqual(today, agent.session_id(PHONE, NOW + timedelta(hours=1)))
+    def read_settings(self, **values):
+        patcher = mock.patch.object(agent.agent_settings, "read", return_value=settings(**values))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_a_window_session_starts_clean_after_the_customer_was_silent(self):
+        self.read_settings(mode="window", minutes=30)
+        session = agent.resolve_session(PHONE, "wamid.1", NOW)
+        self.assertEqual(session["session_id"], f"{agent._session_base(PHONE)}-20261001143000")
+        self.assertTrue(session["memory"])
+        self.assertGreaterEqual(len(session["session_id"]), 33)
+        self.assertNotIn(PHONE, session["session_id"])
+        values = self.table.update_item.call_args.kwargs["ExpressionAttributeValues"]
+        self.assertEqual(values[":cutoff"], int(NOW.timestamp()) - 30 * 60)
+        self.assertIn("attribute_not_exists(#at) OR #at < :cutoff", self.table.update_item.call_args.kwargs["ConditionExpression"])
+
+    def test_a_window_session_continues_while_the_customer_keeps_writing(self):
+        self.read_settings(mode="window", minutes=30)
+        self.table.update_item.side_effect = [
+            conditional_failed(),
+            {"Attributes": {"agent_session_id": "wa-current-session"}},
+        ]
+        session = agent.resolve_session(PHONE, "wamid.2", NOW + timedelta(minutes=10))
+        self.assertEqual(session, {"session_id": "wa-current-session", "memory": True})
+        self.assertEqual(self.table.update_item.call_args.kwargs["ReturnValues"], "ALL_NEW")
+
+    def test_each_message_gets_its_own_clean_session(self):
+        self.read_settings(mode="each_message")
+        first = agent.resolve_session(PHONE, "wamid.1", NOW)
+        second = agent.resolve_session(PHONE, "wamid.2", NOW)
+        self.assertNotEqual(first["session_id"], second["session_id"])
+        self.assertEqual(first["session_id"], agent.resolve_session(PHONE, "wamid.1", NOW)["session_id"])
+        self.assertGreaterEqual(len(first["session_id"]), 33)
+        self.assertTrue(first["memory"])
+        self.table.update_item.assert_not_called()
+
+    def test_no_memory_turns_off_memory_for_the_turn(self):
+        self.read_settings(mode="off")
+        session = agent.resolve_session(PHONE, "wamid.1", NOW)
+        self.assertFalse(session["memory"])
+        self.assertGreaterEqual(len(session["session_id"]), 33)
+        self.table.update_item.assert_not_called()
 
     def test_actor_id_is_stable_and_hides_the_phone(self):
         self.assertEqual(agent.actor_id(PHONE), agent.actor_id(PHONE))
@@ -93,9 +136,15 @@ class AgentHelpersTest(unittest.TestCase):
 
     def test_take_turn_refuses_over_the_limit(self):
         self.table.update_item.side_effect = conditional_failed()
-        with mock.patch.dict("os.environ", {"AGENT_RATE_LIMIT_PER_HOUR": "5"}):
-            self.assertFalse(agent.take_turn(PHONE, NOW))
+        self.read_settings(per_hour=5)
+        self.assertFalse(agent.take_turn(PHONE, NOW))
         self.assertEqual(self.table.update_item.call_args_list[0].kwargs["ExpressionAttributeValues"][":limit"], 5)
+
+    def test_without_a_limit_every_turn_is_allowed_and_nothing_is_counted(self):
+        self.read_settings(limit_enabled=False)
+        self.table.update_item.side_effect = conditional_failed()
+        self.assertTrue(agent.take_turn(PHONE, NOW))
+        self.table.update_item.assert_not_called()
 
     def test_rate_notice_is_claimed_once_per_hour(self):
         self.assertTrue(agent.claim_rate_notice(PHONE, NOW))
@@ -151,6 +200,7 @@ class WsHandlerRoutingTest(unittest.TestCase):
             mock.patch.object(agent, "take_turn", return_value=True),
             mock.patch.object(agent, "claim_rate_notice", return_value=True),
             mock.patch.object(agent, "enqueue"),
+            mock.patch.object(agent, "resolve_session", return_value={"session_id": SESSION, "memory": True}),
         ]
         self.mocks.update({p.attribute: p.start() for p in patches})
 
@@ -176,7 +226,8 @@ class WsHandlerRoutingTest(unittest.TestCase):
         self.assertEqual(queued["text"], "Hola")
         self.assertEqual(queued["user_name"], "Camila")
         self.assertEqual(queued["origination_phone_number_id"], "arn:phone")
-        self.assertGreaterEqual(len(queued["session_id"]), 33)
+        self.assertEqual(queued["session_id"], SESSION)
+        self.assertTrue(queued["memory"])
         self.assertEqual(queued["actor_id"], agent.actor_id(PHONE))
 
     def test_a_switched_off_agent_falls_back_to_the_auto_reply(self):
@@ -354,11 +405,19 @@ class InvokeAgentTest(unittest.TestCase):
                 "prompt": "Hola, ¿tienen despacho?",
                 "actor_id": agent.actor_id(PHONE),
                 "session_id": job()["session_id"],
+                "memory": True,
                 "channel": "whatsapp",
                 "user_name": "Camila",
                 "phone": PHONE,
             },
         )
+
+    def test_no_memory_is_forwarded_to_the_agent(self):
+        self.client.invoke_agent_runtime.return_value = {"response": io.BytesIO(b'{"status": "ok", "response": "Hola"}')}
+        with mock.patch.object(agent_worker, "AGENT_RUNTIME_ARN", "arn:runtime"):
+            agent_worker.invoke_agent(job(memory=False))
+        payload = json.loads(self.client.invoke_agent_runtime.call_args.kwargs["payload"].decode("utf-8"))
+        self.assertIs(payload["memory"], False)
 
     def test_agentcore_stream_takes_the_last_event(self):
         stream = b'data: {"status": "ok", "response": "parcial"}\n\ndata: {"status": "ok", "response": "final"}\n\n'

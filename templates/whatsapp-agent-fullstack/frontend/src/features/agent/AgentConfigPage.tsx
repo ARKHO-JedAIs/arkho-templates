@@ -3,6 +3,7 @@ import { useNavigate } from '@tanstack/react-router';
 import {
   AlertTriangle,
   Braces,
+  Brain,
   Cpu,
   ExternalLink,
   History,
@@ -33,18 +34,20 @@ import {
   saveDraft,
 } from './agentConfigService';
 import { ModelPanel } from './components/ModelPanel';
+import { SettingsPanel } from './components/SettingsPanel';
 import { ParametersPanel } from './components/ParametersPanel';
 import { VersionHistory } from './components/VersionHistory';
 import { formatDate } from './format';
 import { LIMITS, sameValue, variablesOf, type AgentConfig, type AgentConfigState } from './types';
 
-type Tab = 'instructions' | 'messages' | 'parameters' | 'model' | 'history';
+type Tab = 'instructions' | 'messages' | 'parameters' | 'model' | 'settings' | 'history';
 
 const TABS: { id: Tab; label: string; icon: typeof ScrollText }[] = [
   { id: 'instructions', label: 'Instrucciones', icon: ScrollText },
   { id: 'messages', label: 'Mensajes', icon: MessageSquareText },
   { id: 'parameters', label: 'Parámetros', icon: Braces },
   { id: 'model', label: 'Modelo', icon: Cpu },
+  { id: 'settings', label: 'Memoria y límites', icon: Brain },
   { id: 'history', label: 'Historial', icon: History },
 ];
 
@@ -442,6 +445,8 @@ export function AgentConfigPage() {
       {tab === 'model' && (
         <ModelPanel model={form.model} onChange={model => update('model', model)} />
       )}
+
+      {tab === 'settings' && <SettingsPanel />}
 
       {tab === 'history' && (
         <VersionHistory current={published.version} onRestored={load} onError={handleError} />
