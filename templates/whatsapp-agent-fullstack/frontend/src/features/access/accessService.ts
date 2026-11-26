@@ -72,6 +72,14 @@ const mockOverview: AccessOverview = {
   ],
 };
 
+// The Voz page exists only where voice was deployed, as in the real catalog.
+if (import.meta.env.VITE_VOICE_PROVIDER === 'polly') {
+  mockOverview.menu.splice(4, 0, { id: 'voice', label: 'Voz del agente' });
+  for (const role of mockOverview.roles) {
+    if (role.id === 'developer' || role.id === 'admin') role.permissions.menu.push('voice');
+  }
+}
+
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
