@@ -12,7 +12,7 @@ import HomePage from '@/features/home/HomePage';
 import { AppError } from '@/components/AppError';
 import { SectionPending } from '@/components/SectionPending';
 import NotFoundPage from '@/components/NotFoundPage';
-import { requireAdmin, requireAuth, requireDeveloper } from './guards';
+import { requireAdmin, requireAuth, requireDeveloper, requireSection } from './guards';
 
 const rootRoute = createRootRoute({
   notFoundComponent: () => <NotFoundPage />,
@@ -53,11 +53,13 @@ const sectionRoutes = sections.flatMap(section =>
       getParentRoute: () => appRoute,
       path: page.path,
       component: lazyRouteComponent(page.load),
-      beforeLoad: section.requiresDeveloper
-        ? requireDeveloper
-        : section.requiresAdmin
-          ? requireAdmin
-          : requireAuth,
+      beforeLoad: section.menu
+        ? requireSection(section)
+        : section.requiresDeveloper
+          ? requireDeveloper
+          : section.requiresAdmin
+            ? requireAdmin
+            : requireAuth,
     })
   )
 );

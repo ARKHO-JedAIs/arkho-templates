@@ -10,6 +10,7 @@ export const section: AppSection = {
   // Answered at generation time. `false` means this build has a single profile:
   // the route guard and the sidebar filter both read this one flag,
   // so there is nothing left half-gated.
+  menu: 'users',
   requiresAdmin: true,
   order: 90,
 };

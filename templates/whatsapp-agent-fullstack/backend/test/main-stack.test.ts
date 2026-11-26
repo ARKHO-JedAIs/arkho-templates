@@ -119,4 +119,20 @@ describe('MainStack', () => {
       });
     }
   });
+
+  it('serves the roles API and lets it create and delete Cognito groups', () => {
+    const template = getTemplate();
+    template.hasResourceProperties('AWS::Lambda::Function', {
+      FunctionName: `${PREFIX}-roles-admin`,
+      Environment: { Variables: Match.objectLike({ ACCESS_TABLE_NAME: Match.anyValue() }) },
+    });
+    template.hasResourceProperties('AWS::ApiGateway::Resource', { PathPart: 'access' });
+    template.hasResourceProperties('AWS::IAM::Policy', {
+      PolicyDocument: {
+        Statement: Match.arrayWith([
+          Match.objectLike({ Action: Match.arrayWith(['cognito-idp:CreateGroup', 'cognito-idp:DeleteGroup']) }),
+        ]),
+      },
+    });
+  });
 });

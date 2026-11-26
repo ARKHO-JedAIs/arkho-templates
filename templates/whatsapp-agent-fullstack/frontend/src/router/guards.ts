@@ -1,4 +1,6 @@
 import { redirect } from '@tanstack/react-router';
+import type { AppSection } from '@/app/sections';
+import { isSectionAllowedNow, usePermissionsStore } from '@/lib/access/permissions';
 import useAuthStore, { isAdminNow, isDeveloperNow } from '@/lib/stores/useAuthStore';
 
 /**
@@ -33,6 +35,16 @@ export const requireAuth = async () => {
 export const requireAdmin = async () => {
   const result = await requireAuth();
   if (!isAdminNow()) {
+    throw redirect({ to: '/' });
+  }
+  return result;
+};
+
+/** Auth, then the role's permissions: the page the section's `menu` id names. */
+export const requireSection = (section: AppSection) => async () => {
+  const result = await requireAuth();
+  await usePermissionsStore.getState().load();
+  if (!isSectionAllowedNow(section)) {
     throw redirect({ to: '/' });
   }
   return result;

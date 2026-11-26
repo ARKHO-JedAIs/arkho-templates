@@ -5,6 +5,7 @@ the role may do lives in the access-control table, so it changes from the web
 without a new sign-in:
 
     PK=ROLE#<role>  SK=META   {name, description, system, hidden}
+                              (system=false: a role the project created from the web)
     PK=ROLE#<role>  SK=PERMS  {menu: [...], actions: [...]}
 
 `developer` holds every permission in code: no table edit can lock it out.
@@ -15,6 +16,7 @@ Without ACCESS_TABLE_NAME, or when the table cannot be read, the defaults
 below apply: the same values the seed writes on the first deploy.
 """
 import os
+import re
 import time
 
 DEVELOPER = "developer"
@@ -24,9 +26,13 @@ SYSTEM_ROLES = (DEVELOPER, ADMIN, MEMBER)
 # Only a developer sees, assigns or edits users of these roles.
 HIDDEN_ROLES = (DEVELOPER,)
 
+# A role the web creates is also a Cognito group named like its id, so the id
+# has no underscore (`<pool-id>_<Provider>` groups are not roles, see roles_of).
+ROLE_ID_PATTERN = re.compile(r"^[a-z][a-z0-9-]{1,29}$")
+
 ROLE_LABELS = {
     DEVELOPER: ("Developer", "Acceso técnico completo: configuración avanzada, roles y menú."),
-    ADMIN: ("Administrador", "Gestiona usuarios y plantillas."),
+    ADMIN: ("Administrador", "Gestiona usuarios, plantillas y roles."),
     MEMBER: ("Miembro", "Usa la bandeja y las páginas de la operación."),
 }
 
@@ -38,7 +44,6 @@ MENUS = {
     "agent": "Agente IA",
     "agent_advanced": "Agente IA: técnico",
     "access": "Roles y permisos",
-    "menu": "Menú y páginas",
 }
 
 ACTIONS = {
@@ -54,13 +59,12 @@ ACTIONS = {
     "agent.model": "Cambiar modelo, respaldos, temperatura y tokens",
     "agent.tools": "Activar herramientas y cambiar parámetros de negocio",
     "access.manage": "Crear y editar roles y sus permisos",
-    "menu.manage": "Editar el catálogo de páginas",
 }
 
 DEFAULT_PERMISSIONS = {
     # The agent screen (prompt manager) is for developers only, for now.
     ADMIN: {
-        "menu": ["whatsapp", "templates", "users"],
+        "menu": ["whatsapp", "templates", "users", "access"],
         "actions": [
             "whatsapp.reply",
             "whatsapp.agent_toggle",
@@ -68,6 +72,7 @@ DEFAULT_PERMISSIONS = {
             "templates.manage",
             "users.manage",
             "users.assign_roles",
+            "access.manage",
         ],
     },
     MEMBER: {
@@ -94,6 +99,7 @@ def register_menu(menu_id: str, label: str, roles=(ADMIN, MEMBER)) -> None:
 
 CACHE_SECONDS = 60
 _cache: dict[str, tuple[float, dict]] = {}
+_custom_roles_cache: list[tuple[float, list[dict]]] = []
 _table = None
 
 
@@ -135,6 +141,54 @@ def role_permissions(role: str) -> dict:
     return permissions
 
 
+def custom_roles() -> list[dict]:
+    """The roles created from the web: [{id, name, description}], cached 60 s.
+
+    Without the table, or when it cannot be read, there are none: only the
+    system roles exist.
+    """
+    if _custom_roles_cache and time.monotonic() - _custom_roles_cache[0][0] < CACHE_SECONDS:
+        return _custom_roles_cache[0][1]
+    roles: list[dict] = []
+    table = _access_table()
+    if table is not None:
+        try:
+            kwargs = {"FilterExpression": "SK = :meta", "ExpressionAttributeValues": {":meta": "META"}}
+            items = []
+            while True:
+                page = table.scan(**kwargs)
+                items += page.get("Items", [])
+                if not page.get("LastEvaluatedKey"):
+                    break
+                kwargs["ExclusiveStartKey"] = page["LastEvaluatedKey"]
+            for item in items:
+                role = str(item.get("PK", "")).removeprefix("ROLE#")
+                if role and role not in SYSTEM_ROLES and not item.get("system"):
+                    roles.append(
+                        {"id": role, "name": str(item.get("name") or role), "description": str(item.get("description") or "")}
+                    )
+            roles.sort(key=lambda role: role["name"].lower())
+        except Exception:  # noqa: BLE001 - an unreadable table leaves only the system roles
+            roles = []
+    _custom_roles_cache[:] = [(time.monotonic(), roles)]
+    return roles
+
+
+def all_roles() -> list[str]:
+    """Every role id: the system roles, then the ones created from the web."""
+    return list(SYSTEM_ROLES) + [role["id"] for role in custom_roles()]
+
+
+def role_label(role: str) -> tuple[str, str]:
+    """(name, description) of a role."""
+    if role in ROLE_LABELS:
+        return ROLE_LABELS[role]
+    for custom in custom_roles():
+        if custom["id"] == role:
+            return custom["name"], custom["description"]
+    return role, ""
+
+
 def roles_of(groups) -> list[str]:
     """The roles among the token's groups; none of them (only a provider group) = member.
 
@@ -172,9 +226,9 @@ def is_developer(groups) -> bool:
 def assignable_roles(groups) -> list[str]:
     """Roles this user may give or take away: every one for a developer, the visible ones otherwise."""
     if is_developer(groups):
-        return list(SYSTEM_ROLES)
+        return all_roles()
     if has(groups, "users.assign_roles"):
-        return [role for role in SYSTEM_ROLES if role not in HIDDEN_ROLES]
+        return [role for role in all_roles() if role not in HIDDEN_ROLES]
     return []
 
 
@@ -190,3 +244,4 @@ def allowed(event: dict, permission: str) -> bool:
 
 def clear_cache() -> None:
     _cache.clear()
+    _custom_roles_cache.clear()

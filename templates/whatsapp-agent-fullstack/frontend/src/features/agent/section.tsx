@@ -8,7 +8,8 @@ export const section: AppSection = {
   icon: Bot,
   group: 'Configuración',
   load: () => import('./AgentConfigPage'),
-  // Developers only; the backend checks agent.edit / agent.publish / agent.model on every call as well.
+  // The role's permissions decide (menu); without them, developers only. The backend checks agent.edit / agent.publish / agent.model on every call as well.
+  menu: 'agent',
   requiresAdmin: true,
   requiresDeveloper: true,
   order: 70,

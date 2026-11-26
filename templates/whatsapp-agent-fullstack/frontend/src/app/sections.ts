@@ -54,6 +54,12 @@ export interface AppSection {
    * section's sidebar link stays highlighted on them.
    */
   routes?: SectionRoute[];
+  /**
+   * The page id the backend grants to roles (`menu` of GET /me/permissions).
+   * When the permissions load, the route and the sidebar entry follow it;
+   * until then or without them, `requiresAdmin` and `requiresDeveloper` apply.
+   */
+  menu?: string;
   /** Restrict both the route and the sidebar entry to admins. */
   requiresAdmin?: boolean;
   /** Restrict both to the hidden developer role (implies requiresAdmin). */

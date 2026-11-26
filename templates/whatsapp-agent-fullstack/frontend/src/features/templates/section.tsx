@@ -16,6 +16,7 @@ export const section: AppSection = {
     { path: TEMPLATE_PATHS.edit, load: () => import('./CreateTemplatePage') },
   ],
   // Same answer as the users screen: with roles, configuration is for admins.
+  menu: 'templates',
   requiresAdmin: true,
   order: 80,
 };

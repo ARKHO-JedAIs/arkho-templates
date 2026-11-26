@@ -9,7 +9,8 @@ vi.mock('@/lib/auth/session', () => ({
 }));
 
 const { default: useAuthStore } = await import('@/lib/stores/useAuthStore');
-const { requireAdmin, requireAuth } = await import('@/router/guards');
+const { requireAdmin, requireAuth, requireSection } = await import('@/router/guards');
+const { usePermissionsStore } = await import('@/lib/access/permissions');
 
 const admin: AuthUser = { username: 'ada', groups: ['admin'] };
 const member: AuthUser = { username: 'bob', groups: ['member'] };
@@ -46,5 +47,42 @@ describe('requireAdmin', () => {
 
   it('redirects when there is no session at all', async () => {
     await expect(requireAdmin()).rejects.toSatisfy(isRedirect);
+  });
+});
+
+describe('requireSection', () => {
+  const templates = {
+    path: '/settings/templates',
+    label: 'Plantillas',
+    icon: () => null,
+    load: async () => ({ default: () => null }),
+    menu: 'templates',
+    requiresAdmin: true,
+  };
+  const ready = (menu: string[]) =>
+    usePermissionsStore.setState({
+      permissions: { roles: ['supervisor'], menu, actions: [] },
+      status: 'ready',
+      owner: 'bob',
+    });
+
+  it('lets a non-admin role in when its permissions include the page', async () => {
+    useAuthStore.setState({ user: member });
+    ready(['whatsapp', 'templates']);
+    await expect(requireSection(templates)()).resolves.toEqual({ user: member });
+  });
+
+  it('redirects a role whose permissions lack the page, even an admin', async () => {
+    useAuthStore.setState({ user: admin });
+    usePermissionsStore.setState({
+      permissions: { roles: ['admin'], menu: ['whatsapp'], actions: [] },
+      status: 'ready',
+      owner: 'ada',
+    });
+    await expect(requireSection(templates)()).rejects.toSatisfy(isRedirect);
+  });
+
+  it('redirects when there is no session', async () => {
+    await expect(requireSection(templates)()).rejects.toSatisfy(isRedirect);
   });
 });

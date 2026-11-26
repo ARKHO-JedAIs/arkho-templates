@@ -1,6 +1,7 @@
 import { ShieldAlert } from 'lucide-react';
 import { sections } from '@/app/sections';
-import useAuthStore, { selectIsAdmin } from '@/lib/stores/useAuthStore';
+import { isSectionAllowed, usePermissionsStore } from '@/lib/access/permissions';
+import useAuthStore, { selectIsAdmin, selectIsDeveloper } from '@/lib/stores/useAuthStore';
 import { isMockAuth } from '@/lib/auth/session';
 import { HomeIntro } from './HomeIntro';
 
@@ -10,8 +11,12 @@ const CONVERSATIONS_PATH = '/whatsapp';
 export default function HomePage() {
   const user = useAuthStore(state => state.user);
   const isAdmin = useAuthStore(selectIsAdmin);
+  const isDeveloper = useAuthStore(selectIsDeveloper);
+  const permissions = usePermissionsStore(state => state.permissions);
   const inbox = sections.find(
-    section => section.path === CONVERSATIONS_PATH && (!section.requiresAdmin || isAdmin)
+    section =>
+      section.path === CONVERSATIONS_PATH &&
+      isSectionAllowed(section, permissions, { isAdmin, isDeveloper })
   );
 
   return (

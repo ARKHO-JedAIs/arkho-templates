@@ -49,8 +49,9 @@ USER_POOL_ID = os.environ.get("USER_POOL_ID", "")
 ADMIN_GROUP = os.environ.get("ADMIN_GROUP", "")
 MEMBER_GROUP = os.environ.get("MEMBER_GROUP", "member")
 DEVELOPER_GROUP = os.environ.get("DEVELOPER_GROUP", "developer")
-ROLE_GROUPS = {"developer": DEVELOPER_GROUP, "admin": ADMIN_GROUP or "admin", "member": MEMBER_GROUP}
-GROUP_ROLES = {group: role for role, group in ROLE_GROUPS.items()}
+# The system roles may sit in groups named otherwise; a role created from the
+# web is a group named like its id (see role_groups()).
+SYSTEM_GROUPS = {"developer": DEVELOPER_GROUP, "admin": ADMIN_GROUP or "admin", "member": MEMBER_GROUP}
 
 cognito = boto3.client("cognito-idp")
 
@@ -88,10 +89,19 @@ def access_enabled() -> bool:
     return bool(os.environ.get("ACCESS_TABLE_NAME"))
 
 
+def role_groups() -> dict[str, str]:
+    """role -> Cognito group: the system roles, then (with access control) the ones made from the web."""
+    groups = dict(SYSTEM_GROUPS)
+    if access_enabled():
+        groups.update({role["id"]: role["id"] for role in access.custom_roles()})
+    return groups
+
+
 def assignable(event: dict) -> list[str]:
     """The roles the caller may give or take away."""
     if access_enabled():
-        return [role for role in access.assignable_roles(caller(event)["groups"]) if role in ROLE_GROUPS]
+        known = role_groups()
+        return [role for role in access.assignable_roles(caller(event)["groups"]) if role in known]
     return ["admin", "member"]
 
 
@@ -103,12 +113,13 @@ def roles_of(event: dict, body: dict) -> list[str] | None:
     roles = body.get("roles")
     if roles is None:
         return None
-    if not isinstance(roles, list) or any(role not in ROLE_GROUPS for role in roles):
-        raise ApiError(422, "VALIDATION_ERROR", f"roles must be a list of {', '.join(ROLE_GROUPS)}")
+    known = role_groups()
+    if not isinstance(roles, list) or any(role not in known for role in roles):
+        raise ApiError(422, "VALIDATION_ERROR", f"roles must be a list of {', '.join(known)}")
     allowed = assignable(event)
     if any(role not in allowed for role in roles):
         raise ApiError(403, "ROLE_NOT_ALLOWED", f"You can only assign {', '.join(allowed) or 'no roles'}")
-    return sorted(set(roles), key=list(ROLE_GROUPS).index)
+    return sorted(set(roles), key=list(known).index)
 
 
 def protect(event: dict, username: str) -> None:
@@ -123,8 +134,10 @@ def attributes(user: dict) -> dict:
 
 def user_roles(username: str) -> list[str]:
     groups = cognito.admin_list_groups_for_user(UserPoolId=USER_POOL_ID, Username=username)
-    roles = {GROUP_ROLES[g["GroupName"]] for g in groups.get("Groups", []) if g["GroupName"] in GROUP_ROLES}
-    return [role for role in ROLE_GROUPS if role in roles]
+    known = role_groups()
+    by_group = {group: role for role, group in known.items()}
+    roles = {by_group[g["GroupName"]] for g in groups.get("Groups", []) if g["GroupName"] in by_group}
+    return [role for role in known if role in roles]
 
 
 def to_user(user: dict) -> dict:
@@ -147,8 +160,9 @@ def set_roles(username: str, roles: list[str], allowed: list[str]) -> bool:
     """Leaves the roles the caller may not assign as they are. True when something changed."""
     current = set(user_roles(username))
     changed = False
+    known = role_groups()
     for role in allowed:
-        group = ROLE_GROUPS[role]
+        group = known[role]
         if role in roles and role not in current:
             cognito.admin_add_user_to_group(UserPoolId=USER_POOL_ID, Username=username, GroupName=group)
             changed = True
@@ -253,7 +267,7 @@ def route(event: dict):
 
     if resource == "/admin/roles" and method == "GET":
         return create_success_response(data=[
-            {"id": role, "name": access.ROLE_LABELS[role][0], "description": access.ROLE_LABELS[role][1]}
+            {"id": role, "name": access.role_label(role)[0], "description": access.role_label(role)[1]}
             for role in assignable(event)
         ])
     if resource == "/admin/users" and method == "GET":

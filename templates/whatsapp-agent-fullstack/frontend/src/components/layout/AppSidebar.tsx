@@ -2,6 +2,7 @@ import * as React from 'react';
 import { Home, PanelLeftClose, PanelLeftOpen, Settings } from 'lucide-react';
 import { Sidebar, SidebarContent, SidebarRail, useSidebar } from '@/components/ui/sidebar';
 import { sections } from '@/app/sections';
+import { isSectionAllowed, usePermissionsStore } from '@/lib/access/permissions';
 import useAuthStore, { selectIsAdmin, selectIsDeveloper } from '@/lib/stores/useAuthStore';
 import { NavMain, isNavGroup, type NavEntry, type NavGroup } from './NavMain';
 
@@ -14,15 +15,15 @@ export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
   const { state: sidebarState, toggleSidebar } = useSidebar();
   const isAdmin = useAuthStore(selectIsAdmin);
   const isDeveloper = useAuthStore(selectIsDeveloper);
+  const permissions = usePermissionsStore(state => state.permissions);
 
   // Home is always here; everything else is whatever sections this build has.
-  // Hiding an admin link is cosmetic only - the route itself is enforced by
-  // requireAdmin in src/router/routes.tsx. The filter runs per section, before
+  // Hiding a link is cosmetic only - the route itself is enforced by its guard
+  // in src/router/routes.tsx, and the backend checks every call again. The filter runs per section, before
   // grouping, so a group whose children are all hidden never appears.
   const navMain: NavEntry[] = [{ title: 'Inicio', url: '/', icon: Home }];
   for (const section of sections) {
-    if (section.requiresAdmin && !isAdmin) continue;
-    if (section.requiresDeveloper && !isDeveloper) continue;
+    if (!isSectionAllowed(section, permissions, { isAdmin, isDeveloper })) continue;
     const link = { title: section.label, url: section.path, icon: section.icon };
     if (!section.group) {
       navMain.push(link);

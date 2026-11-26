@@ -7,5 +7,6 @@ export const section: AppSection = {
   label: 'WhatsApp',
   icon: WhatsAppIcon,
   load: () => import('./WhatsAppPage'),
+  menu: 'whatsapp',
   order: 20,
 };

@@ -34,6 +34,7 @@ export const DEVELOPER_GROUP = 'developer';
  * - the seed, run on deploy: default permissions where missing, the
  *   DEVELOPER_EMAILS users in developer, and `member` for users with no role;
  * - GET /me/permissions, which the frontend builds its sidebar from;
+ * - the roles API (/admin/access): create roles and edit their permissions;
  * - the AppSync Lambda authorizer of the realtime channel, so any role with
  *   the `whatsapp` page gets live updates.
  *
@@ -113,6 +114,33 @@ export class AccessFactory extends Construct {
     });
     this.grantRead(mePermissions.function);
     apiFactory.restApi.addRoute({ path: '/me/permissions', method: 'GET', lambda: mePermissions.function });
+
+    const rolesAdmin = new LambdaConstruct(this, 'RolesAdminLambda', {
+      functionName: `${prefix}-roles-admin`,
+      description: 'Create roles and edit what each one sees and does',
+      code: Code.fromAsset('src/lambda/access/roles-admin'),
+      handler: 'index.handler',
+      runtime: PYTHON_RUNTIME,
+      layers: [commonLayer],
+      environment: { USER_POOL_ID: userPool.userPoolId },
+      logging,
+    });
+    this.grantRead(rolesAdmin.function);
+    this.table.table.grantWriteData(rolesAdmin.function);
+    userPool.grant(
+      rolesAdmin.function,
+      'cognito-idp:CreateGroup',
+      'cognito-idp:DeleteGroup',
+      'cognito-idp:ListUsersInGroup'
+    );
+    for (const route of [
+      { path: '/admin/access', method: 'GET' },
+      { path: '/admin/access/roles', method: 'POST' },
+      { path: '/admin/access/roles/{role}', method: 'PUT' },
+      { path: '/admin/access/roles/{role}', method: 'DELETE' },
+    ]) {
+      apiFactory.restApi.addRoute({ ...route, lambda: rolesAdmin.function });
+    }
 
     this.realtimeAuthorizer = new LambdaConstruct(this, 'RealtimeAuthorizerLambda', {
       functionName: `${prefix}-realtime-authorizer`,
