@@ -47,18 +47,22 @@ class SettingsError(ValueError):
     """A setting the web sent that is not valid."""
 
 
-def _default_per_hour() -> int:
-    # The deploy-time AGENT_RATE_LIMIT_PER_HOUR seeds the limit until the web changes it.
+def _default_limit() -> dict:
+    # The deploy-time AGENT_RATE_LIMIT_PER_HOUR seeds the limit until the web changes it;
+    # 0 is how the deploy says "no limit".
     try:
-        return min(max(int(os.environ.get("AGENT_RATE_LIMIT_PER_HOUR") or DEFAULT_PER_HOUR), MIN_PER_HOUR), MAX_PER_HOUR)
+        value = int(os.environ.get("AGENT_RATE_LIMIT_PER_HOUR") or DEFAULT_PER_HOUR)
     except ValueError:
-        return DEFAULT_PER_HOUR
+        value = DEFAULT_PER_HOUR
+    if value == 0:
+        return {"enabled": False, "perHour": DEFAULT_PER_HOUR}
+    return {"enabled": True, "perHour": min(max(value, MIN_PER_HOUR), MAX_PER_HOUR)}
 
 
 def defaults() -> dict:
     return {
         "memory": {"mode": MEMORY_WINDOW, "minutes": DEFAULT_MINUTES},
-        "rateLimit": {"enabled": True, "perHour": _default_per_hour()},
+        "rateLimit": _default_limit(),
     }
 
 

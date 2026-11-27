@@ -35,6 +35,11 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(defaults["memory"], {"mode": "window", "minutes": 60})
         self.assertEqual(defaults["rateLimit"], {"enabled": True, "perHour": 12})
 
+    def test_a_zero_limit_from_the_deploy_means_no_limit(self):
+        with mock.patch.dict("os.environ", {"AGENT_RATE_LIMIT_PER_HOUR": "0"}):
+            defaults = agent_settings.defaults()
+        self.assertEqual(defaults["rateLimit"], {"enabled": False, "perHour": 30})
+
     def test_reads_the_stored_settings_and_caches_them(self):
         self.stored({"memory": {"mode": "off", "minutes": 5}, "rateLimit": {"enabled": False, "perHour": 99}})
         first = agent_settings.read()

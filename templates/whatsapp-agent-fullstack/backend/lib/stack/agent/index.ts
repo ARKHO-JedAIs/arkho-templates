@@ -11,7 +11,7 @@ import { Construct } from 'constructs';
 import { AgentCoreMemoryConstruct } from '../../construct/agentcore-memory-construct';
 import { agentCoreName, AgentCoreRuntimeConstruct } from '../../construct/agentcore-runtime-construct';
 import { SsmParametersConstruct } from '../../construct/ssm-parameters-construct';
-import { AgentConfig, AgentMemoryMode, ParamsConfig } from '../shared/util/env-config';
+import { AgentConfig, AgentMemoryMode, DEFAULT_AGENT_RATE_LIMIT_PER_HOUR, ParamsConfig } from '../shared/util/env-config';
 import { PUBLISH_EVENT_FIELD, WhatsAppFactory } from '../whatsapp';
 import { AccessFactory } from '../access';
 import { ApiFactory } from '../api';
@@ -181,7 +181,10 @@ export class AgentFactory extends Construct {
           // that changes this value (or AGENT_RATE_LIMIT_PER_HOUR) overwrites those edits.
           stringValue: JSON.stringify({
             memory: { mode: 'window', minutes: DEFAULT_MEMORY_WINDOW_MINUTES },
-            rateLimit: { enabled: true, perHour: agent.rateLimitPerHour },
+            rateLimit: {
+              enabled: agent.rateLimitPerHour !== null,
+              perHour: agent.rateLimitPerHour ?? DEFAULT_AGENT_RATE_LIMIT_PER_HOUR,
+            },
           }),
           dataType: ssm.ParameterDataType.TEXT,
           description: 'AI agent: memory window and answer limit, edited from the web',
@@ -339,7 +342,7 @@ export class AgentFactory extends Construct {
     wsHandler.addEnvironment('AGENT_JOBS_QUEUE_URL', this.jobsQueue.queueUrl);
     wsHandler.addEnvironment('AGENT_PROMPT_PARAMETER_NAME', promptParameterName);
     wsHandler.addEnvironment('AGENT_SETTINGS_PARAMETER_NAME', settingsParameterName);
-    wsHandler.addEnvironment('AGENT_RATE_LIMIT_PER_HOUR', String(agent.rateLimitPerHour));
+    wsHandler.addEnvironment('AGENT_RATE_LIMIT_PER_HOUR', String(agent.rateLimitPerHour ?? 0));
     this.jobsQueue.grantSendMessages(wsHandler);
     this.promptParameter.grantRead(wsHandler, PROMPT_KEY, SETTINGS_KEY);
 

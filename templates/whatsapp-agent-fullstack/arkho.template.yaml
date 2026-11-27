@@ -106,8 +106,8 @@ parameters:
   - name: auto_reply_message
     type: string
     group: WhatsApp
-    prompt: "Automatic reply to incoming messages?"
-    description: "Sent to every message received. Empty = no automatic reply; your team answers from the web."
+    prompt: "Fallback reply when the agent is off or fails? (optional)"
+    description: "A fixed text sent only if the AI agent is switched off or cannot be reached; while the agent works it answers by itself. Example: Hi! Thanks for writing to us, we will get back to you shortly. Leave empty for no fallback reply (your team answers from the web)."
     when: "components != 'frontend'"
     default: ""
     pattern: "^[^\"\\\\]{0,500}$"
@@ -170,32 +170,32 @@ parameters:
     type: choice
     group: Agent
     prompt: "What should the agent remember?"
-    description: "AgentCore Memory keeps it for 30 days. Long-term modes extract facts or summaries with extra model calls."
+    description: "What the agent remembers about a customer across conversations. AgentCore Memory keeps it for 30 days, and the extra modes cost a few more model calls per conversation. How long a single conversation lasts is set later, in Agente IA > Memoria y límites. If unsure, pick Facts and summaries."
     when: "components != 'frontend'"
     default: conversation
     choices:
       - value: conversation
         label: "The conversation"
-        hint: "remembers the current conversation"
+        hint: "only the current conversation; the next one starts blank"
       - value: facts
         label: "Facts"
-        hint: "+ customer facts and preferences across conversations"
+        hint: "+ saved facts and preferences, e.g. usual address or favourite product"
       - value: facts_summaries
         label: "Facts and summaries"
-        hint: "+ conversation summaries"
+        hint: "+ a short summary of past conversations, so the agent picks up where it left off"
       - value: "off"
         label: "Nothing"
-        hint: "every message is answered on its own"
+        hint: "no memory at all; every message is answered on its own"
 
   - name: agent_rate_limit_per_hour
     type: string
     group: Agent
-    prompt: "Max agent replies per customer per hour?"
-    description: "Beyond it the agent is not called (protects cost); the customer gets one polite notice per hour."
+    prompt: "Max agent replies per customer per hour? (optional)"
+    description: "Beyond it the agent is not called (protects cost) and the customer gets one polite notice per hour. Leave empty for no limit; it can be changed later in Agente IA > Memoria y límites."
     when: "components != 'frontend'"
-    default: "30"
-    pattern: "^[1-9][0-9]{0,3}$"
-    patternHint: "a whole number from 1 to 9999, e.g. 30"
+    default: ""
+    pattern: "^([1-9][0-9]{0,3})?$"
+    patternHint: "a whole number from 1 to 9999, e.g. 30, or empty for no limit"
 
   # Written to backend/.env as VOICE_PROVIDER and to frontend/.env as
   # VITE_VOICE_PROVIDER: the backend deploys the voice resources and the frontend
@@ -241,11 +241,11 @@ parameters:
     type: string
     group: Frontend
     prompt: "Secondary colour?"
-    description: "A hex for the sidebar and secondary buttons. Empty = a dark shade of the main colour."
+    description: "A hex for the sidebar and secondary buttons; the default is a dark slate. Editable later in frontend/src/styles/brand.json."
     when: "components != 'backend'"
-    default: ""
-    pattern: "^(#[0-9A-Fa-f]{6})?$"
-    patternHint: "a 6-digit hex with #, e.g. #1E293B, or empty"
+    default: "#1E293B"
+    pattern: "^#[0-9A-Fa-f]{6}$"
+    patternHint: "a 6-digit hex with #, e.g. #1E293B"
 
   # Selects one file under frontend/src/features/auth/layouts (see include) and
   # is written into that folder's index.ts.
@@ -253,21 +253,22 @@ parameters:
     type: choice
     group: Frontend
     prompt: "Sign-in screen layout?"
+    description: "What users see first. Basic: one centred card. Brand panel: colour panel beside the form. Insights: dark panel with a chart beside the form. Orbit: big greeting with animated orbits. All use your brand colour and logo, and can be changed later."
     when: "components != 'backend'"
     default: basic
     choices:
       - value: basic
         label: "Basic"
-        hint: "a centred card on a soft wash of the brand colour"
+        hint: "simplest: a centred sign-in card on a soft brand-colour background"
       - value: brand-panel
         label: "Brand panel"
-        hint: "brand-colour gradient panel with highlights, form card beside it"
+        hint: "brand-colour gradient panel with your highlights on one side, the form card on the other"
       - value: insights
         label: "Insights"
-        hint: "dark decorated panel (lines, chart) with feature pills, bare form beside it"
+        hint: "dark panel with lines and a chart plus feature pills, the bare form beside it; looks like a data product"
       - value: orbit
         label: "Orbit"
-        hint: "big greeting with the form, animated orbits around the logo beside it"
+        hint: "big greeting and the form on one side, animated orbits around your logo on the other; the most visual"
 
   # ---------------------------------------------------------------------------
   # Access
@@ -365,7 +366,7 @@ parameters:
     type: string
     group: Connections
     prompt: "Backend API URL?"
-    description: "Backend output RestApiUrl. Leave empty until the backend is deployed; then set it in frontend/.env."
+    description: "The address of the backend API. It does not exist yet: AWS creates it when you deploy (npx cdk deploy prints it as RestApiUrl). Leave empty now and paste it in frontend/.env as VITE_API_BASE_URL afterwards; the next steps explain it."
     when: "components != 'backend'"
     default: ""
 
@@ -373,7 +374,7 @@ parameters:
     type: string
     group: Connections
     prompt: "Realtime (AppSync) URL?"
-    description: "Backend output WhatsAppEventsGraphqlUrl, for live updates. Can be left empty."
+    description: "The address for live inbox updates. Created at deploy time too (printed as WhatsAppEventsGraphqlUrl). Leave empty now and paste it in frontend/.env afterwards; without it the inbox works but refreshes slowly."
     when: "components != 'backend'"
     default: ""
 
@@ -488,6 +489,11 @@ nextSteps:
   - "# Publicar makes a Bedrock version the agent uses within a minute; Historial activates older ones"
   - "# Agente IA > Memoria y límites: how much the agent remembers and the answers-per-hour cap (no deploy)"
   - "# docs/PROMPT_MANAGER.md: how it works with Bedrock, the table and the AWS console"
+  - "## AFTER THE FIRST DEPLOY - connect the frontend to the backend"
+  - "# npx cdk deploy (in backend/) prints an Outputs list at the end; also in the CloudFormation console > your stack > Outputs"
+  - "# RestApiUrl -> frontend/.env VITE_API_BASE_URL (empty during generation)"
+  - "# WhatsAppEventsGraphqlUrl -> frontend/.env VITE_APPSYNC_URL (the inbox updates live)"
+  - "# UserPoolId and the app client id -> frontend/.env, then set the sign-in to cognito"
   - "## ROLES, DASHBOARD AND VOICE"
   - "# Configuración > Roles y permisos: create roles and pick their pages and actions; docs/ACCESS.md"
   - "# Dashboard > Uso y costos: messages, agent turns and estimated cost"

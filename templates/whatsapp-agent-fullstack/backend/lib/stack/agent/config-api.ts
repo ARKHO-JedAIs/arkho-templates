@@ -26,7 +26,8 @@ export interface AgentConfigApiProps {
   /** What AgentCore Memory keeps beyond a conversation, shown next to the memory setting. */
   longTermMemoryMode: string;
   /** Seeds the settings the function reads before the parameter exists. */
-  rateLimitPerHour: number;
+  /** null = no limit. */
+  rateLimitPerHour: number | null;
   /** What the agent uses until a model is chosen from the web. */
   defaultModel: { id: string; temperature: number; maxTokens: number };
 }
@@ -159,7 +160,7 @@ export class AgentConfigApi extends Construct {
       environment: {
         AGENT_SETTINGS_PARAMETER_NAME: promptParameter.getParameterName(settingsKey),
         AGENT_MEMORY_MODE: longTermMemoryMode,
-        AGENT_RATE_LIMIT_PER_HOUR: String(rateLimitPerHour),
+        AGENT_RATE_LIMIT_PER_HOUR: String(rateLimitPerHour ?? 0),
       },
       logging: {
         logRetention: RetentionDays.ONE_MONTH,

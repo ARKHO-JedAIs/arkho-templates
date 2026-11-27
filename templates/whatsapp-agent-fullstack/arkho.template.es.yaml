@@ -62,8 +62,8 @@ parameters:
     patternHint: "1 a 3 dígitos, sin +, p. ej. 56"
 
   auto_reply_message:
-    prompt: "¿Respuesta automática a los mensajes entrantes?"
-    description: "Se envía a cada mensaje recibido. Vacío = sin respuesta automática; tu equipo responde desde la web."
+    prompt: "¿Respuesta de respaldo si el agente está apagado o falla? (opcional)"
+    description: "Un texto fijo que se envía solo si el agente de IA está apagado o no responde; mientras funciona, el agente contesta por sí mismo. Ejemplo: Hola, gracias por escribirnos, te responderemos a la brevedad. Vacío = sin respuesta de respaldo (tu equipo responde desde la web)."
     patternHint: "hasta 500 caracteres, sin comillas dobles ni barras invertidas"
 
   media_retention_days:
@@ -97,25 +97,25 @@ parameters:
 
   agent_memory:
     prompt: "¿Qué debe recordar el agente?"
-    description: "AgentCore Memory lo guarda 30 días. Los modos de largo plazo extraen datos o resúmenes con llamadas extra al modelo."
+    description: "Qué recuerda el agente de un cliente entre conversaciones. AgentCore Memory lo guarda 30 días, y los modos extra cuestan unas llamadas más al modelo por conversación. Cuánto dura una sola conversación se define después en Agente IA > Memoria y límites. Si dudas, elige Datos y resúmenes."
     choices:
       conversation:
         label: "La conversación"
-        hint: "recuerda la conversación actual"
+        hint: "solo la conversación actual; la siguiente empieza en blanco"
       facts:
         label: "Datos"
-        hint: "+ datos y preferencias del cliente entre conversaciones"
+        hint: "+ datos y preferencias guardados, p. ej. dirección habitual o producto favorito"
       facts_summaries:
         label: "Datos y resúmenes"
-        hint: "+ resúmenes de las conversaciones"
+        hint: "+ un resumen corto de conversaciones pasadas, para retomar donde quedó"
       "off":
         label: "Nada"
-        hint: "cada mensaje se responde por separado"
+        hint: "sin memoria; cada mensaje se responde por separado"
 
   agent_rate_limit_per_hour:
-    prompt: "¿Máximo de respuestas del agente por cliente por hora?"
-    description: "Pasado ese límite no se llama al agente (cuida el costo); el cliente recibe un aviso amable por hora."
-    patternHint: "un número entero de 1 a 9999, p. ej. 30"
+    prompt: "¿Máximo de respuestas del agente por cliente por hora? (opcional)"
+    description: "Pasado ese límite no se llama al agente (cuida el costo) y el cliente recibe un aviso amable por hora. Vacío = sin límite; se puede cambiar después en Agente IA > Memoria y límites."
+    patternHint: "un número entero de 1 a 9999, p. ej. 30, o vacío para no limitar"
 
   voice:
     prompt: "¿Voz para el agente?"
@@ -138,24 +138,25 @@ parameters:
 
   brand_secondary_color:
     prompt: "¿Color secundario?"
-    description: "Un hex para la barra lateral y los botones secundarios. Vacío = un tono oscuro del color principal."
-    patternHint: "un hex de 6 dígitos con #, p. ej. #1E293B, o vacío"
+    description: "Un hex para la barra lateral y los botones secundarios; por defecto un gris azulado oscuro. Se puede cambiar después en frontend/src/styles/brand.json."
+    patternHint: "un hex de 6 dígitos con #, p. ej. #1E293B"
 
   login_layout:
     prompt: "¿Diseño de la pantalla de inicio de sesión?"
+    description: "Lo primero que ven los usuarios. Básico: una tarjeta centrada. Panel de marca: panel de color junto al formulario. Insights: panel oscuro con un gráfico junto al formulario. Órbita: saludo grande con órbitas animadas. Todos usan el color y el logo de tu marca y se pueden cambiar después."
     choices:
       basic:
         label: "Básico"
-        hint: "una tarjeta centrada sobre un fondo suave del color de la marca"
+        hint: "el más simple: una tarjeta de acceso centrada sobre un fondo suave del color de la marca"
       brand-panel:
         label: "Panel de marca"
-        hint: "panel con degradado del color de la marca y destacados, con el formulario al lado"
+        hint: "panel con degradado del color de la marca y tus destacados a un lado, la tarjeta del formulario al otro"
       insights:
         label: "Insights"
-        hint: "panel oscuro decorado (líneas, gráfico) con etiquetas de funciones, formulario simple al lado"
+        hint: "panel oscuro con líneas y un gráfico y etiquetas de funciones, el formulario simple al lado; aspecto de producto de datos"
       orbit:
         label: "Órbita"
-        hint: "saludo grande con el formulario, órbitas animadas alrededor del logo al lado"
+        hint: "saludo grande y el formulario a un lado, órbitas animadas alrededor de tu logo al otro; el más visual"
 
   auth_provider:
     prompt: "¿Cómo iniciarán sesión los usuarios?"
@@ -203,11 +204,11 @@ parameters:
 
   api_base_url:
     prompt: "¿URL de la API del backend?"
-    description: "Output RestApiUrl del backend. Déjalo vacío hasta desplegar el backend; después complétalo en frontend/.env."
+    description: "La dirección de la API del backend. Todavía no existe: AWS la crea al desplegar (npx cdk deploy la muestra como RestApiUrl). Déjala vacía ahora y pégala después en frontend/.env como VITE_API_BASE_URL; los próximos pasos lo explican."
 
   appsync_url:
     prompt: "¿URL de tiempo real (AppSync)?"
-    description: "Output WhatsAppEventsGraphqlUrl del backend, para las actualizaciones en vivo. Puede quedar vacío."
+    description: "La dirección para las actualizaciones en vivo de la bandeja. También se crea al desplegar (se muestra como WhatsAppEventsGraphqlUrl). Déjala vacía ahora y pégala después en frontend/.env; sin ella la bandeja funciona pero se actualiza más lento."
 
 nextSteps:
   - "# Abre la carpeta del proyecto generado; README.md tiene la guía completa, incluido cómo conectar un número de WhatsApp"
@@ -242,6 +243,11 @@ nextSteps:
   - "# Publicar crea una versión de Bedrock que el agente usa en un minuto; Historial activa versiones anteriores"
   - "# Agente IA > Memoria y límites: cuánto recuerda el agente y el tope de respuestas por hora (sin desplegar)"
   - "# docs/PROMPT_MANAGER.md: cómo funciona con Bedrock, la tabla y la consola de AWS"
+  - "## DESPUÉS DEL PRIMER DESPLIEGUE - conectar el frontend con el backend"
+  - "# npx cdk deploy (en backend/) muestra al final una lista Outputs; también en la consola de CloudFormation > tu stack > Outputs"
+  - "# RestApiUrl -> frontend/.env VITE_API_BASE_URL (queda vacío al generar)"
+  - "# WhatsAppEventsGraphqlUrl -> frontend/.env VITE_APPSYNC_URL (la bandeja se actualiza en vivo)"
+  - "# UserPoolId y el id del app client -> frontend/.env, y luego pon el inicio de sesión en cognito"
   - "## ROLES, DASHBOARD Y VOZ"
   - "# Configuración > Roles y permisos: crea roles y elige sus páginas y acciones; docs/ACCESS.md"
   - "# Dashboard > Uso y costos: mensajes, turnos del agente y costo estimado"

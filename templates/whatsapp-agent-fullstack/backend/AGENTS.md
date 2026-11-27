@@ -222,7 +222,7 @@ Set in `.env` (gitignored; see `.env.example`):
 - `AGENT_MODEL_ID`: Bedrock model or inference profile id the agent uses.
 - `AGENT_BUSINESS_DESCRIPTION`: seeds the agent's base prompt (max 500).
 - `AGENT_MEMORY_MODE`: `off`, `conversation`, `facts`, `facts_summaries`.
-- `AGENT_RATE_LIMIT_PER_HOUR`: initial agent replies per customer per hour (1-9999);
+- `AGENT_RATE_LIMIT_PER_HOUR`: initial agent replies per customer per hour (1-9999; empty = no limit);
   the web edits it (and the memory window) from then on in the `agent-settings`
   parameter, and a deploy that changes this value overwrites those edits.
 - `VOICE_PROVIDER`: `none` (default) or `polly`: transcribes voice notes (Amazon Transcribe) and

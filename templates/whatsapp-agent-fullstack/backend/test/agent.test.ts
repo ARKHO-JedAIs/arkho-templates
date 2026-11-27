@@ -108,6 +108,18 @@ describe('AgentFactory', () => {
       expect(parameter.Properties.Tier).toBe('Intelligent-Tiering');
     });
 
+    it('seeds the answer limit as off when the deploy sets no limit', () => {
+      const template = variant('unlimited', { rateLimitPerHour: null });
+      const parameter = Object.values(
+        template.findResources('AWS::SSM::Parameter', { Properties: { Name: `/${PREFIX}-agent-settings` } })
+      )[0] as any;
+      expect(JSON.parse(parameter.Properties.Value).rateLimit.enabled).toBe(false);
+      template.hasResourceProperties('AWS::Lambda::Function', {
+        FunctionName: `${PREFIX}-whatsapp-ws-handler`,
+        Environment: { Variables: Match.objectLike({ AGENT_RATE_LIMIT_PER_HOUR: '0' }) },
+      });
+    });
+
     it('keeps the memory window and the answer limit in a parameter the web edits', () => {
       const template = agentcore();
       const parameter = Object.values(

@@ -95,8 +95,8 @@ export interface AgentConfig {
   businessDescription: string;
   /** AGENT_MEMORY_MODE: which AgentCore Memory strategies, or no memory. */
   memoryMode: AgentMemoryMode;
-  /** AGENT_RATE_LIMIT_PER_HOUR: agent turns per customer per hour. */
-  rateLimitPerHour: number;
+  /** AGENT_RATE_LIMIT_PER_HOUR: agent turns per customer per hour; null (empty) = no limit. */
+  rateLimitPerHour: number | null;
   /** AGENT_BUSINESS_API_URL: optional HTTPS API the agent tools may call. */
   businessApiUrl?: string;
   /**
@@ -171,8 +171,9 @@ function agentEnv(): AgentConfig {
     process.exit(1);
   }
 
-  const rateLimit = optionalEnv('AGENT_RATE_LIMIT_PER_HOUR');
-  if (rateLimit !== undefined && !/^[1-9][0-9]{0,3}$/.test(rateLimit)) {
+  // Unset keeps the default; set but empty means no limit.
+  const rateLimit = process.env.AGENT_RATE_LIMIT_PER_HOUR?.trim();
+  if (rateLimit &&  !/^[1-9][0-9]{0,3}$/.test(rateLimit)) {
     console.error('Error: AGENT_RATE_LIMIT_PER_HOUR must be a whole number from 1 to 9999, e.g. 30');
     process.exit(1);
   }
@@ -190,7 +191,7 @@ function agentEnv(): AgentConfig {
     modelId,
     businessDescription,
     memoryMode,
-    rateLimitPerHour: rateLimit !== undefined ? Number(rateLimit) : DEFAULT_AGENT_RATE_LIMIT_PER_HOUR,
+    rateLimitPerHour: rateLimit === undefined ? DEFAULT_AGENT_RATE_LIMIT_PER_HOUR : rateLimit === '' ? null : Number(rateLimit),
     businessApiUrl,
     voiceProvider,
   };
