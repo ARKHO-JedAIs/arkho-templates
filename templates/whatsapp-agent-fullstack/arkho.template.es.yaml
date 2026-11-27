@@ -61,17 +61,17 @@ parameters:
     patternHint: "un código de región de AWS, p. ej. eu-central-1"
 
   whatsapp_ready:
-    prompt: "¿Ya tienes un número de WhatsApp conectado en AWS?"
-    description: "Conectado en la consola de AWS, en End User Messaging Social. Sí = a continuación pegas dos ids. No = sáltalos: el proyecto igual se genera y se despliega, pero no podrá enviar ni recibir mensajes de WhatsApp hasta que conectes un número (el README explica cómo) y completes los ids en backend/.env como WHATSAPP_BUSINESS_ACCOUNT_ID y WHATSAPP_PHONE_NUMBER_ID, y vuelvas a desplegar. Ninguno de los dos ids es obligatorio para continuar."
+    prompt: "¿Ya hay un número de WhatsApp conectado en AWS?"
+    description: "En End User Messaging Social. No = el README te guía para conectar uno; los ids se pueden agregar después."
 
   whatsapp_phone_number_id:
-    prompt: "¿ARN del número de teléfono? (opcional)"
-    description: "Lo encuentras en la consola de AWS: End User Messaging Social > Phone numbers; abre tu número y copia su ARN (arn:aws:social-messaging:...). Vacío = lo agregas después."
+    prompt: "¿Id del número de teléfono?"
+    description: "End User Messaging Social > Phone numbers: el ARN del número."
     patternHint: "el ARN del número, con el id completo de 32 caracteres, p. ej. arn:aws:social-messaging:us-east-1:123456789012:phone-number-id/0123456789abcdef0123456789abcdef"
 
   whatsapp_business_account_id:
-    prompt: "¿Id de la cuenta de WhatsApp Business? (opcional)"
-    description: "Lo encuentras en la consola de AWS: End User Messaging Social > Business accounts; copia el id, p. ej. waba-0a46e718017b4acd927aa5833b4fb13e. Vacío = lo agregas después."
+    prompt: "¿Id de la cuenta de WhatsApp Business?"
+    description: "End User Messaging Social > Business accounts, p. ej. waba-0a46e718017b4acd927aa5833b4fb13e."
     patternHint: "el id WABA completo de 32 caracteres, tal como lo muestra AWS, p. ej. waba-0a46e718017b4acd927aa5833b4fb13e"
 
   default_phone_prefix:
