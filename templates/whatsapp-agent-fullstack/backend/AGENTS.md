@@ -206,7 +206,8 @@ Set in `.env` (gitignored; see `.env.example`):
 
 - `ENV_NAME`: dev/staging/prod (required).
 - `PROJECT_NAME`: project prefix for resource names (required).
-- `AWS_ACCOUNT_ID`, `AWS_REGION`: deployment target.
+- `AWS_ACCOUNT_ID`, `AWS_REGION`: deployment target (`AWS_REGION=other` takes the code
+  from `AWS_REGION_OTHER`).
 - `SSO_PROVIDERS`: comma list of `microsoft`, `google` (empty = none).
 - `ENTRA_ID_CLIENT_ID`, `ENTRA_ID_CLIENT_SECRET`, `ENTRA_ID_ISSUER_URL`: the
   Microsoft provider, when `SSO_PROVIDERS` lists `microsoft`.

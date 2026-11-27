@@ -51,15 +51,39 @@ parameters:
   # ---------------------------------------------------------------------------
   # Lands only in backend/.env, which is gitignored in the generated project.
   # The AWS account is not asked: CDK takes it from the profile you deploy with.
+  # "other" is written as is to AWS_REGION and aws_region_other to AWS_REGION_OTHER;
+  # loadEnvironment() takes the second when the first is "other".
   - name: aws_region
-    type: string
+    type: choice
     group: WhatsApp
     prompt: "AWS region?"
-    description: "Where the backend is deployed; WhatsApp (End User Messaging Social) must be available there, e.g. us-east-1."
+    description: "Where the backend is deployed; WhatsApp (End User Messaging Social) must be available there. Pick Other to type any other region code."
     when: "components != 'frontend'"
     default: us-east-1
+    choices:
+      - value: us-east-1
+        label: "US East (N. Virginia) - us-east-1"
+      - value: us-east-2
+        label: "US East (Ohio) - us-east-2"
+      - value: us-west-2
+        label: "US West (Oregon) - us-west-2"
+      - value: sa-east-1
+        label: "South America (Sao Paulo) - sa-east-1"
+      - value: eu-west-1
+        label: "Europe (Ireland) - eu-west-1"
+      - value: other
+        label: "Other"
+        hint: "you will type the region code"
+
+  - name: aws_region_other
+    type: string
+    group: WhatsApp
+    prompt: "Which AWS region?"
+    description: "The region code, e.g. ap-southeast-2 or eu-central-1. WhatsApp (End User Messaging Social) must be available there."
+    when: "components != 'frontend' && aws_region == 'other'"
+    default: ""
     pattern: "^[a-z]{2}(-[a-z]+)+-[0-9]$"
-    patternHint: "an AWS region code, e.g. us-east-1"
+    patternHint: "an AWS region code, e.g. eu-central-1"
 
   - name: whatsapp_ready
     type: boolean

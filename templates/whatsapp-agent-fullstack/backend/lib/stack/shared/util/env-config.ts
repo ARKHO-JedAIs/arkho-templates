@@ -236,6 +236,18 @@ function urlListEnv(name: string, fallback: string[]): string[] {
   return urls.length > 0 ? urls : fallback;
 }
 
+/** AWS_REGION, or AWS_REGION_OTHER when the project was generated with the region "other". */
+function regionEnv(): string | undefined {
+  const region = optionalEnv('AWS_REGION');
+  if (region !== 'other') return region;
+  const typed = optionalEnv('AWS_REGION_OTHER');
+  if (!typed || !/^[a-z]{2}(-[a-z]+)+-[0-9]$/.test(typed)) {
+    console.error('Error: AWS_REGION=other needs AWS_REGION_OTHER to be a region code, e.g. eu-central-1');
+    process.exit(1);
+  }
+  return typed;
+}
+
 export function loadEnvironment(): AppConfig {
   dotenv.config({ quiet: true });
 
@@ -244,7 +256,7 @@ export function loadEnvironment(): AppConfig {
 
   const env: EnvironmentConfig = {
     account: optionalEnv('AWS_ACCOUNT_ID'),
-    region: optionalEnv('AWS_REGION'),
+    region: regionEnv(),
   };
 
   const params: ParamsConfig = {

@@ -39,8 +39,26 @@ parameters:
 
   aws_region:
     prompt: "¿Región de AWS?"
-    description: "Dónde se despliega el backend; WhatsApp (End User Messaging Social) debe estar disponible ahí, p. ej. us-east-1."
-    patternHint: "un código de región de AWS, p. ej. us-east-1"
+    description: "Dónde se despliega el backend; WhatsApp (End User Messaging Social) debe estar disponible ahí. Elige Otra para escribir otro código de región."
+    choices:
+      us-east-1:
+        label: "EE. UU. Este (N. Virginia) - us-east-1"
+      us-east-2:
+        label: "EE. UU. Este (Ohio) - us-east-2"
+      us-west-2:
+        label: "EE. UU. Oeste (Oregón) - us-west-2"
+      sa-east-1:
+        label: "Sudamérica (São Paulo) - sa-east-1"
+      eu-west-1:
+        label: "Europa (Irlanda) - eu-west-1"
+      other:
+        label: "Otra"
+        hint: "escribirás el código de la región"
+
+  aws_region_other:
+    prompt: "¿Qué región de AWS?"
+    description: "El código de la región, p. ej. ap-southeast-2 o eu-central-1. WhatsApp (End User Messaging Social) debe estar disponible ahí."
+    patternHint: "un código de región de AWS, p. ej. eu-central-1"
 
   whatsapp_ready:
     prompt: "¿Ya hay un número de WhatsApp conectado en AWS?"
