@@ -16,7 +16,6 @@ answers:
   whatsapp_phone_number_id: arn:aws:social-messaging:us-east-1:123456789012:phone-number-id/0123456789abcdef0123456789abcdef
   whatsapp_business_account_id: waba-0123456789abcdef0123456789abcdef
   default_phone_prefix: "56"
-  auto_reply_message: Gracias por escribirnos, en breve te respondemos.
   media_retention_days: "90"
 
   agent_runtime: agentcore

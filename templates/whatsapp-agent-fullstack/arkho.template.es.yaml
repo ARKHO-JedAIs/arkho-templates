@@ -61,11 +61,6 @@ parameters:
     description: "Se agrega a los números escritos sin él: 56 Chile, 51 Perú, 52 México."
     patternHint: "1 a 3 dígitos, sin +, p. ej. 56"
 
-  auto_reply_message:
-    prompt: "¿Respuesta de respaldo si el agente está apagado o falla? (opcional)"
-    description: "Un texto fijo que se envía solo si el agente de IA está apagado o no responde; mientras funciona, el agente contesta por sí mismo. Ejemplo: Hola, gracias por escribirnos, te responderemos a la brevedad. Vacío = sin respuesta de respaldo (tu equipo responde desde la web)."
-    patternHint: "hasta 500 caracteres, sin comillas dobles ni barras invertidas"
-
   media_retention_days:
     prompt: "¿Cuántos días guardar los archivos de WhatsApp?"
     description: "Días que se guardan en S3 los archivos recibidos y enviados. Vacío = para siempre."
