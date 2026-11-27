@@ -11,7 +11,7 @@ description: >
   Amazon Bedrock Prompt Management (instructions, model, inference parameters
   and variables, draft, versions with author, rollback and AWS console
   sync). Generate both, or only one.
-version: 0.1.0-rc.1
+version: 0.1.0-rc.2
 category: other
 tags: [whatsapp, aws, cdk, serverless, react, appsync, cognito, end-user-messaging, bedrock, prompt-management, agentcore, rbac]
 
@@ -486,4 +486,10 @@ nextSteps:
   - "# Web > Configuración > Agente IA (developers): instructions, messages, model, variables"
   - "# Guardar borrador creates the prompt <project>-<env>-agent in Bedrock Prompt Management"
   - "# Publicar makes a Bedrock version the agent uses within a minute; Historial activates older ones"
+  - "# Agente IA > Memoria y límites: how much the agent remembers and the answers-per-hour cap (no deploy)"
   - "# docs/PROMPT_MANAGER.md: how it works with Bedrock, the table and the AWS console"
+  - "## ROLES, DASHBOARD AND VOICE"
+  - "# Configuración > Roles y permisos: create roles and pick their pages and actions; docs/ACCESS.md"
+  - "# Dashboard > Uso y costos: messages, agent turns and estimated cost"
+  - "# VOICE_PROVIDER=polly in backend/.env and VITE_VOICE_PROVIDER in frontend/.env (if voice was chosen)"
+  - "# Configuración > Voz: Polly voice, Transcribe language and when to answer with audio"
