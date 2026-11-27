@@ -26,6 +26,11 @@ export interface AccessOverview {
   actions: CatalogItem[];
 }
 
+export interface RoleDetailsInput {
+  name: string;
+  description: string;
+}
+
 export interface NewRoleInput {
   id: string;
   name: string;

@@ -1,6 +1,12 @@
 import { parseJsonBody } from '@/lib/apiFetch';
 import { authHeaders, isMockAuth } from '@/lib/auth/session';
-import type { AccessOverview, AccessRole, NewRoleInput, RolePermissions } from './types';
+import type {
+  AccessOverview,
+  AccessRole,
+  NewRoleInput,
+  RoleDetailsInput,
+  RolePermissions,
+} from './types';
 
 /** Thrown when the backend rejects the request because the session expired. */
 export class AccessAuthError extends Error {}
@@ -132,6 +138,23 @@ export async function updateRolePermissions(
     body: JSON.stringify(permissions),
   });
   if (!response.ok) await fail(response, 'No se pudieron guardar los permisos');
+}
+
+export async function updateRoleDetails(role: string, details: RoleDetailsInput): Promise<void> {
+  if (isMockAuth) {
+    const target = mockOverview.roles.find(item => item.id === role);
+    if (target) {
+      target.name = details.name;
+      target.description = details.description;
+    }
+    return;
+  }
+  const response = await fetch(`${BASE_URL}/roles/${encodeURIComponent(role)}`, {
+    method: 'PUT',
+    headers: await authHeaders(),
+    body: JSON.stringify(details),
+  });
+  if (!response.ok) await fail(response, 'No se pudo editar el rol');
 }
 
 export async function deleteRole(role: string): Promise<void> {

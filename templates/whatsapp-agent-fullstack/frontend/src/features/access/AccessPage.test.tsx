@@ -7,6 +7,7 @@ const service = vi.hoisted(() => ({
   createRole: vi.fn(),
   updateRolePermissions: vi.fn(),
   deleteRole: vi.fn(),
+  updateRoleDetails: vi.fn(),
 }));
 
 vi.mock('./accessService', () => ({ ...service, AccessAuthError: class extends Error {} }));
@@ -103,6 +104,24 @@ describe('AccessPage', () => {
     await screen.findByText('Supervisor');
     expect(screen.getByRole('button', { name: 'Eliminar el rol Supervisor' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Eliminar el rol Administrador' })).toBeNull();
+  });
+
+  it('renames a role made from the web and keeps system roles out of it', async () => {
+    service.updateRoleDetails.mockResolvedValue(undefined);
+    render(<AccessPage />);
+    await screen.findByText('Supervisor');
+    expect(screen.queryByRole('button', { name: 'Editar el rol Administrador' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Editar el rol Supervisor' }));
+    fireEvent.change(await screen.findByLabelText('Nombre'), {
+      target: { value: 'Jefe de turno' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar' }));
+    await waitFor(() =>
+      expect(service.updateRoleDetails).toHaveBeenCalledWith('supervisor', {
+        name: 'Jefe de turno',
+        description: expect.any(String),
+      })
+    );
   });
 
   it('shows the error and lets the user retry', async () => {

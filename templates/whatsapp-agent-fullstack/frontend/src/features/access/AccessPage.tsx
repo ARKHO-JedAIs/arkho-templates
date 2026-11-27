@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
-import { Plus, Save, Trash2 } from 'lucide-react';
+import { Pencil, Plus, Save, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   AlertDialog,
@@ -16,13 +16,21 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Skeleton } from '@/components/ui/skeleton';
 import { usePermissionsStore } from '@/lib/access/permissions';
+import { EditRoleDialog } from './components/EditRoleDialog';
 import { NewRoleDialog } from './components/NewRoleDialog';
-import { createRole, deleteRole, fetchAccess, updateRolePermissions } from './accessService';
+import {
+  createRole,
+  deleteRole,
+  fetchAccess,
+  updateRoleDetails,
+  updateRolePermissions,
+} from './accessService';
 import type {
   AccessOverview,
   AccessRole,
   CatalogItem,
   NewRoleInput,
+  RoleDetailsInput,
   RolePermissions,
 } from './types';
 
@@ -62,6 +70,7 @@ export function AccessPage() {
   const [saving, setSaving] = useState(false);
   const [creating, setCreating] = useState(false);
   const [deleting, setDeleting] = useState<AccessRole | null>(null);
+  const [editing, setEditing] = useState<AccessRole | null>(null);
   const permissions = usePermissionsStore(state => state.permissions);
 
   const load = useCallback(async () => {
@@ -143,6 +152,17 @@ export function AccessPage() {
     }
   };
 
+  const editDetails = async (role: AccessRole, input: RoleDetailsInput) => {
+    try {
+      await updateRoleDetails(role.id, input);
+      toast.success('Rol actualizado');
+      await load();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'No se pudo editar el rol');
+      throw err;
+    }
+  };
+
   const remove = async () => {
     if (!deleting) return;
     try {
@@ -194,7 +214,9 @@ export function AccessPage() {
           <table className='w-full text-sm'>
             <thead>
               <tr className='border-b border-border'>
-                <th className='px-4 py-3 text-left font-medium text-muted-foreground'>Permiso</th>
+                <th className='sticky left-0 z-10 border-r border-border bg-card px-4 py-3 text-left font-medium text-muted-foreground'>
+                  Permiso
+                </th>
                 {overview.roles.map(role => (
                   <th key={role.id} className='min-w-[8.5rem] px-3 py-3 text-center align-top'>
                     <div className='flex flex-col items-center gap-1'>
@@ -202,14 +224,24 @@ export function AccessPage() {
                       {role.system ? (
                         <Badge variant='outline'>{role.locked ? 'Oculto' : 'Del sistema'}</Badge>
                       ) : (
-                        <button
-                          type='button'
-                          onClick={() => setDeleting(role)}
-                          aria-label={`Eliminar el rol ${role.name}`}
-                          className='rounded p-1 text-muted-foreground hover:bg-muted hover:text-destructive'
-                        >
-                          <Trash2 className='h-4 w-4' aria-hidden />
-                        </button>
+                        <div className='flex items-center gap-1'>
+                          <button
+                            type='button'
+                            onClick={() => setEditing(role)}
+                            aria-label={`Editar el rol ${role.name}`}
+                            className='rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground'
+                          >
+                            <Pencil className='h-4 w-4' aria-hidden />
+                          </button>
+                          <button
+                            type='button'
+                            onClick={() => setDeleting(role)}
+                            aria-label={`Eliminar el rol ${role.name}`}
+                            className='rounded p-1 text-muted-foreground hover:bg-muted hover:text-destructive'
+                          >
+                            <Trash2 className='h-4 w-4' aria-hidden />
+                          </button>
+                        </div>
                       )}
                     </div>
                   </th>
@@ -251,6 +283,11 @@ export function AccessPage() {
       )}
 
       <NewRoleDialog open={creating} onOpenChange={setCreating} onSubmit={create} />
+      <EditRoleDialog
+        role={editing}
+        onOpenChange={open => !open && setEditing(null)}
+        onSubmit={editDetails}
+      />
 
       <AlertDialog open={deleting !== null} onOpenChange={open => !open && setDeleting(null)}>
         <AlertDialogContent>
@@ -277,7 +314,7 @@ function SectionRow({ title, span }: { title: string; span: number }) {
         colSpan={span}
         className='px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground'
       >
-        {title}
+        <span className='sticky left-4'>{title}</span>
       </th>
     </tr>
   );
@@ -295,7 +332,9 @@ interface PermissionRowProps {
 function PermissionRow({ item, kind, roles, draft, holds, onToggle }: PermissionRowProps) {
   return (
     <tr className='border-t border-border/60'>
-      <td className='px-4 py-2.5 text-foreground'>{item.label}</td>
+      <td className='sticky left-0 z-10 border-r border-border bg-card px-4 py-2.5 text-foreground'>
+        {item.label}
+      </td>
       {roles.map(role => {
         const checked = (draft[role.id]?.[kind] ?? []).includes(item.id);
         // Nobody grants what they do not hold themselves (the backend enforces it too).
